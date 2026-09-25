@@ -1,0 +1,54 @@
+--- rtl/ap68040/experimental/ap040_pipeline_integer.sv
++++ rtl/ap68040/experimental/ap040_pipeline_integer.sv
+@@ -289,8 +289,18 @@
+     assign in_supported = admission[52] &&
+         (!(is_pea(in_opcode) || is_indexread(in_opcode) || is_indexstore(in_opcode)) || (in_extension_valid && !in_extension[8])) &&
+         (!is_disp_lea(in_opcode) || in_extension_valid);
++    // Empty-pipeline admission can decode directly into EX. Outstanding
++    // transactions and retained responses always use the existing ID path.
++    wire direct_admit = nreset && ce && !flush && !kill_younger &&
++        !id_v && !ex_v && !wb_v && !load_pending && !load_done && !load_discard &&
++        in_valid && in_supported;
++    wire [15:0] ex_input_opcode = direct_admit ? in_opcode : id_opcode;
++    wire [15:0] ex_input_extension = direct_admit ? in_extension : id_extension;
++    wire [31:0] ex_input_pc = direct_admit ? in_pc : id_pc;
++    wire [31:0] ex_input_next_pc = direct_admit ? in_pc + {29'd0, in_words, 1'b0} : id_next_pc;
+     assign {legal, dec_imm, dec_we, dec_flags, dec_word_src, dec_op,
+-            dec_size, dec_src, dec_dst, dec_immediate} = decode(id_opcode);
++            dec_size, dec_src, dec_dst, dec_immediate} =
++        direct_admit ? admission : decode(id_opcode);
+ 
+     wire wb_ready = !wb_v || (retire_ready && !wb_fault);
+     wire load_response = load_req && load_ack && !load_discard && !flush && !kill_younger;
+@@ -469,22 +479,22 @@
+                     end
+                 end
+                 if (ex_ready) begin
+-                    ex_v <= id_v && legal;
+-                    if (id_v && legal) begin
+-                        ex_pc <= id_pc; ex_next_pc <= id_next_pc; ex_opcode <= id_opcode;
+-                        ex_extension <= id_extension; ex_pea <= is_pea(id_opcode);
+-                        ex_load <= is_load(id_opcode) || is_store(id_opcode) || is_pea(id_opcode);
+-                        ex_store <= is_store(id_opcode) || is_pea(id_opcode);
++                    ex_v <= (id_v || direct_admit) && legal;
++                    if ((id_v || direct_admit) && legal) begin
++                        ex_pc <= ex_input_pc; ex_next_pc <= ex_input_next_pc; ex_opcode <= ex_input_opcode;
++                        ex_extension <= ex_input_extension; ex_pea <= is_pea(ex_input_opcode);
++                        ex_load <= is_load(ex_input_opcode) || is_store(ex_input_opcode) || is_pea(ex_input_opcode);
++                        ex_store <= is_store(ex_input_opcode) || is_pea(ex_input_opcode);
+                         ex_op <= dec_op; ex_size <= dec_size;
+                         ex_src <= dec_src; ex_dst <= dec_dst;
+-                        ex_read_dst <= (is_pea(id_opcode) || is_indexread(id_opcode) ||
+-                                        is_indexstore(id_opcode)) ? id_extension[15:12] : dec_dst;
++                        ex_read_dst <= (is_pea(ex_input_opcode) || is_indexread(ex_input_opcode) ||
++                                        is_indexstore(ex_input_opcode)) ? ex_input_extension[15:12] : dec_dst;
+                         ex_imm <= dec_imm; ex_immediate <= dec_immediate;
+                         ex_we <= dec_we; ex_flags <= dec_flags; ex_word_src <= dec_word_src;
+                     end
+                 end
+                 if (in_ready) begin
+-                    id_v <= in_valid;
++                    id_v <= in_valid && !direct_admit;
+                     if (in_valid) begin
+                         id_pc <= in_pc; id_next_pc <= in_pc + {29'd0, in_words, 1'b0};
+                         id_opcode <= in_opcode; id_extension <= in_extension;

@@ -1,0 +1,21 @@
+--- a/rtl/ap68040/rtl/ap040_muldiv.v
++++ b/rtl/ap68040/rtl/ap040_muldiv.v
+@@ -101,8 +101,16 @@
+ 			ovf     <= 0;
+ 			if (is_div) begin
+ 				den   <= abs_a;
+-				acc   <= {33'd0, abs_d};
+-				count <= 7'd16;
++                // If the upper dividend is below the divisor, processing
++                // those 32 bits emits no quotient bits and leaves exactly
++                // that upper dividend as the restoring remainder.
++                if (abs_d[63:32] < abs_a) begin
++                    acc <= {1'b0, abs_d[63:32], abs_d[31:0], 32'd0};
++                    count <= 7'd8;
++                end else begin
++                    acc <= {33'd0, abs_d};
++                    count <= 7'd16;
++                end
+ 				neg_q <= sign_op && (op_hi[31] ^ op_a[31]);
+ 				neg_r <= sign_op && op_hi[31];
+ 			end

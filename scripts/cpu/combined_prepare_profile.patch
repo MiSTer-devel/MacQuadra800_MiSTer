@@ -1,0 +1,71 @@
+--- a/scripts/cpu/tb_cpu_whetstone.sv
++++ b/scripts/cpu/tb_cpu_whetstone.sv
+@@ -29,6 +29,12 @@
+  integer mem_setup=0, mem_prefetch=0, mem_issued=0, read_shape;
+  integer read_cache[0:2][0:15];
+  integer write_cache[0:15];
++ integer consumer_phase[0:255][0:4];
++ integer prepare_opcode[0:65535][0:2];
++ integer prep_slot;
++ integer operand_phase[0:65535][0:4];
++ integer phase_index, profile_total=0, phase_total=0, k;
++
+  integer latency=1, waitleft=0, cycles=0, i, j, bytes, done=0;
+  integer states[0:255]; integer fpu_crossings=0, require_cross=0, fpu_reads=0; reg [7:0] previous_state=0;
+  integer lat_count[0:2], lat_total[0:2], lat_start=-1, lat_class;
+@@ -62,7 +68,12 @@
+  initial begin
+   if(!$value$plusargs("prog=%s",path) || !$value$plusargs("rom=%s",rompath)) $fatal(1,"missing image/ROM");
+   if($value$plusargs("latency=%d",latency)) begin end
+-  for(i=0;i<256;i++) states[i]=0;
++  for(i=0;i<256;i++) begin
++   states[i]=0;
++   for(k=0;k<5;k++) consumer_phase[i][k]=0;
++  end
++  for(i=0;i<65536;i++) for(k=0;k<5;k++) operand_phase[i][k]=0;
++  for(i=0;i<65536;i++) for(k=0;k<3;k++) prepare_opcode[i][k]=0;
+   for(i=0;i<16;i++) begin
+    write_cache[i]=0;
+    for(j=0;j<3;j++) read_cache[j][i]=0;
+@@ -79,7 +90,24 @@
+   nreset=1;
+  end
+  always @(posedge clk) if(nreset) begin
++  prep_slot=-1;
++  if(dut.core.state==dut.core.S_PIPE_START) prep_slot=0;
++  else if(dut.core.state==dut.core.S_DECODE) prep_slot=1;
++  else if(dut.core.state==dut.core.S_PIPE_REGS) prep_slot=2;
++  if(prep_slot>=0) prepare_opcode[dut.core.ir][prep_slot]++;
++
+   if(dut.core.state==dut.core.S_MRD || dut.core.state==dut.core.S_MWR) begin
++   // Exclusive categories: unissued setup, waiting for prefetch, issued
++   // waiting, successful acknowledgement, and fault response.
++   if(!dut.core.m_issued) phase_index=dut.core.epf_pend?1:0;
++   else if(dut.core.d_err) phase_index=4;
++   else if(dut.core.d_ack) phase_index=3;
++   else phase_index=2;
++   consumer_phase[dut.core.r_m_ret][phase_index]++;
++   profile_total++;
++   if(dut.core.state==dut.core.S_MRD && dut.core.r_m_ret==dut.core.S_PIPE_SDONE)
++    operand_phase[dut.core.ir][phase_index]++;
++
+    if(!dut.core.m_issued) begin
+     if(dut.core.epf_pend) mem_prefetch++; else mem_setup++;
+    end else begin
+@@ -145,6 +173,16 @@
+       if(write_cache[i]) $display("WRITE_CACHE state=%0d cycles=%0d",i,write_cache[i]);
+       for(j=0;j<3;j++) if(read_cache[j][i]) $display("READ_CACHE shape=%0d state=%0d cycles=%0d",j,i,read_cache[j][i]);
+      end
++     for(j=0;j<256;j++) for(k=0;k<5;k++) begin
++      phase_total+=consumer_phase[j][k];
++      if(consumer_phase[j][k]) $display("CONSUMER_PHASE ret=%0d phase=%0d cycles=%0d",j,k,consumer_phase[j][k]);
++     end
++     if(phase_total!=profile_total || profile_total!=mem_setup+mem_prefetch+mem_issued)
++      $fatal(1,"consumer phase accounting mismatch");
++     for(j=0;j<65536;j++) for(k=0;k<5;k++)
++      if(operand_phase[j][k]) $display("OPERAND_PHASE opcode=%04h phase=%0d cycles=%0d",j[15:0],k,operand_phase[j][k]);
++     for(j=0;j<65536;j++) for(k=0;k<3;k++)
++      if(prepare_opcode[j][k]) $display("PREPARE_OPCODE opcode=%04h slot=%0d cycles=%0d",j[15:0],k,prepare_opcode[j][k]);
+      for(j=0;j<256;j++) if(states[j]) $display("STATE %0d cycles=%0d",j,states[j]);
+      for(j=0;j<65536;j++) if(pc_cycles[j]) $display("PC_BUCKET %06h cycles=%0d",j*256,pc_cycles[j]);
+      $writememh("whet_stack.hex",mem,'h63fc00,'h63ffff);

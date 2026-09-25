@@ -1,0 +1,41 @@
+--- rtl/ap68040/rtl/ap040_cache.v
++++ rtl/ap68040/rtl/ap040_cache.v
+@@ -564,7 +564,7 @@
+ // queue's ring write, the tightest path in the core).
+ wire fast_hit;
+ wire [31:0] fast_data;
+-assign c_ack   = (pass_active && !post_active) ? m_ack : (ack_r | fast_hit | fast_store);
++assign c_ack   = (pass_active && !post_active) ? m_ack : (ack_r | fast_hit | fast_store | fast_span_ack);
+ // The offer is a level, not a pulse: the core refuses a line while a
+ // queue fetch is outstanding or a data access acknowledges in the same
+ // cycle, and a pulse lost to that refusal cost explicit fetches for the
+@@ -579,7 +579,7 @@
+ assign m_posted    = post_active && (!r_span2 || sline_ready);
+ assign c_line_tag  = iline_tag;
+ assign c_line_data = iline_data;
+-assign c_rdata = pass_active ? m_rdata : (fast_hit ? fast_data : rdata_r);
++assign c_rdata = pass_active ? m_rdata : fast_span_ack ? span_extract({sp_w0, sp_w1}, r_size, r_off) : (fast_hit ? fast_data : rdata_r);
+ 
+ assign rd_accept = (cst == C_IDLE) && !(cinv_req && !cinv_done) &&
+                    c_req && !ack_r && !c_write && !bypass &&
+@@ -886,6 +886,11 @@
+ wire  [1:0] wr_way = store_hit_write ? hit_way : r_way;
+ wire  [1:0] wr_arr = wr_way + r_beat;
+ wire  [1:0] wr_arr1 = wr_arr + 2'd1;
++// The registered whole-line read already supplies both words in look2.
++// Acknowledge a qualified spanning data hit here instead of registering it.
++wire fast_span_ack = (cst == C_LOOK) && look2 && r_span2 && !r_bank &&
++    c_req && !c_write && !c_instr && !look_snooped && !snoop_look_row &&
++    !err_hold && !m_err;
+ wire [63:0] pair_new = span_merge({sp_w0, sp_w1}, r_wdata, r_size, r_off);
+ assign cd_we     = store_pair_write ? ((4'd1 << wr_arr) | (4'd1 << wr_arr1)) :
+                    (store_hit_write || fill_beat_write) ? (4'd1 << wr_arr) : 4'd0;
+@@ -1258,7 +1263,7 @@
+ 					look2 <= 0;
+ 					if (!look_snooped && !snoop_look_row) begin
+ 						rdata_r <= span_extract({sp_w0, sp_w1}, r_size, r_off);
+-						ack_r <= 1;
++						if (!fast_span_ack) ack_r <= 1;
+ 						cst <= C_IDLE;
+ 					end
+ 					else begin

@@ -1,0 +1,11 @@
+--- a/rtl/wombat_store_buffer.sv
++++ b/rtl/wombat_store_buffer.sv
+@@ -273,7 +273,7 @@
+ 		if (drain_active) begin
+ 			if (m_ack || m_err) drain_active <= 0;
+ 		end
+-		else if (!direct_active && (count != 0) && !direct_request &&
++		else if (!direct_active && ((count != 0) || push) && !direct_request &&
+ 		         !m_ack && !m_err)
+ 			drain_active <= 1;
+ 

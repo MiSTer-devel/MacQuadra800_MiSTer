@@ -1,0 +1,24 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -2866,7 +2866,20 @@
+ 		if (n_md_sign_v) md_sign <= n_md_sign;
+ 		if (n_lk_cyc_v) lk_cyc <= n_lk_cyc;
+ 		case (n_next)
+-			NX_PSTART: state <= S_PIPE_START;
++			NX_PSTART: begin
++                // A settled indirect source needs no register-selection cycle.
++                // Restrict this first experiment to non-updating memory MOVE.
++                if (n_p_src_v && n_p_src == SK_MEM &&
++                    n_p_dst_v && n_p_dst == DK_MEM &&
++                    n_alu_op_v && n_alu_op == `AP040_ALU_MOVE &&
++                    n_src_mode_r_v && n_src_mode_r == 3'b010 &&
++                    n_src_rn_r_v && n_p_ssize_v &&
++                    rr_a == {1'b1,n_src_rn_r} && !rf_we && !aux_we &&
++                    epf_ready_pc2) begin
++                    x_ext <= imm;
++                    mrd(rf_rdata_a,n_p_ssize,S_PIPE_SDONE);
++                end else state <= S_PIPE_START;
++            end
+ 			NX_PREGS:  state <= S_PIPE_REGS;
+ 			NX_IMMF_PSTART: immf(n_immn, S_PIPE_START);
+ 			NX_IMMREG: immf_reg(n_immn, n_rr_b);

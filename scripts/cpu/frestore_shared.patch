@@ -1,0 +1,110 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -7653,68 +7653,48 @@
+ 				else exc(`AP040_VEC_FMTERR, 4'd0, pc_i, 32'd0);
+ 			end
+ 
+-			S_FREST_U: begin
+-				case (FPU_REV40 ? fp_n + 4'd2 : fp_n)
+-					4'd1: fp_restore_cmd3 <= m_val[31:16];
+-					4'd3: begin
+-					fp_restore_stag <= m_val[31:29];
+-					fp_restore_grs  <= m_val[25:23];
+-				end
+-					4'd4: fp_restore_cmd1 <= m_val[31:16];
+-					4'd5: begin
+-					fp_restore_dtag   <= m_val[31:29];
+-					fp_restore_wbte15 <= m_val[20];
+-				end
+-					4'd6: fp_restore_flags <= {m_val[26], m_val[25], m_val[20]};
+-					4'd7: fp_restore_fpt[95:64] <= m_val;
+-					4'd8: fp_restore_fpt[63:32] <= m_val;
+-					4'd9: fp_restore_fpt[31:0] <= m_val;
+-					4'd10: fp_restore_et[95:64] <= m_val;
+-					4'd11: fp_restore_et[63:32] <= m_val;
+-					4'd12: fp_restore_et[31:0] <= m_val;
+-					default: ; // reserved longword at offset $08
+-				endcase
+-				if (fp_n == FPU_UNIMP_LAST) state <= S_FREST_UD;
+-				else begin
+-					fp_n <= fp_n + 4'd1;
+-					mrd(ea_addr + ({28'd0, fp_n} << 2) + 32'd4,
+-					    `AP040_SZ_L, S_FREST_U);
+-				end
+-			end
+-
+-			S_FREST_B: begin
+-				case (fpb_n)
+-					5'd2:  fp_restore_cusavepc <= m_val[31:24];
+-					5'd6:  fp_restore_wbt[95:64] <= m_val;
+-					5'd7:  fp_restore_wbt[63:32] <= m_val;
+-					5'd8:  fp_restore_wbt[31:0]  <= m_val;
+-					5'd10: fp_restore_fpiar <= m_val;
+-					5'd13: fp_restore_cmd3 <= m_val[31:16];
+-					5'd15: begin
+-						fp_restore_stag <= m_val[31:29];
+-						fp_restore_et15 <= m_val[28];
+-						fp_restore_grs  <= m_val[25:23];
++			S_FREST_U, S_FREST_B: begin
++				// UNIMP indices 1..12 and BUSY indices 13..24 share state fields.
++				if (state == S_FREST_U || fpb_n >= 5'd13) begin
++					case (state == S_FREST_U ?
++					      {1'b0, (FPU_REV40 ? fp_n + 4'd2 : fp_n)} : fpb_n - 5'd12)
++						5'd1: fp_restore_cmd3 <= m_val[31:16];
++						5'd3: begin fp_restore_stag <= m_val[31:29]; fp_restore_grs <= m_val[25:23]; end
++						5'd4: fp_restore_cmd1 <= m_val[31:16];
++						5'd5: begin fp_restore_dtag <= m_val[31:29]; fp_restore_wbte15 <= m_val[20]; end
++						5'd6: fp_restore_flags <= {m_val[26], m_val[25], m_val[20]};
++						5'd7: fp_restore_fpt[95:64] <= m_val;
++						5'd8: fp_restore_fpt[63:32] <= m_val;
++						5'd9: fp_restore_fpt[31:0] <= m_val;
++						5'd10: fp_restore_et[95:64] <= m_val;
++						5'd11: fp_restore_et[63:32] <= m_val;
++						5'd12: fp_restore_et[31:0] <= m_val;
++						default: ; // reserved payload word
++					endcase
++				end else begin
++					case (fpb_n)
++						5'd2: fp_restore_cusavepc <= m_val[31:24];
++						5'd6: fp_restore_wbt[95:64] <= m_val;
++						5'd7: fp_restore_wbt[63:32] <= m_val;
++						5'd8: fp_restore_wbt[31:0] <= m_val;
++						5'd10: fp_restore_fpiar <= m_val;
++						default: ;
++					endcase
++				end
++				if (state == S_FREST_B) begin
++					if (fpb_n == 5'd15) fp_restore_et15 <= m_val[28];
++					if (fpb_n == 5'd17) fp_restore_fpt15 <= m_val[28];
++				end
++				if (state == S_FREST_U) begin
++					if (fp_n == FPU_UNIMP_LAST) state <= S_FREST_UD;
++					else begin
++						fp_n <= fp_n + 4'd1;
++						mrd(ea_addr + ({28'd0, fp_n} << 2) + 32'd4, `AP040_SZ_L, S_FREST_U);
+ 					end
+-					5'd16: fp_restore_cmd1 <= m_val[31:16];
+-					5'd17: begin
+-						fp_restore_dtag   <= m_val[31:29];
+-						fp_restore_fpt15  <= m_val[28];
+-						fp_restore_wbte15 <= m_val[20];
+-					end
+-					5'd18: fp_restore_flags <= {m_val[26], m_val[25], m_val[20]};
+-					5'd19: fp_restore_fpt[95:64] <= m_val;
+-					5'd20: fp_restore_fpt[63:32] <= m_val;
+-					5'd21: fp_restore_fpt[31:0]  <= m_val;
+-					5'd22: fp_restore_et[95:64]  <= m_val;
+-					5'd23: fp_restore_et[63:32]  <= m_val;
+-					5'd24: fp_restore_et[31:0]   <= m_val;
+-					default: ;
+-				endcase
+-				if (fpb_n == 5'd24) state <= S_FREST_BD;
++				end else if (fpb_n == 5'd24) state <= S_FREST_BD;
+ 				else begin
+ 					fpb_n <= fpb_n + 5'd1;
+-					mrd(ea_addr + ({27'd0, fpb_n} << 2) + 32'd4,
+-					    `AP040_SZ_L, S_FREST_B);
++					mrd(ea_addr + ({27'd0, fpb_n} << 2) + 32'd4, `AP040_SZ_L, S_FREST_B);
+ 				end
+ 			end
+ 

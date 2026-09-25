@@ -1,0 +1,53 @@
+--- rtl/ap68040/rtl/ap040_cache.v
++++ rtl/ap68040/rtl/ap040_cache.v
+@@ -564,7 +564,7 @@
+ // queue's ring write, the tightest path in the core).
+ wire fast_hit;
+ wire [31:0] fast_data;
+-assign c_ack   = (pass_active && !post_active) ? m_ack : (ack_r | fast_hit | fast_store | fast_span_ack);
++assign c_ack   = (pass_active && !post_active) ? m_ack : (ack_r | fast_hit | fast_store | fast_span_ack | fast_ifetch_idle | fast_ifetch_look);
+ // The offer is a level, not a pulse: the core refuses a line while a
+ // queue fetch is outstanding or a data access acknowledges in the same
+ // cycle, and a pulse lost to that refusal cost explicit fetches for the
+@@ -579,7 +579,10 @@
+ assign m_posted    = post_active && (!r_span2 || sline_ready);
+ assign c_line_tag  = iline_tag;
+ assign c_line_data = iline_data;
+-assign c_rdata = pass_active ? m_rdata : fast_span_ack ? span_extract({sp_w0, sp_w1}, r_size, r_off) : (fast_hit ? fast_data : rdata_r);
++assign c_rdata = pass_active ? m_rdata :
++    fast_span_ack ? span_extract({sp_w0, sp_w1}, r_size, r_off) :
++    fast_ifetch_idle ? lw_extract(data_hit, c_size, c_addr[1:0]) :
++    fast_ifetch_look ? lw_extract(data_hit, r_size, r_off) : (fast_hit ? fast_data : rdata_r);
+ 
+ assign rd_accept = (cst == C_IDLE) && !(cinv_req && !cinv_done) &&
+                    c_req && !ack_r && !c_write && !bypass &&
+@@ -751,6 +754,11 @@
+                 (idle_data_idx == {c_instr, c_addr[SETW+3:2]}) &&
+                 (idle_tag_idx == a_row) && look_hit &&
+                 !tag_we && !inv_wren && !look_snooped && !snoop_look_row;
++// Instruction hits acknowledge the available word before the line-seed read.
++wire fast_ifetch_idle = idle_hit && c_instr;
++wire fast_ifetch_look = (cst == C_LOOK) && r_bank && c_req && c_instr && !c_write &&
++    !look2 && !xlook && !r_xline && !r_span2 && look_hit &&
++    !look_snooped && !snoop_look_row && !m_err;
+ // Start a settled within-line pair read at admission.
+ wire idle_span_hit = rd_accept && !ipred_hit && !err_hold && !m_err && span2 &&
+                 idle_data_valid && idle_tag_valid &&
+@@ -1016,7 +1024,7 @@
+ 					// matching read rather than issuing a redundant RAM read.
+ 					// A data hit the hint vouched for was acknowledged
+ 					// combinationally (fast_hit).
+-					if (!fast_hit) begin
++					if (!fast_hit && !fast_ifetch_idle) begin
+ 						rdata_r <= lw_extract(data_hit, c_size, c_addr[1:0]);
+ 						ack_r <= 1;
+ 					end
+@@ -1328,7 +1336,7 @@
+ 					// all four ways were read alongside the tags, so the
+ 					// hit completes here: two cycles request-to-ack
+ 					rdata_r <= lw_extract(data_hit, r_size, r_off);
+-					ack_r <= 1;
++					if (!fast_ifetch_look) ack_r <= 1;
+ 					if (r_bank) begin
+ 						// the line read runs in parallel (iline_seed_read)
+ 						iline_pending <= 1;

@@ -1,0 +1,52 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -372,6 +372,26 @@
+ wire [1:0] pipe_words;
+ wire [15:0] pipe_opcode;
+ wire [4:0] pipe_ccr;
++// Restrict new stream entries to three already-resident, one-word
++// register instructions. No new opcode or execution behavior is added.
++function pipe_chain_register;
++    input [15:0] w;
++    begin
++        pipe_chain_register = (w == 16'h4e71) || ((w & 16'hf100) == 16'h7000) ||
++            (w[15:14] == 0 && w[13:12] != 0 && w[8:7] == 0 && w[5:4] == 0 &&
++             !(w[13:12] == 1 && (w[6] || w[3]))) ||
++            (w[15:12] == 5 && w[7:6] != 3 && w[5:4] == 0 &&
++             !(w[7:6] == 0 && w[3])) ||
++            (w[5:4] == 0 && (w[15:12] == 9 || w[15:12] == 11 || w[15:12] == 13) &&
++             (w[7:6] == 3 || (!w[8] && !(w[7:6] == 0 && w[3])) ||
++              (w[15:12] == 11 && w[8] && !w[3]))) ||
++            (w[5:3] == 0 && w[7:6] != 3 && !w[8] &&
++             (w[15:12] == 8 || w[15:12] == 12));
++    end
++endfunction
++wire pipe_register_chain = epf_ready_pc2 && pipe_chain_register(ir) &&
++    pipe_chain_register(epf_data[epf_head]) &&
++    pipe_chain_register(epf_data[epf_head + 3'd1]);
+ // A short unsupported boundary should retain the sequencer's fast path.
+ // PEA already wins in isolation; other entries need a supported successor.
+ // Forced-decode tests deliberately bypass this policy for opcode coverage.
+@@ -382,7 +402,7 @@
+ `elsif AP040_PIPELINE_SELECTIVE
+ wire pipe_entry_ok = pipe_words == 2 || pipe_next_supported;
+ `elsif AP040_PIPELINE_MEMORY_ENTRY
+-wire pipe_entry_ok = (pipe_words == 2 && (ir & 16'hf1f8) != 16'h41e8) ||
++wire pipe_entry_ok = pipe_register_chain || (pipe_words == 2 && (ir & 16'hf1f8) != 16'h41e8) ||
+     (PIPE_COMPARE && (ir & 16'hff38) == 16'h4a10 && ir[7:6] != 3);
+ `else
+ wire pipe_entry_ok = 1'b1;
+@@ -9420,6 +9440,13 @@
+ `endif
+ `endif
+ `ifdef AP040_EXPERIMENTAL_PIPELINE
++        // Preserve the legacy path for short fragments; route only a
++        // complete resident triple through normal S_DECODE admission.
++        if (PIPE_MEMORY_ENTRY && rd_queue_pop && epf_count >= 3 &&
++            pipe_chain_register(epf_data[epf_head]) &&
++            pipe_chain_register(epf_data[epf_head + 3'd1]) &&
++            pipe_chain_register(epf_data[epf_head + 3'd2]))
++            rd_queue_pop = 0;
+         // Route indexed MOVE to admission even when its extension is late.
+         // The same-page wait above admits brief format once resident; full
+         // format falls back to the sequencer after the extension arrives.

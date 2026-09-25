@@ -1,0 +1,41 @@
+--- rtl/ap68040/rtl/ap040_core.v
++++ rtl/ap68040/rtl/ap040_core.v
+@@ -2022,7 +2022,7 @@
+ 		                  state == S_PIPE_DEA || state == S_DECODE ||
+ 		                  state == S_RET1 || state == S_UNLK1 ||
+ 		                  state == S_MOVEM_LOOP || hint_early_read || hint_fpu_read || pipe_load_launch)) ||
+-		     (mgo_wr && (state == S_EXEC || state == S_PIPE_DEA || state == S_MOVEM_LOOP ||
++		     (mgo_wr && (state == S_PIPE_START || state == S_EXEC || state == S_PIPE_DEA || state == S_MOVEM_LOOP ||
+ 		                 // the pushes: BSR.B from decode, BSR.W, JSR, PEA,
+ 		                 // LINK -- registered data (pc, ea_addr, port A
+ 		                 // selected a state earlier) at dbg_a7 - 4
+@@ -2082,6 +2082,8 @@
+ 	reg        direct, drd;      // a direct path resolved here: read / no read
+ 	reg [31:0] da;               // its address
+ 	reg [7:0]  dret;             // where its read returns
++	reg [31:0] move_data;
++	reg move_n, move_z;
+ 	begin
+ 		ea_start(mode, rn, size, ret);
+ 		direct = 0; drd = 0; da = 32'd0; dret = ret;
+@@ -2173,6 +2175,20 @@
+ 		// the one read issue of this task: every direct path above lands here
+ 		if (direct) begin
+ 			if (drd) mrd(da, size, dret);
++            else if (state == S_PIPE_START && exec_kind == EK_ALU &&
++                     p_dst == DK_MEM && alu_op == `AP040_ALU_MOVE &&
++                     !p_rmw && !p_wbsup &&
++                     (p_src == SK_REG || p_src == SK_IMM)) begin
++                // Source and destination base are already settled on the
++                // two ports. Preserve MOVE's X flag; compute N/Z by size.
++                move_data = (p_src == SK_REG) ? rf_capture_b : imm;
++                move_n = (size == `AP040_SZ_B) ? move_data[7] :
++                         (size == `AP040_SZ_W) ? move_data[15] : move_data[31];
++                move_z = (size == `AP040_SZ_B) ? (move_data[7:0] == 0) :
++                         (size == `AP040_SZ_W) ? (move_data[15:0] == 0) : (move_data == 0);
++                if (p_flags) sr[4:0] <= {sr[4], move_n, move_z, 2'b00};
++                mwr(da, size, move_data, S_NEXT);
++            end
+ 			else state <= S_EXEC;
+ 		end
+ 	end

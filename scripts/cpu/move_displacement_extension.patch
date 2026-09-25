@@ -1,0 +1,20 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -5255,10 +5255,15 @@
+                     // Faulting or page-split reads retain their original path.
+                     else if (r_m_ret == S_PIPE_SDONE && p_src == SK_MEM &&
+                              p_dst == DK_MEM && exec_kind == EK_ALU &&
+-                             alu_op == `AP040_ALU_MOVE && !p_rmw && dst_mode_r == 3'b110) begin
++                             alu_op == `AP040_ALU_MOVE && !p_rmw &&
++                             (dst_mode_r == 3'b110 || dst_mode_r == 3'b101)) begin
+                         src_val <= mem_rdata;
+                         ea_start(dst_mode_r, dst_rn_r, p_dsize, S_PIPE_DEA);
+-                        if (epf_ready_pc && !epf_flushed && !epf_data[epf_head][8] &&
++                        // d16 destination: select its base and request the
++                        // extension together. S_IMMF still provides the
++                        // register-settling and precise extension-fault edge.
++                        if (dst_mode_r == 3'b101) immf(2'd1, S_EA_D16);
++                        if (dst_mode_r == 3'b110 && epf_ready_pc && !epf_flushed && !epf_data[epf_head][8] &&
+                             rr_a == {1'b1,dst_rn_r} && rr_b == epf_data[epf_head][15:12] &&
+                             !rf_we && !aux_we) begin
+                             extw <= epf_data[epf_head];

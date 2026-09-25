@@ -1,0 +1,53 @@
+--- rtl/ap68040/experimental/ap040_pipeline_integer.sv
++++ rtl/ap68040/experimental/ap040_pipeline_integer.sv
+@@ -136,6 +136,9 @@
+     function automatic is_indexread(input [15:0] word);
+         is_indexread = is_indexload(word) || is_indexcmp(word) || is_indextst(word) || is_indexmul(word);
+     endfunction
++    function automatic is_indirectcmp(input [15:0] word);
++        is_indirectcmp = ENABLE_COMPARE && (word & 16'hf138) == 16'hb010 && word[7:6] != 3;
++    endfunction
+     function automatic is_indirecttst(input [15:0] word);
+         is_indirecttst = ENABLE_COMPARE && (word & 16'hff38) == 16'h4a10 && word[7:6] != 3;
+     endfunction
+@@ -143,7 +146,7 @@
+         is_indirectadd = ENABLE_COMPARE && (word & 16'hf138) == 16'hd010 && word[7:6] != 3;
+     endfunction
+     function automatic is_load(input [15:0] word);
+-        is_load = is_indirectadd(word) || is_indirecttst(word) || is_indexread(word) || ENABLE_LOADS && word[15:14] == 0 && word[13:12] != 0 &&
++        is_load = is_indirectcmp(word) || is_indirectadd(word) || is_indirecttst(word) || is_indexread(word) || ENABLE_LOADS && word[15:14] == 0 && word[13:12] != 0 &&
+                   word[8:6] == 0 && word[5:3] == 3'b010;
+     endfunction
+     function automatic is_store(input [15:0] word);
+@@ -186,10 +189,10 @@
+             end else if (is_indexmul(word)) begin
+                 legal = 1; writeback = 1; flags = 1; size = `AP040_SZ_W;
+                 source = {1'b1, word[2:0]}; destination = {1'b0, word[11:9]};
+-            end else if (is_indexcmp(word) || is_indextst(word) || is_indirecttst(word)) begin
++            end else if (is_indexcmp(word) || is_indirectcmp(word) || is_indextst(word) || is_indirecttst(word)) begin
+                 legal = 1; writeback = 0; flags = 1; size = word[7:6];
+                 source = {1'b1, word[2:0]}; destination = {1'b0, word[11:9]};
+-                operation = is_indexcmp(word) ? `AP040_ALU_CMP : `AP040_ALU_TST;
++                operation = (is_indexcmp(word) || is_indirectcmp(word)) ? `AP040_ALU_CMP : `AP040_ALU_TST;
+             end else if (ENABLE_COMPARE && (word & 16'hff38) == 16'h4a00 && word[7:6] != 3) begin
+                 legal = 1; writeback = 0; flags = 1; size = word[7:6];
+                 source = {1'b0,word[2:0]}; operation = `AP040_ALU_TST;
+@@ -364,7 +367,7 @@
+     wire [4:0] alu_flags, alu_fast_flags;
+     wire alu_fast_ok;
+     ap040_alu #(.PIPELINE_SUBSET(1)) alu (
+-        .op(ex_op), .size(ex_size), .shcnt(source_full[5:0]), .a(src), .b(is_indexcmp(ex_opcode) ? old_dst : dst),
++        .op(ex_op), .size(ex_size), .shcnt(source_full[5:0]), .a(src), .b((is_indexcmp(ex_opcode) || is_indirectcmp(ex_opcode)) ? old_dst : dst),
+         .flags_in(flags_in), .result(alu_result), .flags_out(alu_flags),
+         .fast_flags(alu_fast_flags), .fast_ok(alu_fast_ok)
+     );
+--- rtl/ap68040/rtl/ap040_core.v
++++ rtl/ap68040/rtl/ap040_core.v
+@@ -9439,6 +9439,7 @@
+         if (PIPE_MEMORY_ENTRY && PIPE_COMPARE && rd_queue_pop && epf_count >= 1 &&
+             epf_data[epf_head][7:6] != 3 &&
+             (((epf_data[epf_head] & 16'hff38) == 16'h4a10) ||
++             ((epf_data[epf_head] & 16'hf138) == 16'hb010) ||
+              ((epf_count < 2 || !epf_data[epf_head + 3'd1][8]) &&
+               (((epf_data[epf_head] & 16'hff38) == 16'h4a30) ||
+                ((epf_data[epf_head] & 16'hf138) == 16'hb030)))))

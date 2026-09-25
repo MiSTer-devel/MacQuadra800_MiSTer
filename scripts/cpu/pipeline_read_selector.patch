@@ -1,0 +1,37 @@
+--- rtl/ap68040/experimental/ap040_pipeline_integer.sv
++++ rtl/ap68040/experimental/ap040_pipeline_integer.sv
+@@ -67,6 +67,7 @@
+     output wire [15:0] fallback_opcode
+ );
+     reg id_v, ex_v, wb_v;
++    reg [3:0] ex_read_dst; // ID-decoded physical register selector for EX port B
+     reg ex_load, ex_store, ex_pea, wb_fault;
+     reg [15:0] id_extension, ex_extension;
+     reg [31:0] id_next_pc, ex_next_pc, wb_next_pc;
+@@ -321,7 +322,7 @@
+     wire [31:0] rf_a, rf_b, rf_sp, rf_old_dst;
+     assign read_old_dst = ex_dst;
+     assign read_src = ex_src;
+-    assign read_dst = (ex_pea || is_indexread(ex_opcode) || is_indexstore(ex_opcode)) ? ex_extension[15:12] : ex_dst;
++    assign read_dst = ex_read_dst;
+     generate if (EXTERNAL_STATE) begin : shared_state
+         assign rf_a = external_a;
+         assign rf_b = external_b;
+@@ -441,7 +442,7 @@
+             id_next_pc <= 0; ex_next_pc <= 0; wb_next_pc <= 0; wb_fault <= 0; wb_fault_addr <= 0;
+             id_pc <= 0; ex_pc <= 0; wb_pc <= 0;
+             id_opcode <= 0; ex_opcode <= 0; wb_opcode <= 0;
+-            ex_op <= 0; ex_size <= 0; ex_src <= 0; ex_dst <= 0;
++            ex_op <= 0; ex_size <= 0; ex_src <= 0; ex_dst <= 0; ex_read_dst <= 0;
+             ex_word_src <= 0; ex_imm <= 0; ex_we <= 0; ex_flags <= 0; ex_immediate <= 0;
+             wb_dst <= 0; wb_we <= 0; wb_data <= 0; wb_ccr <= 0;
+         end else if (ce) begin
+@@ -476,6 +477,8 @@
+                         ex_store <= is_store(id_opcode) || is_pea(id_opcode);
+                         ex_op <= dec_op; ex_size <= dec_size;
+                         ex_src <= dec_src; ex_dst <= dec_dst;
++                        ex_read_dst <= (is_pea(id_opcode) || is_indexread(id_opcode) ||
++                                        is_indexstore(id_opcode)) ? id_extension[15:12] : dec_dst;
+                         ex_imm <= dec_imm; ex_immediate <= dec_immediate;
+                         ex_we <= dec_we; ex_flags <= dec_flags; ex_word_src <= dec_word_src;
+                     end

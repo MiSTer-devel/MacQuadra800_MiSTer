@@ -1,0 +1,29 @@
+--- rtl/ap68040/rtl/ap040_core.v
++++ rtl/ap68040/rtl/ap040_core.v
+@@ -5233,7 +5233,7 @@
+                     p_dst == DK_MEM && exec_kind == EK_ALU &&
+                     alu_op == `AP040_ALU_MOVE && !p_rmw &&
+                     (dst_mode_r == 3'b010 || dst_mode_r == 3'b011 ||
+-                     dst_mode_r == 3'b100)) rr_a <= {1'b1, dst_rn_r};
++                     dst_mode_r == 3'b100 || dst_mode_r == 3'b101)) rr_a <= {1'b1, dst_rn_r};
+                 // Prepare only register selectors; extension consumption and
+                 // destination access still wait for source read success.
+                 if (r_m_ret == S_PIPE_SDONE && p_src == SK_MEM &&
+@@ -5301,7 +5301,16 @@
+                         // d16 destination: select its base and request the
+                         // extension together. S_IMMF still provides the
+                         // register-settling and precise extension-fault edge.
+-                        if (dst_mode_r == 3'b101) immf(2'd1, S_EA_D16);
++                        // The queued displacement and settled destination base
++                        // can resolve together once the source read succeeds.
++                        if (dst_mode_r == 3'b101 && epf_ready_pc && !epf_flushed &&
++                            rr_a == {1'b1,dst_rn_r} && !rf_we && !aux_we) begin
++                            ea_addr <= rf_rdata_a + sxw(epf_data[epf_head]);
++                            pc <= pc + 32'd2;
++                            epf_pop = 2'd1;
++                            epf_issue = 1;
++                            state <= S_PIPE_DEA;
++                        end else if (dst_mode_r == 3'b101) immf(2'd1, S_EA_D16);
+                         // A settled base lets the successful source response
+                         // perform the existing EA_DISP work. Pending writes
+                         // retain EA_DISP so aliased source updates land first.

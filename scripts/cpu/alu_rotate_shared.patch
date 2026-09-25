@@ -1,0 +1,52 @@
+--- a/rtl/ap68040/rtl/ap040_alu.v
++++ b/rtl/ap68040/rtl/ap040_alu.v
+@@ -284,7 +284,9 @@
+ 			// (size+1) and reports C = the rotated X for every nonzero
+ 			// count, including exact multiples of size+1.
+ 			reg  [5:0] n, nm, nx, ne;
+-			reg [32:0] w, rot, cmask;
++			reg [32:0] w, rot, cmask, rotate_in, rotate_mask;
++			reg [5:0] rotate_width, rotate_amount, rotate_left;
++			reg rotate_extend, rotate_right;
+ 			reg [31:0] r, sext, win;
+ 			reg        c, x2, vf;
+ 			n  = shcnt;
+@@ -307,6 +309,14 @@
+ 			ne = (n > nbits) ? nbits : n;
+ 			cmask = (33'd2 << nbits) - 33'd1;
+ 			w = ({32'd0, f_x} << nbits) | {1'b0, bm};
++			rotate_extend = (op == `AP040_ALU_ROXL1) || (op == `AP040_ALU_ROXR1);
++			rotate_right = (op == `AP040_ALU_ROR1) || (op == `AP040_ALU_ROXR1);
++			rotate_width = nbits + rotate_extend;
++			rotate_amount = rotate_extend ? nx : nm;
++			rotate_left = rotate_right ? (rotate_width - rotate_amount) : rotate_amount;
++			rotate_in = rotate_extend ? w : {1'b0, bm};
++			rotate_mask = rotate_extend ? cmask : {1'b0, szmask};
++			rot = ((rotate_in << rotate_left) | (rotate_in >> (rotate_width - rotate_left))) & rotate_mask;
+ 			case (op)
+ 				`AP040_ALU_ASL1, `AP040_ALU_LSL1: begin
+ 					r = (bm << n) & szmask;
+@@ -337,21 +347,19 @@
+ 					x2 = c;
+ 				end
+ 				`AP040_ALU_ROL1: begin
+-					r = ((bm << nm) | (bm >> (nbits - nm))) & szmask;
++					r = rot[31:0] & szmask;
+ 					c = r[0];
+ 				end
+ 				`AP040_ALU_ROR1: begin
+-					r = ((bm >> nm) | (bm << (nbits - nm))) & szmask;
++					r = rot[31:0] & szmask;
+ 					c = ((r >> (nbits - 6'd1)) & 32'd1) != 0;
+ 				end
+ 				`AP040_ALU_ROXL1: begin
+-					rot = ((w << nx) | (w >> (nbits + 6'd1 - nx))) & cmask;
+ 					x2 = ((rot >> nbits) & 33'd1) != 0;
+ 					r = rot[31:0] & szmask;
+ 					c = x2;
+ 				end
+ 				default: begin // AP040_ALU_ROXR1
+-					rot = ((w >> nx) | (w << (nbits + 6'd1 - nx))) & cmask;
+ 					x2 = ((rot >> nbits) & 33'd1) != 0;
+ 					r = rot[31:0] & szmask;
+ 					c = x2;

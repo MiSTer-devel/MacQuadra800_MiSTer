@@ -1,0 +1,18 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -5733,6 +5733,15 @@
+ 				if (exec_kind == EK_ALU && p_dst == DK_REG) begin
+ 					retire_operand_alu;
+ 				end
++                else if (state == S_PIPE_SDONE && exec_kind == EK_ALU &&
++                         p_src == SK_MEM && p_dst == DK_MEM &&
++                         alu_op == `AP040_ALU_MOVE && !p_rmw && !p_wbsup) begin
++                    // The source read has completed with faults resolved. Select
++                    // the destination base while capturing the source, skipping
++                    // the otherwise redundant S_PIPE_DST dispatch cycle.
++                    src_val <= m_val;
++                    ea_start(dst_mode_r, dst_rn_r, p_dsize, S_PIPE_DEA);
++                end
+ 				else if (shift_fire && (shift_cnt != 6'd0)) begin
+ 					// register shift, whole count in one ALU call (a zero
+ 					// count keeps the S_SHIFT path for its special flags)

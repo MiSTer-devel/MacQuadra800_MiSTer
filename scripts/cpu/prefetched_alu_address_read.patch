@@ -1,0 +1,11 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -2723,7 +2723,7 @@
+ // Forward an address-register ALU result into the following indirect MOVE.
+ // Actual issue remains gated by apply_record after fetch_next accepts retirement.
+ wire retire_move_read = state == S_PIPE_REGS && regs_alu_fire && !p_wbsup &&
+-    p_dreg[3] && n_apply_ok && epf_ready_pc2 &&
++    p_dreg[3] && n_apply_ok && epf_ready_pc2 && epf_count >= 4 &&
+     n_p_src_v && n_p_src == SK_MEM && n_p_dst_v && n_p_dst == DK_MEM &&
+     n_alu_op_v && n_alu_op == `AP040_ALU_MOVE &&
+     n_src_mode_r_v && n_src_mode_r == 3'b010 && n_src_rn_r_v && n_p_ssize_v &&

@@ -1,0 +1,11 @@
+--- a/rtl/wombat_store_buffer.sv
++++ b/rtl/wombat_store_buffer.sv
+@@ -78,7 +78,7 @@
+ // accept_ack doubles as the held-request guard. In the cycle after capture it
+ // prevents the still-asserted request from being enqueued twice, matching the
+ // registered-ack discipline used by wombat_bus32.
+-wire push = buffer_req && !accept_ack && (count != 2'd2);
++wire push = buffer_req && !accept_ack && ((count != 2'd2) || pop);
+ wire pop  = drain_active && (m_ack || m_err);
+ 
+ // Direct transactions wait until the queue is empty. Their live attributes

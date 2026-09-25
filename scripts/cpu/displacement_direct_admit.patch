@@ -1,0 +1,78 @@
+--- rtl/ap68040/experimental/ap040_pipeline_integer.sv
++++ rtl/ap68040/experimental/ap040_pipeline_integer.sv
+@@ -120,6 +120,12 @@
+             word[5:3] == 6 && (word[8:6] == 0 || word[8:6] == 1) &&
+             word[13:12] != 0 && !(word[13:12] == 1 && word[8:6] == 1);
+     endfunction
++    function automatic is_dispload(input [15:0] word);
++        is_dispload = ENABLE_INDEXLOAD && word[15:14] == 0 &&
++            word[13:12] != 0 && word[5:3] == 5 &&
++            (word[8:6] == 0 || word[8:6] == 1) &&
++            !(word[13:12] == 1 && word[8:6] == 1);
++    endfunction
+     function automatic is_indexstore(input [15:0] word);
+         is_indexstore = ENABLE_INDEXLOAD && word[15:14] == 0 && word[13:12] != 0 &&
+             word[5:4] == 0 && !(word[13:12] == 1 && word[3]) && word[8:6] == 6;
+@@ -143,7 +149,7 @@
+         is_indirectadd = ENABLE_COMPARE && (word & 16'hf138) == 16'hd010 && word[7:6] != 3;
+     endfunction
+     function automatic is_load(input [15:0] word);
+-        is_load = is_indirectadd(word) || is_indirecttst(word) || is_indexread(word) || ENABLE_LOADS && word[15:14] == 0 && word[13:12] != 0 &&
++        is_load = is_dispload(word) || is_indirectadd(word) || is_indirecttst(word) || is_indexread(word) || ENABLE_LOADS && word[15:14] == 0 && word[13:12] != 0 &&
+                   word[8:6] == 0 && word[5:3] == 3'b010;
+     endfunction
+     function automatic is_store(input [15:0] word);
+@@ -284,11 +290,11 @@
+     wire [52:0] next_admission = decode(next_opcode);
+     assign next_supported = next_valid && next_admission[52] &&
+         (!(is_pea(next_opcode) || is_indexread(next_opcode) || is_indexstore(next_opcode)) || (next_extension_valid && !next_extension[8])) &&
+-        (!is_disp_lea(next_opcode) || next_extension_valid);
+-    assign in_words = (is_pea(in_opcode) || is_indexread(in_opcode) || is_indexstore(in_opcode) || is_disp_lea(in_opcode)) ? 2'd2 : 2'd1;
++        (!(is_disp_lea(next_opcode) || is_dispload(next_opcode)) || next_extension_valid);
++    assign in_words = (is_pea(in_opcode) || is_indexread(in_opcode) || is_indexstore(in_opcode) || is_disp_lea(in_opcode) || is_dispload(in_opcode)) ? 2'd2 : 2'd1;
+     assign in_supported = admission[52] &&
+         (!(is_pea(in_opcode) || is_indexread(in_opcode) || is_indexstore(in_opcode)) || (in_extension_valid && !in_extension[8])) &&
+-        (!is_disp_lea(in_opcode) || in_extension_valid);
++        (!(is_disp_lea(in_opcode) || is_dispload(in_opcode)) || in_extension_valid);
+     // Empty-pipeline admission can decode directly into EX. Outstanding
+     // transactions and retained responses always use the existing ID path.
+     wire direct_admit = nreset && ce && !flush && !kill_younger &&
+@@ -396,7 +402,8 @@
+     wire [31:0] pea_index = ex_extension[11] ? dst : {{16{dst[15]}}, dst[15:0]};
+     wire [31:0] pea_value = source_full + (pea_index << ex_extension[10:9]) +
+                            {{24{ex_extension[7]}}, ex_extension[7:0]};
+-    wire [31:0] read_addr = is_indexread(ex_opcode) ? pea_value : source_full;
++    wire [31:0] read_addr = is_indexread(ex_opcode) ? pea_value :
++        is_dispload(ex_opcode) ? source_full + {{16{ex_extension[15]}}, ex_extension} : source_full;
+     wire [31:0] store_value = ex_pea ? pea_value : source_full;
+     wire [31:0] stack_value = wb_v && wb_we && wb_dst == 15 ? wb_data : rf_sp;
+     wire [31:0] store_step = ex_size == `AP040_SZ_L ? 32'd4 :
+--- rtl/ap68040/rtl/ap040_core.v
++++ rtl/ap68040/rtl/ap040_core.v
+@@ -389,8 +389,11 @@
+ `endif
+ // A late same-page PEA/indexed-memory extension can join after background fetch.
+ // Do not wait across a page or after a speculative fetch fault.
++wire pipe_dispload = PIPE_P6 && ir[15:14] == 0 && ir[13:12] != 0 &&
++    ir[5:3] == 5 && (ir[8:6] == 0 || ir[8:6] == 1) &&
++    !(ir[13:12] == 1 && ir[8:6] == 1);
+ wire pipe_wait_indexed = PIPE_MEMORY_ENTRY &&
+-    ((PIPE_P6 && ir[15:14] == 0 && ir[13:12] != 0 &&
++    (pipe_dispload || (PIPE_P6 && ir[15:14] == 0 && ir[13:12] != 0 &&
+       ((ir[5:3] == 6 && (ir[8:6] == 0 || ir[8:6] == 1) &&
+         !(ir[13:12] == 1 && ir[8:6] == 1)) ||
+        (ir[8:6] == 6 && ir[5:4] == 0 && !(ir[13:12] == 1 && ir[3])))) ||
+@@ -9434,6 +9437,13 @@
+             rd_queue_pop = 0;
+ `endif
+ `ifdef AP040_EXPERIMENTAL_PIPELINE
++        // d16 MOVE/MOVEA loads consume an unrestricted signed extension.
++        if (PIPE_MEMORY_ENTRY && PIPE_P6 && rd_queue_pop && epf_count >= 1 &&
++            epf_data[epf_head][15:14] == 0 && epf_data[epf_head][13:12] != 0 &&
++            epf_data[epf_head][5:3] == 5 &&
++            (epf_data[epf_head][8:6] == 0 || epf_data[epf_head][8:6] == 1) &&
++            !(epf_data[epf_head][13:12] == 1 && epf_data[epf_head][8:6] == 1))
++            rd_queue_pop = 0;
+         // Let supported memory compares reach the existing admission policy
+         // instead of having resident lookahead immediately choose legacy EA.
+         if (PIPE_MEMORY_ENTRY && PIPE_COMPARE && rd_queue_pop && epf_count >= 1 &&

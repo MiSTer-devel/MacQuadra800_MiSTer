@@ -1,0 +1,90 @@
+--- a/rtl/ap68040/rtl/ap040_cache.v
++++ b/rtl/ap68040/rtl/ap040_cache.v
+@@ -147,14 +147,10 @@
+ (* ramstyle = "no_rw_check" *) reg [31:0] cdata2 [0:(1<<DIDXW)-1];
+ (* ramstyle = "no_rw_check" *) reg [31:0] cdata3 [0:(1<<DIDXW)-1];
+ 
+-// Experimental mirrored banks read the next word of all four ways.
+-(* ramstyle = "no_rw_check" *) reg [31:0] pairdata0 [0:(1<<DIDXW)-1];
++// Share each bank write port with the next-word lookup when it is idle.
+ reg [31:0] pair_q0;
+-(* ramstyle = "no_rw_check" *) reg [31:0] pairdata1 [0:(1<<DIDXW)-1];
+ reg [31:0] pair_q1;
+-(* ramstyle = "no_rw_check" *) reg [31:0] pairdata2 [0:(1<<DIDXW)-1];
+ reg [31:0] pair_q2;
+-(* ramstyle = "no_rw_check" *) reg [31:0] pairdata3 [0:(1<<DIDXW)-1];
+ reg [31:0] pair_q3;
+ 
+ wire [ROWW-1:0] tag_q;
+@@ -192,10 +188,10 @@
+ 
+ wire  [DIDXW-1:0] cd_ridx0, cd_ridx1, cd_ridx2, cd_ridx3;
+ always @(posedge clk) begin
+-	if (ce & cd_we[0]) cdata0[cd_widx] <= cd_wdat0;
+-	if (ce & cd_we[1]) cdata1[cd_widx] <= cd_wdat1;
+-	if (ce & cd_we[2]) cdata2[cd_widx] <= cd_wdat2;
+-	if (ce & cd_we[3]) cdata3[cd_widx] <= cd_wdat3;
++	if (ce & cd_we[0]) cdata0[pair_port_addr0] <= cd_wdat0;
++	if (ce & cd_we[1]) cdata1[pair_port_addr1] <= cd_wdat1;
++	if (ce & cd_we[2]) cdata2[pair_port_addr2] <= cd_wdat2;
++	if (ce & cd_we[3]) cdata3[pair_port_addr3] <= cd_wdat3;
+ 	if (ce & cd_rd_en) begin
+ 		data_q0 <= cdata0[cd_ridx0];
+ 		data_q1 <= cdata1[cd_ridx1];
+@@ -204,19 +200,28 @@
+ 	end
+ end
+ 
+-// Keep writes identical to the architectural cache banks. Only the
+-// independent synchronous read address differs; cache capacity is unchanged.
++// Port A keeps write priority. A colliding write invalidates the paired
++// lookup until a later read refreshes it; the original slow path remains.
++// Port B continues the ordinary word/line lookup independently.
+ wire [1:0] pair_read_word = x_w + 2'd1;
++wire [DIDXW-1:0] pair_port_addr0 = cd_we[0] ? cd_widx : {x_row, 2'd0 - pair_read_word};
++wire [DIDXW-1:0] pair_port_addr1 = cd_we[1] ? cd_widx : {x_row, 2'd1 - pair_read_word};
++wire [DIDXW-1:0] pair_port_addr2 = cd_we[2] ? cd_widx : {x_row, 2'd2 - pair_read_word};
++wire [DIDXW-1:0] pair_port_addr3 = cd_we[3] ? cd_widx : {x_row, 2'd3 - pair_read_word};
++reg pair_port_valid;
+ always @(posedge clk) begin
+-    if (ce & cd_we[0]) pairdata0[cd_widx] <= cd_wdat0;
+-    if (ce & cd_we[1]) pairdata1[cd_widx] <= cd_wdat1;
+-    if (ce & cd_we[2]) pairdata2[cd_widx] <= cd_wdat2;
+-    if (ce & cd_we[3]) pairdata3[cd_widx] <= cd_wdat3;
++    if (!nreset) pair_port_valid <= 0;
++    else if (ce) begin
++        if (|cd_we) pair_port_valid <= 0;
++        else if (cd_rd_en) pair_port_valid <= 1;
++    end
++end
++always @(posedge clk) begin
+     if (ce & cd_rd_en) begin
+-        pair_q0 <= pairdata0[{x_row, 2'd0 - pair_read_word}];
+-        pair_q1 <= pairdata1[{x_row, 2'd1 - pair_read_word}];
+-        pair_q2 <= pairdata2[{x_row, 2'd2 - pair_read_word}];
+-        pair_q3 <= pairdata3[{x_row, 2'd3 - pair_read_word}];
++        pair_q0 <= cdata0[pair_port_addr0];
++        pair_q1 <= cdata1[pair_port_addr1];
++        pair_q2 <= cdata2[pair_port_addr2];
++        pair_q3 <= cdata3[pair_port_addr3];
+     end
+ end
+ 
+@@ -943,7 +948,7 @@
+ wire hint_pair_lane = hq_lo[3:2] != 3 &&
+     ((c_size == `AP040_SZ_L && hq_lo[1:0] != 0) ||
+      (c_size == `AP040_SZ_W && hq_lo[1:0] == 3));
+-wire fast_pair_idle = fast_accept && !err_hold && !m_err && hint_pair_lane &&
++wire fast_pair_idle = pair_port_valid && fast_accept && !err_hold && !m_err && hint_pair_lane &&
+                    idle_data_valid && hint_tag_valid &&
+                    (idle_data_idx == {1'b0, hq_lo[SETW+3:2]}) &&
+                    (hint_tag_idx == {1'b0, hq_lo[SETW+3:4]}) && hint_look_hit &&
+@@ -970,7 +975,7 @@
+     (hint_pair_word2 & {32{!hh0 && !hh1 && hh2}}) |
+     (hint_pair_word3 & {32{!hh0 && !hh1 && !hh2}});
+ wire [31:0] hint_pair_data = span_extract({hint_data_hit, hint_pair_next}, c_size, hq_lo[1:0]);
+-wire fast_pair_look = pair_look_select && c_req && !c_write && !c_instr &&
++wire fast_pair_look = pair_port_valid && pair_look_select && c_req && !c_write && !c_instr &&
+     look_hit && !look_snooped && !snoop_look_row && !err_hold && !m_err;
+ wire [31:0] pair_read_data = span_extract({data_hit, pair_next},
+     cst == C_IDLE ? c_size : r_size, cst == C_IDLE ? c_addr[1:0] : r_off);

@@ -1,0 +1,230 @@
+--- a/rtl/wombat_store_buffer.sv
++++ b/rtl/wombat_store_buffer.sv
+@@ -53,16 +53,16 @@
+ 	output            pending
+ );
+ 
+-reg  [1:0] count;
++reg  [2:0] count;
+ reg        accept_ack;
+ reg        drain_active;
+ reg        direct_active;
+ 
+-reg        q0_instr, q1_instr;
+-reg  [1:0] q0_size,  q1_size;
+-reg [31:0] q0_addr,  q1_addr;
+-reg [31:0] q0_wdata, q1_wdata;
+-reg  [2:0] q0_fc,    q1_fc;
++reg        q0_instr, q1_instr, q2_instr, q3_instr;
++reg  [1:0] q0_size,  q1_size, q2_size, q3_size;
++reg [31:0] q0_addr,  q1_addr, q2_addr, q3_addr;
++reg [31:0] q0_wdata, q1_wdata, q2_wdata, q3_wdata;
++reg  [2:0] q0_fc,    q1_fc, q2_fc, q3_fc;
+ 
+ // Wombat's physical RAM window occupies the low 1 GB. buffer_writes excludes
+ // the boot overlay; the remaining address check excludes the fixed ROM window
+@@ -78,7 +78,7 @@
+ // accept_ack doubles as the held-request guard. In the cycle after capture it
+ // prevents the still-asserted request from being enqueued twice, matching the
+ // registered-ack discipline used by wombat_bus32.
+-wire push = buffer_req && !accept_ack && (count != 2'd2);
++wire push = buffer_req && !accept_ack && (count != 3'd4);
+ wire pop  = drain_active && (m_ack || m_err);
+ 
+ // Direct transactions wait until the queue is empty. Their live attributes
+@@ -137,11 +137,11 @@
+ 		accept_ack    <= 0;
+ 		drain_active  <= 0;
+ 		direct_active <= 0;
+-		q0_instr <= 0; q1_instr <= 0;
+-		q0_size  <= 0; q1_size  <= 0;
+-		q0_addr  <= 0; q1_addr  <= 0;
+-		q0_wdata <= 0; q1_wdata <= 0;
+-		q0_fc    <= 0; q1_fc    <= 0;
++		q0_instr <= 0; q1_instr <= 0; q2_instr <= 0; q3_instr <= 0;
++		q0_size  <= 0; q1_size  <= 0; q2_size <= 0; q3_size <= 0;
++		q0_addr  <= 0; q1_addr  <= 0; q2_addr <= 0; q3_addr <= 0;
++		q0_wdata <= 0; q1_wdata <= 0; q2_wdata <= 0; q3_wdata <= 0;
++		q0_fc    <= 0; q1_fc    <= 0; q2_fc <= 0; q3_fc <= 0;
+ 	end
+ 	else if (ce) begin
+ 		accept_ack <= 0;
+@@ -149,61 +149,123 @@
+ 		// requester has moved on, so no held-request guard is needed
+ 		if (push) accept_ack <= !s_posted;
+ 
+-		// Queue update. A simultaneous pop/push is included for completeness;
+-		// with a full queue the waiting third store is accepted on the next
+-		// cycle, after the pop has made its slot visible.
+-		case ({push, pop})
+-			2'b10: begin
+-				if (count == 0) begin
+-					q0_instr <= s_instr;
+-					q0_size  <= s_size;
+-					q0_addr  <= s_addr;
+-					q0_wdata <= s_wdata;
+-					q0_fc    <= s_fc;
+-				end
+-				else begin
+-					q1_instr <= s_instr;
+-					q1_size  <= s_size;
+-					q1_addr  <= s_addr;
+-					q1_wdata <= s_wdata;
+-					q1_fc    <= s_fc;
+-				end
+-				count <= count + 2'd1;
+-			end
+-
+-			2'b01: begin
+-				q0_instr <= q1_instr;
+-				q0_size  <= q1_size;
+-				q0_addr  <= q1_addr;
+-				q0_wdata <= q1_wdata;
+-				q0_fc    <= q1_fc;
+-				count <= count - 2'd1;
+-			end
+-
+-			2'b11: begin
+-				if (count == 2'd1) begin
+-					q0_instr <= s_instr;
+-					q0_size  <= s_size;
+-					q0_addr  <= s_addr;
+-					q0_wdata <= s_wdata;
+-					q0_fc    <= s_fc;
+-				end
+-				else begin
+-					q0_instr <= q1_instr;
+-					q0_size  <= q1_size;
+-					q0_addr  <= q1_addr;
+-					q0_wdata <= q1_wdata;
+-					q0_fc    <= q1_fc;
+-					q1_instr <= s_instr;
+-					q1_size  <= s_size;
+-					q1_addr  <= s_addr;
+-					q1_wdata <= s_wdata;
+-					q1_fc    <= s_fc;
+-				end
+-			end
+-
+-			default: begin end
+-		endcase
++        // Four ordered slots; preserve the one-queued-write read bypass rule.
++        case ({push,pop})
++          2'b10: begin
++            case(count)
++              3'd0: begin
++                    q0_instr <= s_instr;
++                    q0_size <= s_size;
++                    q0_addr <= s_addr;
++                    q0_wdata <= s_wdata;
++                    q0_fc <= s_fc;
++              end
++              3'd1: begin
++                    q1_instr <= s_instr;
++                    q1_size <= s_size;
++                    q1_addr <= s_addr;
++                    q1_wdata <= s_wdata;
++                    q1_fc <= s_fc;
++              end
++              3'd2: begin
++                    q2_instr <= s_instr;
++                    q2_size <= s_size;
++                    q2_addr <= s_addr;
++                    q2_wdata <= s_wdata;
++                    q2_fc <= s_fc;
++              end
++              3'd3: begin
++                    q3_instr <= s_instr;
++                    q3_size <= s_size;
++                    q3_addr <= s_addr;
++                    q3_wdata <= s_wdata;
++                    q3_fc <= s_fc;
++              end
++            endcase
++            count <= count + 3'd1;
++          end
++          2'b01: begin
++                    q0_instr <= q1_instr;
++                    q0_size <= q1_size;
++                    q0_addr <= q1_addr;
++                    q0_wdata <= q1_wdata;
++                    q0_fc <= q1_fc;
++                    q1_instr <= q2_instr;
++                    q1_size <= q2_size;
++                    q1_addr <= q2_addr;
++                    q1_wdata <= q2_wdata;
++                    q1_fc <= q2_fc;
++                    q2_instr <= q3_instr;
++                    q2_size <= q3_size;
++                    q2_addr <= q3_addr;
++                    q2_wdata <= q3_wdata;
++                    q2_fc <= q3_fc;
++            count <= count - 3'd1;
++          end
++          2'b11: begin
++            case(count)
++              3'd1: begin
++                    q0_instr <= s_instr;
++                    q0_size <= s_size;
++                    q0_addr <= s_addr;
++                    q0_wdata <= s_wdata;
++                    q0_fc <= s_fc;
++              end
++              3'd2: begin
++                    q0_instr <= q1_instr;
++                    q0_size <= q1_size;
++                    q0_addr <= q1_addr;
++                    q0_wdata <= q1_wdata;
++                    q0_fc <= q1_fc;
++                    q1_instr <= s_instr;
++                    q1_size <= s_size;
++                    q1_addr <= s_addr;
++                    q1_wdata <= s_wdata;
++                    q1_fc <= s_fc;
++              end
++              3'd3: begin
++                    q0_instr <= q1_instr;
++                    q0_size <= q1_size;
++                    q0_addr <= q1_addr;
++                    q0_wdata <= q1_wdata;
++                    q0_fc <= q1_fc;
++                    q1_instr <= q2_instr;
++                    q1_size <= q2_size;
++                    q1_addr <= q2_addr;
++                    q1_wdata <= q2_wdata;
++                    q1_fc <= q2_fc;
++                    q2_instr <= s_instr;
++                    q2_size <= s_size;
++                    q2_addr <= s_addr;
++                    q2_wdata <= s_wdata;
++                    q2_fc <= s_fc;
++              end
++              3'd4: begin
++                    q0_instr <= q1_instr;
++                    q0_size <= q1_size;
++                    q0_addr <= q1_addr;
++                    q0_wdata <= q1_wdata;
++                    q0_fc <= q1_fc;
++                    q1_instr <= q2_instr;
++                    q1_size <= q2_size;
++                    q1_addr <= q2_addr;
++                    q1_wdata <= q2_wdata;
++                    q1_fc <= q2_fc;
++                    q2_instr <= q3_instr;
++                    q2_size <= q3_size;
++                    q2_addr <= q3_addr;
++                    q2_wdata <= q3_wdata;
++                    q2_fc <= q3_fc;
++                    q3_instr <= s_instr;
++                    q3_size <= s_size;
++                    q3_addr <= s_addr;
++                    q3_wdata <= s_wdata;
++                    q3_fc <= s_fc;
++              end
++            endcase
++          end
++          default: begin end
++        endcase
+ 
+ 		// a passing read eligible in the same cycle wins over the drain of
+ 		// the one queued write (the CPU waits on the read, not the write);

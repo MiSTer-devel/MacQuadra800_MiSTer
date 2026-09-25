@@ -1,0 +1,15 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -1284,8 +1284,11 @@
+ function [31:0] rotl32;
+ 	input [31:0] v;
+ 	input [4:0] n;
++	reg [63:0] rotated;
+ 	begin
+-		rotl32 = (n == 0) ? v : ((v << n) | (v >> (6'd32 - {1'b0, n})));
++		// Repeated input makes wraparound part of one barrel selection.
++		rotated = {v, v} << n;
++		rotl32 = rotated[63:32];
+ 	end
+ endfunction
+ 

@@ -1,0 +1,33 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -3105,22 +3105,25 @@
+         // installing it, so S_PIPE_START receives settled RF read addresses
+         // without an intervening S_DECODE cycle. No access issues here:
+         // S_PIPE_START retains memory arbitration, An undo and fault handling.
+-        // MOVEA and extension/indexed modes outside d16(An) stay on decode.
++        // Include MOVEA.W/L with full-width, flag-preserving retirement.
++        // Extension/indexed modes outside d16(An) stay on decode.
+         if (fw[15:14] == 2'b00 && fw[13:12] != 2'b00 &&
+-            fw[8:6] == 3'b000 &&
++            fw[8:7] == 2'b00 && !(fw[6] && fw[13:12] == 2'b01) &&
+             (fw[5:3] == 3'b010 || fw[5:3] == 3'b011 ||
+              fw[5:3] == 3'b100 || fw[5:3] == 3'b101)) begin
+             alu_op <= `AP040_ALU_MOVE;
+-            op_size <= fw[13:12] == 2'b01 ? `AP040_SZ_B :
++            op_size <= fw[6] ? `AP040_SZ_L : fw[13:12] == 2'b01 ? `AP040_SZ_B :
+                        fw[13:12] == 2'b10 ? `AP040_SZ_L : `AP040_SZ_W;
+             p_ssize <= fw[13:12] == 2'b01 ? `AP040_SZ_B :
+                        fw[13:12] == 2'b10 ? `AP040_SZ_L : `AP040_SZ_W;
+             p_dsize <= fw[13:12] == 2'b01 ? `AP040_SZ_B :
+                        fw[13:12] == 2'b10 ? `AP040_SZ_L : `AP040_SZ_W;
+             p_src <= SK_MEM; p_dst <= DK_REG;
+-            p_dreg <= {1'b0, fw[11:9]};
++            p_dreg <= {fw[6], fw[11:9]};
++            p_flags <= !fw[6];
++            p_sextw <= fw[6] && fw[13:12] == 2'b11;
+             src_mode_r <= fw[5:3]; src_rn_r <= fw[2:0];
+-            rr_a <= {1'b1, fw[2:0]}; rr_b <= {1'b0, fw[11:9]};
++            rr_a <= {1'b1, fw[2:0]}; rr_b <= {fw[6], fw[11:9]};
+             state <= S_PIPE_START;
+         end
+ `endif

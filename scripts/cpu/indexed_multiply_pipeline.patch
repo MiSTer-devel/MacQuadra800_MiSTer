@@ -1,0 +1,54 @@
+--- a/rtl/ap68040/experimental/ap040_pipeline_integer.sv
++++ b/rtl/ap68040/experimental/ap040_pipeline_integer.sv
+@@ -129,8 +129,11 @@
+     function automatic is_indextst(input [15:0] word);
+         is_indextst = ENABLE_COMPARE && (word & 16'hff38) == 16'h4a30 && word[7:6] != 3;
+     endfunction
++    function automatic is_indexmul(input [15:0] word);
++        is_indexmul = ENABLE_COMPARE && (word & 16'hf0f8) == 16'hc0f0;
++    endfunction
+     function automatic is_indexread(input [15:0] word);
+-        is_indexread = is_indexload(word) || is_indexcmp(word) || is_indextst(word);
++        is_indexread = is_indexload(word) || is_indexcmp(word) || is_indextst(word) || is_indexmul(word);
+     endfunction
+     function automatic is_indirecttst(input [15:0] word);
+         is_indirecttst = ENABLE_COMPARE && (word & 16'hff38) == 16'h4a10 && word[7:6] != 3;
+@@ -172,6 +175,9 @@
+             literal = {{24{word[7]}}, word[7:0]};
+             if (is_short_branch(word)) begin
+                 legal = 1; writeback = 0; flags = 0;
++            end else if (is_indexmul(word)) begin
++                legal = 1; writeback = 1; flags = 1; size = `AP040_SZ_W;
++                source = {1'b1, word[2:0]}; destination = {1'b0, word[11:9]};
+             end else if (is_indexcmp(word) || is_indextst(word) || is_indirecttst(word)) begin
+                 legal = 1; writeback = 0; flags = 1; size = word[7:6];
+                 source = {1'b1, word[2:0]}; destination = {1'b0, word[11:9]};
+@@ -286,7 +292,7 @@
+     assign idle = !id_v && !ex_v && !wb_v && !load_pending;
+     assign in_ready = nreset && ce && !flush && !kill_younger && !load_discard && (!id_v || id_advance);
+     wire fast_read_retire = ENABLE_FAST_READ_RETIRE && nreset && ce && !flush &&
+-        !wb_v && ex_v && ex_load && !ex_store && load_response && !load_fault && retire_ready;
++        !wb_v && ex_v && ex_load && !ex_store && !is_indexmul(ex_opcode) && load_response && !load_fault && retire_ready;
+     assign retire_wb_valid = nreset && ce && !flush && wb_v;
+     assign retire_branch_taken = retire_wb_valid && wb_opcode[15:12] == 6 && wb_next_pc != wb_pc + 32'd2;
+     assign retire_valid = nreset && ce && !flush && (wb_v || fast_read_retire);
+@@ -357,10 +363,17 @@
+     wire zero_shift = ENABLE_SHIFTS && ex_opcode[15:12] == 4'he && source_full[5:0] == 0;
+     wire [31:0] shift_masked = ex_size == `AP040_SZ_B ? {24'd0, dst[7:0]} :
+                               ex_size == `AP040_SZ_W ? {16'd0, dst[15:0]} : dst;
+-    wire [4:0] result_flags = zero_shift ? {flags_in[4],
++    // A word product writes all 32 destination bits. Keep registered WB;
++    // never put multiply onto the fast load-retirement path.
++    wire signed [16:0] mul_a = {ex_opcode[8] && src[15], src[15:0]};
++    wire signed [16:0] mul_b = {ex_opcode[8] && old_dst[15], old_dst[15:0]};
++    wire signed [33:0] mul_product = mul_a * mul_b;
++    wire [31:0] mul_result = mul_product[31:0];
++    wire [4:0] result_flags = is_indexmul(ex_opcode) ?
++        {flags_in[4],mul_result[31],mul_result==0,2'b00} : zero_shift ? {flags_in[4],
+         ex_size == `AP040_SZ_B ? dst[7] : ex_size == `AP040_SZ_W ? dst[15] : dst[31],
+         shift_masked == 0, 1'b0, ex_opcode[4:3] == 2 ? flags_in[4] : 1'b0} : alu_flags;
+-    wire [31:0] merged = is_disp_lea(ex_opcode) ? source_full + {{16{ex_extension[15]}},ex_extension} : zero_shift ? dst : ex_size == `AP040_SZ_B ? {merge_dst[31:8], alu_result[7:0]} :
++    wire [31:0] merged = is_indexmul(ex_opcode) ? mul_result : is_disp_lea(ex_opcode) ? source_full + {{16{ex_extension[15]}},ex_extension} : zero_shift ? dst : ex_size == `AP040_SZ_B ? {merge_dst[31:8], alu_result[7:0]} :
+                          ex_size == `AP040_SZ_W ? {merge_dst[31:16], alu_result[15:0]} : alu_result;
+     wire [31:0] pea_index = ex_extension[11] ? dst : {{16{dst[15]}}, dst[15:0]};
+     wire [31:0] pea_value = source_full + (pea_index << ex_extension[10:9]) +

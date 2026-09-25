@@ -1,0 +1,46 @@
+--- rtl/ap68040/rtl/ap040_cache.v
++++ rtl/ap68040/rtl/ap040_cache.v
+@@ -737,7 +737,6 @@
+ wire hh2 = v_w2 && (t_w2 == c_hint_ptag[21:22-TAGW]);
+ wire hh3 = v_w3 && (t_w3 == c_hint_ptag[21:22-TAGW]);
+ wire       hint_look_hit = hh0 | hh1 | hh2 | hh3;
+-wire [1:0] hint_way = hh0 ? 2'd0 : hh1 ? 2'd1 : hh2 ? 2'd2 : 2'd3;
+ // The fast hit's own view of the request: the hint bus repeats the
+ // registered request address while it is presented, so the offset bits
+ // come from there and not from the translated address (whose low bits
+@@ -751,7 +750,6 @@
+ // 33 MHz clock by 3.8 ns, 2026-09-17).
+ reg  [SETW+3:0] hq_lo;
+ always @(posedge clk) hq_lo <= c_hint_addr[SETW+3:0];
+-wire  [1:0] fq_arr   = hint_way + hq_lo[3:2];
+ wire        fast_lane = (c_size == `AP040_SZ_L && hq_lo[1:0] == 2'b00) ||
+                         (c_size == `AP040_SZ_W && hq_lo[1:0] != 2'b11) ||
+                         (c_size == `AP040_SZ_B);
+@@ -762,9 +760,24 @@
+ // it is the registered hint, it translated, it is cacheable and readable".
+ wire        fast_accept = (cst == C_IDLE) && !(cinv_req && !cinv_done) && !ack_r &&
+                           !c_write && !c_instr && de && !ci_inv_pend && !store_inv_lost;
+-wire [31:0] hint_data_hit = (fq_arr == 2'd0) ? data_q0 :
+-                            (fq_arr == 2'd1) ? data_q1 :
+-                            (fq_arr == 2'd2) ? data_q2 : data_q3;
++// Rotate words using the registered offset before the late tag selection.
++// Preserve the original way priority, including the no-hit default.
++wire [31:0] hint_word0 = (hq_lo[3:2] == 0) ? data_q0 :
++    (hq_lo[3:2] == 1) ? data_q1 :
++    (hq_lo[3:2] == 2) ? data_q2 : data_q3;
++wire [31:0] hint_word1 = (hq_lo[3:2] == 0) ? data_q1 :
++    (hq_lo[3:2] == 1) ? data_q2 :
++    (hq_lo[3:2] == 2) ? data_q3 : data_q0;
++wire [31:0] hint_word2 = (hq_lo[3:2] == 0) ? data_q2 :
++    (hq_lo[3:2] == 1) ? data_q3 :
++    (hq_lo[3:2] == 2) ? data_q0 : data_q1;
++wire [31:0] hint_word3 = (hq_lo[3:2] == 0) ? data_q3 :
++    (hq_lo[3:2] == 1) ? data_q0 :
++    (hq_lo[3:2] == 2) ? data_q1 : data_q2;
++wire [31:0] hint_data_hit = (hint_word0 & {32{hh0}}) |
++    (hint_word1 & {32{!hh0 && hh1}}) |
++    (hint_word2 & {32{!hh0 && !hh1 && hh2}}) |
++    (hint_word3 & {32{!hh0 && !hh1 && !hh2}});
+ // idle_hit without look_hit (the live translation's tag compare)
+ assign fast_hit  = fast_accept && !err_hold && !m_err && fast_lane &&
+                    idle_data_valid && idle_tag_valid &&

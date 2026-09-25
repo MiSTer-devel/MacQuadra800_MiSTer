@@ -1,0 +1,60 @@
+--- a/rtl/ap68040/rtl/ap040_cache.v
++++ b/rtl/ap68040/rtl/ap040_cache.v
+@@ -606,7 +606,7 @@
+ assign c_line_tag  = iline_tag;
+ assign c_line_data = iline_data;
+ assign c_rdata = pass_active ? m_rdata :
+-    (fast_pair_idle || pair_look_select) ? pair_read_data :
++    fast_pair_idle ? hint_pair_data : pair_look_select ? pair_read_data :
+     span_data_select ? span_extract({sp_w0, sp_w1}, r_size, r_off) :
+     data_look_select ? lw_extract(data_hit, r_size, r_off) :
+     fast_ifetch_idle ? lw_extract(data_hit, c_size, c_addr[1:0]) :
+@@ -931,7 +931,38 @@
+     pair_array == 2 ? pair_q2 : pair_q3;
+ wire pair_look_select = (cst == C_LOOK) && !r_bank && r_span2 &&
+     !r_xline && !look2 && !xlook;
+-wire fast_pair_idle = idle_span_hit && !c_instr;
++// Match the established data-hint fast path: avoid the live MMU physical
++// address/tag mux on the request-to-data critical path.
++wire hint_pair_lane = hq_lo[3:2] != 3 &&
++    ((c_size == `AP040_SZ_L && hq_lo[1:0] != 0) ||
++     (c_size == `AP040_SZ_W && hq_lo[1:0] == 3));
++wire fast_pair_idle = fast_accept && !err_hold && !m_err && hint_pair_lane &&
++                   idle_data_valid && hint_tag_valid &&
++                   (idle_data_idx == {1'b0, hq_lo[SETW+3:2]}) &&
++                   (hint_tag_idx == {1'b0, hq_lo[SETW+3:4]}) && hint_look_hit &&
++                   // !snoop_wr, not !inv_wren: with cst == C_IDLE, !c_write,
++                   // !ci_inv_pend and !store_inv_lost already required, every
++                   // other term of inv_wren is zero, and inv_wren's store term
++                   // carries c_req -- the live translation (ATC RAM -> hit ->
++                   // walk decision), which put 8 ns in front of the fast
++                   // acknowledge and its data (build 5, -1.04 ns, 2026-09-17).
++                   // the snoop-row collision compares against the registered
++                   // hint's set as well: snoop_look_row uses a_set from c_addr,
++                   // whose low bits reach the cache through the MMU's
++                   // physical-address mux, i.e. another false dependency on
++                   // the live translation for the analyzer
++                   !tag_we && !snoop_wr && !look_snooped &&
++                   !(s_stb && (s_addr[SETW+3:4] == hq_lo[SETW+3:4])) &&
++                   !c_instr && c_hint_match;
++wire [31:0] hint_pair_word0 = hq_lo[3:2] == 0 ? pair_q1 : hq_lo[3:2] == 1 ? pair_q2 : hq_lo[3:2] == 2 ? pair_q3 : pair_q0;
++wire [31:0] hint_pair_word1 = hq_lo[3:2] == 0 ? pair_q2 : hq_lo[3:2] == 1 ? pair_q3 : hq_lo[3:2] == 2 ? pair_q0 : pair_q1;
++wire [31:0] hint_pair_word2 = hq_lo[3:2] == 0 ? pair_q3 : hq_lo[3:2] == 1 ? pair_q0 : hq_lo[3:2] == 2 ? pair_q1 : pair_q2;
++wire [31:0] hint_pair_word3 = hq_lo[3:2] == 0 ? pair_q0 : hq_lo[3:2] == 1 ? pair_q1 : hq_lo[3:2] == 2 ? pair_q2 : pair_q3;
++wire [31:0] hint_pair_next = (hint_pair_word0 & {32{hh0}}) |
++    (hint_pair_word1 & {32{!hh0 && hh1}}) |
++    (hint_pair_word2 & {32{!hh0 && !hh1 && hh2}}) |
++    (hint_pair_word3 & {32{!hh0 && !hh1 && !hh2}});
++wire [31:0] hint_pair_data = span_extract({hint_data_hit, hint_pair_next}, c_size, hq_lo[1:0]);
+ wire fast_pair_look = pair_look_select && c_req && !c_write && !c_instr &&
+     look_hit && !look_snooped && !snoop_look_row && !err_hold && !m_err;
+ wire [31:0] pair_read_data = span_extract({data_hit, pair_next},
+@@ -1066,7 +1097,7 @@
+ 				end
+                 else if (fast_pair_idle) begin
+                     // Completed in the request cycle: no registered second ack.
+-                    rdata_r <= pair_read_data;
++                    rdata_r <= hint_pair_data;
+                 end
+ 				else if (idle_hit || fast_hit) begin
+ 					// Identical registered response to C_LOOK, using the prior

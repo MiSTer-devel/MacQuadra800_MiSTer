@@ -1,0 +1,26 @@
+--- a/rtl/ap68040/experimental/ap040_pipeline_integer.sv
++++ b/rtl/ap68040/experimental/ap040_pipeline_integer.sv
+@@ -138,8 +138,11 @@
+     function automatic is_indirecttst(input [15:0] word);
+         is_indirecttst = ENABLE_COMPARE && (word & 16'hff38) == 16'h4a10 && word[7:6] != 3;
+     endfunction
++    function automatic is_indirectadd(input [15:0] word);
++        is_indirectadd = ENABLE_COMPARE && (word & 16'hf138) == 16'hd010 && word[7:6] != 3;
++    endfunction
+     function automatic is_load(input [15:0] word);
+-        is_load = is_indirecttst(word) || is_indexread(word) || ENABLE_LOADS && word[15:14] == 0 && word[13:12] != 0 &&
++        is_load = is_indirectadd(word) || is_indirecttst(word) || is_indexread(word) || ENABLE_LOADS && word[15:14] == 0 && word[13:12] != 0 &&
+                   word[8:6] == 0 && word[5:3] == 3'b010;
+     endfunction
+     function automatic is_store(input [15:0] word);
+@@ -175,6 +178,10 @@
+             literal = {{24{word[7]}}, word[7:0]};
+             if (is_short_branch(word)) begin
+                 legal = 1; writeback = 0; flags = 0;
++            end else if (is_indirectadd(word)) begin
++                legal = 1; writeback = 1; flags = 1; size = word[7:6];
++                source = {1'b1, word[2:0]}; destination = {1'b0, word[11:9]};
++                operation = `AP040_ALU_ADD;
+             end else if (is_indexmul(word)) begin
+                 legal = 1; writeback = 1; flags = 1; size = `AP040_SZ_W;
+                 source = {1'b1, word[2:0]}; destination = {1'b0, word[11:9]};

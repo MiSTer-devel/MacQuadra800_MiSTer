@@ -1,0 +1,18 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -3005,7 +3005,14 @@
+ // True while an effective address is being computed, i.e. while a data
+ // access is known to be coming.  Keeps speculative instruction fetches
+ // off the shared memory port just ahead of it.
+-wire ea_state = (state == S_EA_DISP)  || (state == S_EA_BASE) ||
++// A decoded simple-source MOVE reaches operand issue next cycle. With two
++// words already queued, keep this slot free instead of launching a speculative
++// fill immediately ahead of that read. Demand instruction fetch is unchanged.
++wire decode_move_read_slot = state == S_DECODE && epf_count >= 4'd2 &&
++    ir[15:14] == 2'b00 && ir[13:12] != 2'b00 &&
++    (ir[5:3] == 3'b010 || ir[5:3] == 3'b011 || ir[5:3] == 3'b100);
++wire ea_state = decode_move_read_slot ||
++                (state == S_EA_DISP)  || (state == S_EA_BASE) ||
+                 (state == S_EA_D16)   || (state == S_EA_EXTW) ||
+                 // Brief MOVE destination calculation has time to overlap a
+                 // fetch before its store; delaying it stalls the next operand.

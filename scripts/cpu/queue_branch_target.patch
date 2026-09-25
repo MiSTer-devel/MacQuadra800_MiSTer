@@ -1,0 +1,49 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -2386,7 +2386,13 @@
+ // lookahead at an older ALU retirement. It reads opcode bits only; operands
+ // and CCR remain owned by the existing execution pipeline. Fetches initiated
+ // in S_DECODE must use the ordinary path because this decoder still sees ir.
+-wire [15:0] rd_ir = (state == S_DECODE) ? ir : epf_data[epf_head];
++wire [15:0] rd_head_ir = epf_data[epf_head];
++wire [15:0] rd_ir = (state == S_DECODE) ? ir : rd_head_ir;
++// Early redirect's fallback is used only outside S_DECODE. Keep its
++// opcode decode and displacement arithmetic independent of the state mux.
++wire rd_head_is_bcc = (rd_head_ir[15:12] == 4'h6) && (rd_head_ir[11:8] != 4'h1) &&
++                      (rd_head_ir[7:0] != 8'h00) && (rd_head_ir[7:0] != 8'hFF);
++wire [31:0] rd_head_bcc_t = pc + 32'd2 + sxb(rd_head_ir[7:0]);
+ wire [2:0] rd_mode = rd_ir[5:3];
+ wire [1:0] rd_sz = rd_ir[7:6];
+ reg rd_valid, rd_quick, rd_flags, rd_wbsup, rd_sextw;
+@@ -2454,7 +2460,7 @@
+ 	// has ONE target and the carriers only enable it (build 7: a second
+ 	// issue_ifetch target let the lookahead's flags select the target,
+ 	// -1.575 ns).  The select is the registered head opcode.
+-	                                           (rd_is_bcc ? rd_bcc_t : bd_t);
++	                                           (rd_head_is_bcc ? rd_head_bcc_t : bd_t);
+ // decode_dbcc_brf's callers: S_DBCC1 and S_BCC_EXT (their own target when
+ // the branch is taken, the lookahead's when it retires instead), the
+ // decode-time Bcc.B, and the lookahead arm in any other state.
+@@ -2712,13 +2718,15 @@
+ // state raise its address error as before; a fault on the early fetch is
+ // recorded by the fill engine like any speculative fill's and re-raised
+ // on demand.  (2026-09-18)
+-wire        bd_bra    = (rd_ir[15:12] == 4'h6) && (rd_ir[11:9] == 3'b000) &&
+-                        ((rd_ir[7:0] == 8'h00) || (rd_ir[7:0] == 8'hFF));
+-wire        bd_jsrjmp = (rd_ir[15:8] == 8'h4E) && rd_ir[7] &&
+-                        (rd_ir[5:3] == 3'b111) && (rd_ir[2:0] <= 3'd2);
+-wire        bd_jmp    = bd_jsrjmp && rd_ir[6];
+-wire        bd_long   = bd_bra ? (rd_ir[7:0] == 8'hFF) : (rd_ir[2:0] == 3'd1);
+-wire        bd_abs    = bd_jsrjmp && !rd_ir[1];
++// bd_ok excludes S_DECODE, where rd_ir instead describes the current
++// instruction. Derive lookahead targets solely from registered queue data.
++wire        bd_bra    = (rd_head_ir[15:12] == 4'h6) && (rd_head_ir[11:9] == 3'b000) &&
++                        ((rd_head_ir[7:0] == 8'h00) || (rd_head_ir[7:0] == 8'hFF));
++wire        bd_jsrjmp = (rd_head_ir[15:8] == 8'h4E) && rd_head_ir[7] &&
++                        (rd_head_ir[5:3] == 3'b111) && (rd_head_ir[2:0] <= 3'd2);
++wire        bd_jmp    = bd_jsrjmp && rd_head_ir[6];
++wire        bd_long   = bd_bra ? (rd_head_ir[7:0] == 8'hFF) : (rd_head_ir[2:0] == 3'd1);
++wire        bd_abs    = bd_jsrjmp && !rd_head_ir[1];
+ wire  [1:0] bd_n      = bd_long ? 2'd2 : 2'd1;
+ wire [31:0] bd_immv   = bd_long ? {rd_w1, rd_w2} : {16'd0, rd_w1};
+ wire [31:0] bd_disp   = bd_long ? {rd_w1, rd_w2} : sxw(rd_w1);

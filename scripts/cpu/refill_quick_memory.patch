@@ -1,0 +1,25 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -3127,6 +3127,22 @@
+             state <= S_PIPE_START;
+         end
+ `endif
++        // A resident memory ADDQ/SUBQ target can likewise install its
++        // operand descriptor while seeding the refill queue. All memory
++        // reads, updates, flags and fault retirement stay on the existing path.
++        if (fw[15:12] == 4'h5 && fw[7:6] != 2'b11 &&
++            (fw[5:3] == 3'b010 || fw[5:3] == 3'b011 ||
++             fw[5:3] == 3'b100 || fw[5:3] == 3'b101)) begin
++            alu_op <= fw[8] ? `AP040_ALU_SUB : `AP040_ALU_ADD;
++            op_size <= fw[7:6]; p_dsize <= fw[7:6];
++            p_src <= SK_IMPL;
++            src_val <= {28'd0, (fw[11:9] == 3'd0) ? 4'd8 : {1'b0, fw[11:9]}};
++            p_dst <= DK_MEM; p_rmw <= 1;
++            dst_mode_r <= fw[5:3]; dst_rn_r <= fw[2:0];
++            rr_a <= {1'b1, fw[2:0]};
++            state <= S_PIPE_START;
++        end
++
+ 	end
+ endtask
+ 

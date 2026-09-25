@@ -1,0 +1,57 @@
+--- rtl/ap68040/rtl/ap040_cache.v
++++ rtl/ap68040/rtl/ap040_cache.v
+@@ -562,8 +562,10 @@
+ // fetches keep the registered acknowledge (their consumer is the fetch
+ // queue's ring write, the tightest path in the core).
+ wire fast_hit;
++wire fast_iline_hit;
++wire [31:0] fast_iline_data;
+ wire [31:0] fast_data;
+-assign c_ack   = (pass_active && !post_active) ? m_ack : (ack_r | fast_hit | fast_store);
++assign c_ack   = (pass_active && !post_active) ? m_ack : (ack_r | fast_hit | fast_store | fast_iline_hit);
+ // The offer is a level, not a pulse: the core refuses a line while a
+ // queue fetch is outstanding or a data access acknowledges in the same
+ // cycle, and a pulse lost to that refusal cost explicit fetches for the
+@@ -578,7 +580,7 @@
+ assign m_posted    = post_active && (!r_span2 || sline_ready);
+ assign c_line_tag  = iline_tag;
+ assign c_line_data = iline_data;
+-assign c_rdata = pass_active ? m_rdata : (fast_hit ? fast_data : rdata_r);
++assign c_rdata = pass_active ? m_rdata : fast_iline_hit ? fast_iline_data : (fast_hit ? fast_data : rdata_r);
+ 
+ assign rd_accept = (cst == C_IDLE) && !(cinv_req && !cinv_done) &&
+                    c_req && !ack_r && !c_write && !bypass &&
+@@ -751,6 +753,18 @@
+ // 33 MHz clock by 3.8 ns, 2026-09-17).
+ reg  [SETW+3:0] hq_lo;
+ always @(posedge clk) hq_lo <= c_hint_addr[SETW+3:0];
++// A retained instruction line can answer the registered MMU hint without
++// repeating its tag-RAM lookup. The hint vouches for current permissions
++// and cacheability; the physical line and word select are registered inputs.
++assign fast_iline_hit = nreset && cst == C_IDLE && !ack_r &&
++    !(cinv_req && !cinv_done) && !ci_inv_pend && !err_hold && !m_err &&
++    !c_write && c_instr && ie && iline_valid && !iline_pending &&
++    c_size == `AP040_SZ_L && hq_lo[1:0] == 0 && c_hint_match &&
++    iline_tag == {c_hint_ptag, hq_lo[9:4]};
++assign fast_iline_data = hq_lo[3:2] == 0 ? iline_data[127:96] :
++                        hq_lo[3:2] == 1 ? iline_data[95:64] :
++                        hq_lo[3:2] == 2 ? iline_data[63:32] : iline_data[31:0];
++
+ wire  [1:0] fq_arr   = hint_way + hq_lo[3:2];
+ wire        fast_lane = (c_size == `AP040_SZ_L && hq_lo[1:0] == 2'b00) ||
+                         (c_size == `AP040_SZ_W && hq_lo[1:0] != 2'b11) ||
+@@ -954,12 +968,12 @@
+ 					sweep_all <= 0;   // honour the cinv_ic/cinv_dc selects
+ 					cst <= C_SWEEP;
+ 				end
+-				else if (iline_hit) begin
++				else if (iline_hit || fast_iline_hit) begin
+ 					// Registered completion just like C_LOOK, from the
+ 					// buffered line; the buffer stays valid for the rest of
+ 					// the line (a loop inside one line keeps hitting here).
+ 					rdata_r <= lw_extract(iline_lw, c_size, c_addr[1:0]);
+-					ack_r <= 1;
++					if (!fast_iline_hit) ack_r <= 1;
+ 					iline_stb_pend <= 1;
+ 				end
+ 				else if (idle_hit || fast_hit) begin

@@ -1,0 +1,30 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -5396,6 +5396,16 @@
+                         fpu_req <= 1;
+                         state <= S_FPU_GO;
+                     end
++                    // Capture a successful FMOVEM read beat at acknowledgement.
++                    // The register commit remains in S_FPU_MVM2 after all words.
++                    else if (r_m_ret == S_FPU_MVM3 && !fp_st) begin
++                        case (fp_n)
++                            4'd1: fpb[95:64] <= mem_rdata;
++                            4'd2: fpb[63:32] <= mem_rdata;
++                            default: fpb[31:0] <= mem_rdata;
++                        endcase
++                        state <= S_FPU_MVM2;
++                    end
+ 					else if (r_m_ret == S_UNLK3) begin
+ 						rfw({1'b1, d_rn}, mem_rdata);
+ 						fetch_next;
+@@ -5461,7 +5471,9 @@
+                     if (pipe_load_direct) state <= S_EXPERIMENT_PIPE;
+                     else
+ `endif
+-                    if (r_m_ret == S_NEXT) fetch_next;
++                    // Successful ordinary FMOVEM stores need no MVM3 copy step.
++                    if (r_m_ret == S_FPU_MVM3 && fp_st) state <= S_FPU_MVM2;
++                    else if (r_m_ret == S_NEXT) fetch_next;
+ 					// LINK and PEA: A7 lands with the push's acknowledge and
+ 					// the instruction retires, as S_LINK4/S_PEA2 would a cycle
+ 					// later (both stay for the byte-split path).  (2026-09-17)

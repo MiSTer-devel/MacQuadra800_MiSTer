@@ -1,0 +1,44 @@
+--- rtl/ap68040/rtl/ap040_core.v
++++ rtl/ap68040/rtl/ap040_core.v
+@@ -2012,7 +2012,7 @@
+ 		if (((!mgo_wr && (state == S_PIPE_START || state == S_PIPE_SRD ||
+ 		                  state == S_PIPE_DEA || state == S_DECODE ||
+ 		                  state == S_RET1 || state == S_UNLK1 ||
+-		                  state == S_MOVEM_LOOP || hint_early_read || pipe_load_launch)) ||
++		                  state == S_MOVEM_LOOP || hint_early_read || hint_fpu_read || pipe_load_launch)) ||
+ 		     (mgo_wr && (state == S_EXEC || state == S_PIPE_DEA || state == S_MOVEM_LOOP ||
+ 		                 // the pushes: BSR.B from decode, BSR.W, JSR, PEA,
+ 		                 // LINK -- registered data (pc, ea_addr, port A
+@@ -3361,6 +3361,15 @@
+     (p_dst == DK_REG || (p_dst == DK_MEM && exec_kind == EK_ALU &&
+                         alu_op == `AP040_ALU_MOVE && !p_rmw));
+ wire hint_early_read = hint_indexed_read || hint_displacement_read;
++// Isolated experiment: hint exactly the next ordinary FPU operand read.
++wire hint_fpu_operand = state == S_FPU_RD &&
++    !((fp_nb <= 4'd4 && fp_n != 0) ||
++      (fp_nb == 4'd8 && fp_n == 2) || (fp_nb == 4'd12 && fp_n == 3));
++wire hint_fpu_movem = state == S_FPU_MVM2 && !fp_st && fp_n != 3;
++wire hint_fpu_read = hint_fpu_operand || hint_fpu_movem;
++wire [31:0] hint_fpu_addr = t_a +
++    ((hint_fpu_operand && fp_nb <= 2) ? 32'd0 : {26'd0,fp_n,2'b00});
++
+ wire [31:0] hint_displacement_addr = (ea_pcmode ? ea_pcb : rf_rdata_a) + sxw(imm[15:0]);
+ wire [31:0] hint_indexed_offset = (extw[11] ? rf_rdata_b : sxw(rf_rdata_b[15:0])) << extw[10:9];
+ wire [31:0] hint_indexed_addr = ea_base_v + hint_indexed_offset + sxb(extw[7:0]);
+@@ -3432,6 +3441,7 @@
+                         hint_pipe  ? hint_pipe_addr :
+                         hint_displacement_read ? hint_displacement_addr :
+                         hint_indexed_read ? hint_indexed_addr :
++                        hint_fpu_read ? hint_fpu_addr :
+                         hint_ea    ? ea_addr :
+                         hint_pop   ? hint_pop_addr :
+                         hint_redir ? hint_redir_addr :
+@@ -3447,7 +3457,7 @@
+ assign mem_addr  = mem_addr_q;
+ assign mem_instr = mem_instr_q;
+ assign mem_hint_addr  = mem_req ? mem_addr_q  : hint_addr;
+-assign mem_hint_instr = mem_req ? mem_instr_q : !(hint_data || hint_store || hint_pipe || hint_ea || hint_early_read || hint_pop || hint_p2);
++assign mem_hint_instr = mem_req ? mem_instr_q : !(hint_data || hint_store || hint_pipe || hint_ea || hint_early_read || hint_fpu_read || hint_pop || hint_p2);
+ 
+ //---------------------------------------------------------------------------
+ // main state machine

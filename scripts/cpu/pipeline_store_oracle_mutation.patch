@@ -1,0 +1,30 @@
+--- a/scripts/cpu/pipeline_store_oracle.py
++++ b/scripts/cpu/pipeline_store_oracle.py
+@@ -62,9 +62,12 @@
+ 
+ # A wrong address-register update must fail the independent retirement oracle.
+ poison=d/'bad_update.sv'
+-poison.write_text((exp/'ap040_pipeline_integer.sv').read_text().replace(
+-    'wb_data <= ex_store ? store_update : merged;',
+-    "wb_data <= ex_store ? (store_update ^ 32'd1) : merged;"))
++store_src=(exp/'ap040_pipeline_integer.sv').read_text()
++store_old='wb_data <= ex_store ? store_update : (ex_load && ex_dst[3]) ?'
++store_new="wb_data <= ex_store ? (store_update ^ 32'd1) : (ex_load && ex_dst[3]) ?"
++if store_src.count(store_old) != 1:
++ raise SystemExit(f'bad An-update mutation expected one target, found {store_src.count(store_old)}')
++poison.write_text(store_src.replace(store_old,store_new,1))
+ with (d/'negative_compile.log').open('w') as f:
+  subprocess.run(['iverilog','-g2012','-I',str(rtl),'-s','tb_pipeline_stores','-o',str(d/'negative.vvp'),
+                  str(exp/'tb_pipeline_stores.sv'),str(poison),str(rtl/'ap040_regfile.v'),str(rtl/'ap040_alu.v')],stdout=f,stderr=subprocess.STDOUT,check=True)
+@@ -85,8 +88,9 @@
+ poison=d/'bad_cancel.sv'
+ src=(exp/'ap040_pipeline_integer.sv').read_text()
+ old='nreset && ce && !flush && !kill_younger &&\n        ex_v && ex_load'
+-assert old in src
+-poison.write_text(src.replace(old,'nreset && ce && !flush &&\n        ex_v && ex_load'))
++if src.count(old) != 1:
++ raise SystemExit(f'cancel-offer mutation expected one target, found {src.count(old)}')
++poison.write_text(src.replace(old,'nreset && ce && !flush &&\n        ex_v && ex_load',1))
+ with (d/'cancel_negative_compile.log').open('w') as f:
+  subprocess.run(['iverilog','-g2012','-I',str(rtl),'-s','tb_pipeline_store_cancel','-o',str(d/'cancel_negative.vvp'),
+                  str(exp/'tb_pipeline_store_cancel.sv'),str(poison),str(rtl/'ap040_regfile.v'),str(rtl/'ap040_alu.v')],stdout=f,stderr=subprocess.STDOUT,check=True)

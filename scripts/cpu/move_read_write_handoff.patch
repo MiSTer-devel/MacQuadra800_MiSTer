@@ -1,0 +1,64 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -528,7 +528,19 @@
+ wire        regs_alu_fire = (state == S_PIPE_REGS || state == S_PIPE_SDONE ||
+                             state == S_MRD) &&
+                             (exec_kind == EK_ALU) && (p_dst == DK_REG);
+-wire [31:0] alu_src = (regs_alu_fire && state == S_MRD) ? mem_rdata :
++// Only the successful-read arm consumes this value. Keep acknowledgement
++// out of the data select; it qualifies the ordered read-to-write handoff below.
++wire move_store_read_context = state == S_MRD && r_m_ret == S_PIPE_SDONE &&
++    p_src == SK_MEM && p_dst == DK_MEM && exec_kind == EK_ALU &&
++    alu_op == `AP040_ALU_MOVE && !p_rmw && !p_wbsup;
++wire move_store_read_ready = move_store_read_context &&
++    (dst_mode_r == 3'b010 || dst_mode_r == 3'b011 || dst_mode_r == 3'b100) &&
++    rr_a == {1'b1,dst_rn_r} && !rf_we && !aux_we;
++wire [31:0] move_store_read_addr = dst_mode_r == 3'b100 ?
++    rf_rdata_a - an_adj(dst_rn_r,p_dsize) : rf_rdata_a;
++wire move_store_read_handoff = move_store_read_ready && m_issued && d_ack && !d_err;
++wire [31:0] alu_src = move_store_read_context ? mem_rdata :
++                     (regs_alu_fire && state == S_MRD) ? mem_rdata :
+                      (regs_alu_fire && state == S_PIPE_SDONE) ? m_val :
+                      (regs_alu_fire && p_src == SK_REG) ? rf_capture_a : src_val;
+ // A register shift with a nonzero count retires in S_PIPE_REGS as well:
+@@ -2022,14 +2034,15 @@
+ 		                  state == S_PIPE_DEA || state == S_DECODE ||
+ 		                  state == S_RET1 || state == S_UNLK1 ||
+ 		                  state == S_MOVEM_LOOP || hint_early_read || hint_fpu_read || pipe_load_launch)) ||
+-		     (mgo_wr && (state == S_EXEC || state == S_PIPE_DEA || state == S_MOVEM_LOOP ||
++		     (mgo_wr && (move_store_read_handoff || state == S_EXEC || state == S_PIPE_DEA || state == S_MOVEM_LOOP ||
+ 		                 // the pushes: BSR.B from decode, BSR.W, JSR, PEA,
+ 		                 // LINK -- registered data (pc, ea_addr, port A
+ 		                 // selected a state earlier) at dbg_a7 - 4
+ 		                 state == S_DECODE || state == S_BCC_EXT ||
+ 		                 state == S_JSR1 || state == S_PEA1 ||
+ 		                 state == S_LINK2 || pipe_load_launch))) &&
+-		    mgo_a[31:28] == 4'h0 && !epf_pend && !mem_req && !mem_ack &&
++		    mgo_a[31:28] == 4'h0 && !epf_pend &&
++            ((!mem_req && !mem_ack) || (mgo_wr && move_store_read_handoff)) &&
+         // A transfer wholly inside 4KB cannot cross either supported MMU
+         // page size. Crossing accesses retain delayed issue and byte splitting.
+ 		    ((mgo_sz == `AP040_SZ_B) ||
+@@ -5302,6 +5315,22 @@
+                     else if (quick_rmw_direct) begin
+                         if (p_flags) sr[4:0] <= alu_fl;
+                         mwr(dst_addr, p_dsize, alu_res, S_NEXT);
++                    end
++                    // The source read has succeeded and the simple destination
++                    // base is settled. Keep its undo/update order, then replace
++                    // the completed read with the ordered destination write.
++                    else if (move_store_read_ready) begin
++                        src_val <= mem_rdata;
++                        dst_addr <= move_store_read_addr;
++                        if (dst_mode_r == 3'b011) begin
++                            rfw({1'b1,dst_rn_r},rf_rdata_a + an_adj(dst_rn_r,p_dsize));
++                            u_rec({1'b1,dst_rn_r},rf_rdata_a);
++                        end else if (dst_mode_r == 3'b100) begin
++                            rfw({1'b1,dst_rn_r},move_store_read_addr);
++                            u_rec({1'b1,dst_rn_r},rf_rdata_a);
++                        end
++                        if (p_flags) sr[4:0] <= alu_fl;
++                        mwr(move_store_read_addr,p_dsize,alu_res,S_NEXT);
+                     end
+                     // Begin the destination EA once the source read succeeds.
+                     // Faulting or page-split reads retain their original path.

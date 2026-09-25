@@ -1,0 +1,34 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -2028,7 +2028,7 @@
+ 		                 // selected a state earlier) at dbg_a7 - 4
+ 		                 state == S_DECODE || state == S_BCC_EXT ||
+ 		                 state == S_JSR1 || state == S_PEA1 ||
+-		                 state == S_LINK2 || pipe_load_launch))) &&
++		                 state == S_LINK2 || hint_st_fpu || hint_st_fmovem || pipe_load_launch))) &&
+ 		    mgo_a[31:28] == 4'h0 && !epf_pend && !mem_req && !mem_ack &&
+         // A transfer wholly inside 4KB cannot cross either supported MMU
+         // page size. Crossing accesses retain delayed issue and byte splitting.
+@@ -3319,11 +3319,21 @@
+ wire        hint_st_push  = (state == S_PEA1) || (state == S_LINK2);
+ wire        hint_st_movem = (state == S_MOVEM_LOOP) && !mm_dir;
+ wire        hint_st_mwr   = (state == S_MWR) && !m_issued;
++// FPU result data and transfer index are registered before these states.
++// Hints do not issue stores; ordinary mwr ordering/fault handling still owns them.
++wire hint_st_fpu = state == S_FPU_WR &&
++    !((fp_nb <= 4'd4 && fp_n != 4'd0) ||
++      (fp_nb == 4'd8 && fp_n == 4'd2) ||
++      (fp_nb == 4'd12 && fp_n == 4'd3));
++wire hint_st_fmovem = state == S_FPU_MVM2 && fp_st && fp_n != 4'd3;
++wire [31:0] hint_st_fpu_addr = t_a +
++    ((hint_st_fpu && fp_nb <= 4'd2) ? 32'd0 : {26'd0, fp_n, 2'b00});
+ wire        hint_store    = hint_st_move_ea || hint_st_exec || hint_st_pushf || hint_st_push ||
+-                            hint_st_movem || hint_st_mwr;
++                            hint_st_movem || hint_st_mwr || hint_st_fpu || hint_st_fmovem;
+ wire [31:0] hint_store_addr = hint_st_move_ea ? ea_addr :
+                               hint_st_exec  ? dst_addr :
+                               hint_st_mwr   ? m_addr_r :
++                              (hint_st_fpu || hint_st_fmovem) ? hint_st_fpu_addr :
+                               hint_st_movem ? mm_addr :
+                               hint_st_pushf ? (dbg_a7_wb - 32'd4) :
+                                               (dbg_a7 - 32'd4);

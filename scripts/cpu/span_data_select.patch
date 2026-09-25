@@ -1,0 +1,23 @@
+--- a/rtl/ap68040/rtl/ap040_cache.v
++++ b/rtl/ap68040/rtl/ap040_cache.v
+@@ -579,7 +579,7 @@
+ assign m_posted    = post_active && (!r_span2 || sline_ready);
+ assign c_line_tag  = iline_tag;
+ assign c_line_data = iline_data;
+-assign c_rdata = pass_active ? m_rdata : fast_span_ack ? span_extract({sp_w0, sp_w1}, r_size, r_off) : (fast_hit ? fast_data : rdata_r);
++assign c_rdata = pass_active ? m_rdata : span_data_select ? span_extract({sp_w0, sp_w1}, r_size, r_off) : (fast_hit ? fast_data : rdata_r);
+ 
+ assign rd_accept = (cst == C_IDLE) && !(cinv_req && !cinv_done) &&
+                    c_req && !ack_r && !c_write && !bypass &&
+@@ -888,6 +888,11 @@
+ wire  [1:0] wr_arr1 = wr_arr + 2'd1;
+ // The registered whole-line read already supplies both words in look2.
+ // Acknowledge a qualified spanning data hit here instead of registering it.
++// Data selection depends only on registered transaction state. Request,
++// snoop and error qualification remain on acknowledgement; including them
++// here creates an MMU-request-to-load-data-to-branch path without changing
++// the value of any successfully acknowledged read.
++wire span_data_select = (cst == C_LOOK) && look2 && r_span2 && !r_bank;
+ wire fast_span_ack = (cst == C_LOOK) && look2 && r_span2 && !r_bank &&
+     c_req && !c_write && !c_instr && !look_snooped && !snoop_look_row &&
+     !err_hold && !m_err;

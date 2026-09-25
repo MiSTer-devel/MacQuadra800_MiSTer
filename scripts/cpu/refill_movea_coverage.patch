@@ -1,0 +1,27 @@
+--- a/ap040_core.v
++++ b/ap040_core.v
+@@ -122,6 +122,7 @@
+ localparam [3:0] FPU_UNIMP_LAST = FPU_REV40 ? 4'd10 : 4'd12;
+ // synthesis translate_off
+ initial begin
++    movea_refill_count=0;
+ 	if (AP040_FPU_REVISION != 8'h40 && AP040_FPU_REVISION != 8'h41)
+ 		$fatal(1, "AP040_FPU_REVISION must be 0x40 or 0x41");
+ end
+@@ -912,6 +913,7 @@
+ reg        rd_queue_pop;
+ reg        retire_req;
+ reg        dgo;                   // an arm dispatched a resident branch target (decode_dbcc_brf): done once
++    integer movea_refill_count;
+ reg        pgo;                   // an arm redirected the flow (go_pc): performed once after the case
+ reg        sgo;                   // dispatch_branch put the target fetch out at the pop (issue_ifetch once after the case)
+ reg        rfw_now;               // an arm called rfw this cycle ...
+@@ -3111,6 +3113,8 @@
+             fw[8:7] == 2'b00 && !(fw[6] && fw[13:12] == 2'b01) &&
+             (fw[5:3] == 3'b010 || fw[5:3] == 3'b011 ||
+              fw[5:3] == 3'b100 || fw[5:3] == 3'b101)) begin
++            movea_refill_count = movea_refill_count + 1;
++            $display("MOVEA_REFILL_HIT fw=%h mode=%b size=%b count=%0d", fw, fw[5:3], fw[13:12], movea_refill_count);
+             alu_op <= `AP040_ALU_MOVE;
+             op_size <= fw[6] ? `AP040_SZ_L : fw[13:12] == 2'b01 ? `AP040_SZ_B :
+                        fw[13:12] == 2'b10 ? `AP040_SZ_L : `AP040_SZ_W;

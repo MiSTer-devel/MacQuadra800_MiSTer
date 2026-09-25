@@ -1,0 +1,43 @@
+--- a/rtl/ap68040/rtl/ap040_cache.v
++++ b/rtl/ap68040/rtl/ap040_cache.v
+@@ -564,7 +564,7 @@
+ // queue's ring write, the tightest path in the core).
+ wire fast_hit;
+ wire [31:0] fast_data;
+-assign c_ack   = (pass_active && !post_active) ? m_ack : (ack_r | fast_hit | fast_store | fast_span_ack);
++assign c_ack   = (pass_active && !post_active) ? m_ack : (ack_r | fast_hit | fast_store | fast_span_ack | fast_data_look);
+ // The offer is a level, not a pulse: the core refuses a line while a
+ // queue fetch is outstanding or a data access acknowledges in the same
+ // cycle, and a pulse lost to that refusal cost explicit fetches for the
+@@ -579,7 +579,7 @@
+ assign m_posted    = post_active && (!r_span2 || sline_ready);
+ assign c_line_tag  = iline_tag;
+ assign c_line_data = iline_data;
+-assign c_rdata = pass_active ? m_rdata : fast_span_ack ? span_extract({sp_w0, sp_w1}, r_size, r_off) : (fast_hit ? fast_data : rdata_r);
++assign c_rdata = pass_active ? m_rdata : fast_span_ack ? span_extract({sp_w0, sp_w1}, r_size, r_off) : (data_look_select ? lw_extract(data_hit, r_size, r_off) : (fast_hit ? fast_data : rdata_r));
+ 
+ assign rd_accept = (cst == C_IDLE) && !(cinv_req && !cinv_done) &&
+                    c_req && !ack_r && !c_write && !bypass &&
+@@ -888,6 +888,13 @@
+ wire  [1:0] wr_arr1 = wr_arr + 2'd1;
+ // The registered whole-line read already supplies both words in look2.
+ // Acknowledge a qualified spanning data hit here instead of registering it.
++// A settled ordinary data lookup can return its hit word before the
++// registered acknowledgement stage. Keep spanning/crossing transactions
++// and any snoop/error collision on their existing paths.
++wire data_look_select = (cst == C_LOOK) && !r_bank &&
++    !look2 && !xlook && !r_xline && !r_span2;
++wire fast_data_look = data_look_select && c_req && !c_write && !c_instr &&
++    look_hit && !look_snooped && !snoop_look_row && !err_hold && !m_err;
+ wire fast_span_ack = (cst == C_LOOK) && look2 && r_span2 && !r_bank &&
+     c_req && !c_write && !c_instr && !look_snooped && !snoop_look_row &&
+     !err_hold && !m_err;
+@@ -1328,7 +1335,7 @@
+ 					// all four ways were read alongside the tags, so the
+ 					// hit completes here: two cycles request-to-ack
+ 					rdata_r <= lw_extract(data_hit, r_size, r_off);
+-					ack_r <= 1;
++					if (!fast_data_look) ack_r <= 1;
+ 					if (r_bank) begin
+ 						// the line read runs in parallel (iline_seed_read)
+ 						iline_pending <= 1;

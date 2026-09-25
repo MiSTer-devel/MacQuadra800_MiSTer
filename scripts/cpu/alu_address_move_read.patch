@@ -1,0 +1,57 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -2038,7 +2038,7 @@
+ 		if (((!mgo_wr && (state == S_PIPE_START || state == S_PIPE_SRD ||
+ 		                  state == S_PIPE_DEA || state == S_DECODE ||
+ 		                  state == S_RET1 || state == S_UNLK1 ||
+-		                  state == S_MOVEM_LOOP || hint_early_read || hint_fpu_read || pipe_load_launch)) ||
++		                  state == S_MOVEM_LOOP || retire_move_read || hint_early_read || hint_fpu_read || pipe_load_launch)) ||
+ 		     (mgo_wr && (reg_move_store_prepare || move_store_read_handoff || state == S_EXEC || state == S_PIPE_DEA || state == S_MOVEM_LOOP ||
+ 		                 // the pushes: BSR.B from decode, BSR.W, JSR, PEA,
+ 		                 // LINK -- registered data (pc, ea_addr, port A
+@@ -2720,6 +2720,14 @@
+                           (state == S_POST_EXC_F4);
+ wire        n_apply_ok = !rd_valid && !n_inplace && (n_next != NX_NONE) && n_words_ok &&
+                         (state != S_DECODE) && !aux_we;
++// Forward an address-register ALU result into the following indirect MOVE.
++// Actual issue remains gated by apply_record after fetch_next accepts retirement.
++wire retire_move_read = state == S_PIPE_REGS && regs_alu_fire && !p_wbsup &&
++    p_dreg[3] && n_apply_ok && epf_ready_pc2 &&
++    n_p_src_v && n_p_src == SK_MEM && n_p_dst_v && n_p_dst == DK_MEM &&
++    n_alu_op_v && n_alu_op == `AP040_ALU_MOVE &&
++    n_src_mode_r_v && n_src_mode_r == 3'b010 && n_src_rn_r_v && n_p_ssize_v &&
++    p_dreg == {1'b1,n_src_rn_r};
+ // the descriptor classes dispatch at every ordinary retire as well
+ // dovi: the descriptor dispatch bounded to the ALU/shift/store producers
+ // again (step C); the record handover stays at every retire.
+@@ -2903,7 +2911,12 @@
+ 		if (n_md_sign_v) md_sign <= n_md_sign;
+ 		if (n_lk_cyc_v) lk_cyc <= n_lk_cyc;
+ 		case (n_next)
+-			NX_PSTART: state <= S_PIPE_START;
++			NX_PSTART: begin
++                if (retire_move_read) begin
++                    x_ext <= imm;
++                    mrd(alu_res,n_p_ssize,S_PIPE_SDONE);
++                end else state <= S_PIPE_START;
++            end
+ 			NX_PREGS:  state <= S_PIPE_REGS;
+ 			NX_IMMF_PSTART: begin
+ 				imm <= n_immv;
+@@ -3504,6 +3517,7 @@
+ `endif
+ wire        hint_bd  = bd_ok && !epf_pend && !mem_req && !sr[15];
+ wire [31:0] hint_addr = hint_data  ? m_addr_r :
++                        retire_move_read ? alu_res :
+                         hint_p2    ? hint_p2_addr :
+                         hint_store ? hint_store_addr :
+                         hint_bcc   ? (pc + sxb(ir[7:0])) :
+@@ -3526,7 +3540,7 @@
+ assign mem_addr  = mem_addr_q;
+ assign mem_instr = mem_instr_q;
+ assign mem_hint_addr  = mem_req ? mem_addr_q  : hint_addr;
+-assign mem_hint_instr = mem_req ? mem_instr_q : !(hint_data || hint_store || hint_pipe || hint_ea || hint_early_read || hint_fpu_read || hint_pop || hint_p2);
++assign mem_hint_instr = mem_req ? mem_instr_q : !(retire_move_read || hint_data || hint_store || hint_pipe || hint_ea || hint_early_read || hint_fpu_read || hint_pop || hint_p2);
+ 
+ //---------------------------------------------------------------------------
+ // main state machine

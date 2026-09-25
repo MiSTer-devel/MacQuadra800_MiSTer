@@ -1,0 +1,25 @@
+--- a/rtl/ap68040/rtl/ap040_fpu.v
++++ b/rtl/ap68040/rtl/ap040_fpu.v
+@@ -2170,11 +2170,18 @@
+ 				// clocks per add alignment (Whetstone's polynomial FADD.X
+ 				// averaged 8.3 FPU clocks).  Same result: {int, G, R} shift
+ 				// right by sh_cnt, S ORs every bit shifted out (and itself).
+-				reg [66:0] shifted, gone;
+-				shifted = sh_v >> sh_cnt;
+-				gone    = sh_v & ((67'd1 << sh_cnt) - 67'd1);
++				reg [66:0] jammed;
++				// Combinational barrel stages accumulate sticky bits into bit zero.
++				jammed = sh_v;
++				if (sh_cnt[6]) jammed = (jammed >> 64) | {66'd0, |jammed[63:0]};
++				if (sh_cnt[5]) jammed = (jammed >> 32) | {66'd0, |jammed[31:0]};
++				if (sh_cnt[4]) jammed = (jammed >> 16) | {66'd0, |jammed[15:0]};
++				if (sh_cnt[3]) jammed = (jammed >> 8) | {66'd0, |jammed[7:0]};
++				if (sh_cnt[2]) jammed = (jammed >> 4) | {66'd0, |jammed[3:0]};
++				if (sh_cnt[1]) jammed = (jammed >> 2) | {66'd0, |jammed[1:0]};
++				if (sh_cnt[0]) jammed = (jammed >> 1) | {66'd0, |jammed[0:0]};
+ 				if (sh_cnt != 0) begin
+-					sh_v   <= {shifted[66:1], shifted[0] | (|gone)};
++					sh_v   <= jammed;
+ 					sh_cnt <= 7'd0;
+ 				end
+ 				fst <= sh_ret;

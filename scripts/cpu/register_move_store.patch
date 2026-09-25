@@ -1,0 +1,52 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -528,7 +528,13 @@
+ wire        regs_alu_fire = (state == S_PIPE_REGS || state == S_PIPE_SDONE ||
+                             state == S_MRD) &&
+                             (exec_kind == EK_ALU) && (p_dst == DK_REG);
+-wire [31:0] alu_src = (regs_alu_fire && state == S_MRD) ? mem_rdata :
++// A settled register source can feed an ordinary MOVE store while its
++// simple destination EA is formed, before src_val is latched on this edge.
++wire reg_move_store_prepare = state == S_PIPE_START && exec_kind == EK_ALU &&
++    alu_op == `AP040_ALU_MOVE && p_src == SK_REG && p_dst == DK_MEM &&
++    !p_rmw && !p_wbsup && !p_dst_mem_bit && rr_b == p_sreg;
++wire [31:0] alu_src = reg_move_store_prepare ? rf_capture_b :
++                     (regs_alu_fire && state == S_MRD) ? mem_rdata :
+                      (regs_alu_fire && state == S_PIPE_SDONE) ? m_val :
+                      (regs_alu_fire && p_src == SK_REG) ? rf_capture_a : src_val;
+ // A register shift with a nonzero count retires in S_PIPE_REGS as well:
+@@ -2173,6 +2179,10 @@
+ 		// the one read issue of this task: every direct path above lands here
+ 		if (direct) begin
+ 			if (drd) mrd(da, size, dret);
++            else if (reg_move_store_prepare) begin
++                if (p_flags) sr[4:0] <= alu_fl;
++                mwr(da, size, alu_res, S_NEXT);
++            end
+ 			else state <= S_EXEC;
+ 		end
+ 	end
+@@ -3307,6 +3317,10 @@
+ // and the cache acknowledges a posted store in its request cycle
+ // (fast_store).  A store that was not hinted takes the registered
+ // acknowledge as before.  (2026-09-19)
++wire hint_st_reg_move = reg_move_store_prepare &&
++    rr_a == {1'b1, dst_rn_r} && !base_landing && !aux_we &&
++    ((dst_mode_r == 3'b101 && epf_ready_pc) || dst_mode_r == 3'b010 ||
++     dst_mode_r == 3'b011 || dst_mode_r == 3'b100);
+ wire        hint_st_exec  = (state == S_EXEC) && (p_dst == DK_MEM);
+ wire        hint_st_move_ea = (state == S_PIPE_DEA) && !p_rmw &&
+     exec_kind == EK_ALU && p_dst == DK_MEM && !p_wbsup &&
+@@ -3319,9 +3333,10 @@
+ wire        hint_st_push  = (state == S_PEA1) || (state == S_LINK2);
+ wire        hint_st_movem = (state == S_MOVEM_LOOP) && !mm_dir;
+ wire        hint_st_mwr   = (state == S_MWR) && !m_issued;
+-wire        hint_store    = hint_st_move_ea || hint_st_exec || hint_st_pushf || hint_st_push ||
++wire        hint_store    = hint_st_reg_move || hint_st_move_ea || hint_st_exec || hint_st_pushf || hint_st_push ||
+                             hint_st_movem || hint_st_mwr;
+-wire [31:0] hint_store_addr = hint_st_move_ea ? ea_addr :
++wire [31:0] hint_store_addr = hint_st_reg_move ? hint_dst_addr :
++                              hint_st_move_ea ? ea_addr :
+                               hint_st_exec  ? dst_addr :
+                               hint_st_mwr   ? m_addr_r :
+                               hint_st_movem ? mm_addr :

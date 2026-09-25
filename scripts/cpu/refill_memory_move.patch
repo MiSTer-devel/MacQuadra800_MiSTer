@@ -1,0 +1,29 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -3124,6 +3124,26 @@
+             p_sextw <= fw[6] && fw[13:12] == 2'b11;
+             src_mode_r <= fw[5:3]; src_rn_r <= fw[2:0];
+             rr_a <= {1'b1, fw[2:0]}; rr_b <= {fw[6], fw[11:9]};
++            state <= S_PIPE_START;
++        end
++        // Decode a resident memory-to-memory MOVE target without consuming
++        // either operand. The normal operand path retains address updates,
++        // source-fault priority and destination issue ordering.
++        if (fw[15:14] == 2'b00 && fw[13:12] != 2'b00 &&
++            (fw[8:6] == 3'b010 || fw[8:6] == 3'b011 || fw[8:6] == 3'b100) &&
++            (fw[5:3] == 3'b010 || fw[5:3] == 3'b011 ||
++             fw[5:3] == 3'b100 || fw[5:3] == 3'b101)) begin
++            alu_op <= `AP040_ALU_MOVE;
++            op_size <= fw[13:12] == 2'b01 ? `AP040_SZ_B :
++                       fw[13:12] == 2'b10 ? `AP040_SZ_L : `AP040_SZ_W;
++            p_ssize <= fw[13:12] == 2'b01 ? `AP040_SZ_B :
++                       fw[13:12] == 2'b10 ? `AP040_SZ_L : `AP040_SZ_W;
++            p_dsize <= fw[13:12] == 2'b01 ? `AP040_SZ_B :
++                       fw[13:12] == 2'b10 ? `AP040_SZ_L : `AP040_SZ_W;
++            p_src <= SK_MEM; p_dst <= DK_MEM;
++            src_mode_r <= fw[5:3]; src_rn_r <= fw[2:0];
++            dst_mode_r <= fw[8:6]; dst_rn_r <= fw[11:9];
++            rr_a <= {1'b1,fw[2:0]};
+             state <= S_PIPE_START;
+         end
+ `endif

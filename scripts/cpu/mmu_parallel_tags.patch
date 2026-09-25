@@ -1,0 +1,22 @@
+--- a/rtl/ap68040/rtl/ap040_mmu.v
++++ b/rtl/ap68040/rtl/ap040_mmu.v
+@@ -220,8 +220,17 @@
+ 		u_ent[(l_row[4] ? 3'd4 : {1'b0,l_row[1:0]})]   <= pipe_ent;
+ 	end
+ end
+-wire u_hit = u_valid[(c_instr ? 3'd4 : {1'b0,a_row[1:0]})] && (u_row[(c_instr ? 3'd4 : {1'b0,a_row[1:0]})] == a_row) &&
+-             (u_tag[(c_instr ? 3'd4 : {1'b0,a_row[1:0]})] == a_tag);
++// Compare constant-index copies in parallel before qualifying the selected
++// bank, avoiding a tag mux in front of the equality comparison.
++wire [2:0] u_index = c_instr ? 3'd4 : {1'b0,a_row[1:0]};
++(* keep *) wire [4:0] u_tag_matches;
++wire [4:0] u_selected_hits;
++genvar uc;
++generate for (uc=0; uc<5; uc=uc+1) begin : copy_match
++    assign u_tag_matches[uc] = u_valid[uc] && u_row[uc] == a_row && u_tag[uc] == a_tag;
++    assign u_selected_hits[uc] = (u_index == uc) && u_tag_matches[uc];
++end endgenerate
++wire u_hit = |u_selected_hits;
+ wire [EW-1:0] u_sel = u_ent[(c_instr ? 3'd4 : {1'b0,a_row[1:0]})];
+ 
+ wire atc_hit = u_hit | pipe_hit;

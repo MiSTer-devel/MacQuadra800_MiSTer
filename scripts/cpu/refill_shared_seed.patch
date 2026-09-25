@@ -1,0 +1,34 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -9594,15 +9594,22 @@
+ 		// words from the buffer land last, over any ring write earlier in
+ 		// this cycle (a killed fetch's append, a line offer).
+ 		if (brf_seed_req) begin : brf_seed_data
+-			reg [6:0] sw;
+-			integer   si;
+-			for (si = 0; si < 8; si = si + 1) begin
+-				sw = {1'b0, brf_seed_a} + si[6:0];
+-				if (si[3:0] < brf_seed_n)
+-					epf_data[si] <= sw[0] ? brf_data[sw[5:1]][15:0]
+-					                      : brf_data[sw[5:1]][31:16];
+-			end
+-		end
++            reg [255:0] seed_window, seed_aligned;
++            reg [2:0] seed_next_line;
++            integer si;
++            // Select two adjacent 16-byte lines once, then align their words.
++            // At a sector boundary the wrapped line is masked by brf_seed_n.
++            seed_next_line = brf_seed_a[5:3] + 3'd1;
++            for (si = 0; si < 4; si = si + 1) begin
++                seed_window[255 - 32*si -: 32] = brf_data[{brf_seed_a[5:3],si[1:0]}];
++                seed_window[127 - 32*si -: 32] = brf_data[{seed_next_line,si[1:0]}];
++            end
++            seed_aligned = seed_window << {brf_seed_a[2:0],4'b0000};
++            for (si = 0; si < 8; si = si + 1) begin
++                if (si[3:0] < brf_seed_n)
++                    epf_data[si] <= seed_aligned[255 - 16*si -: 16];
++            end
++        end
+ 		// Queue bookkeeping in one place, so that a pop and an append in the
+ 		// same cycle cannot lose each other's update.  A flush has already
+ 		// written the whole set and wins.

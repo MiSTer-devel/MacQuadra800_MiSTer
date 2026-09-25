@@ -1,0 +1,71 @@
+--- spans_tb.v
++++ spans_tb.v
+@@ -88,6 +88,13 @@
+ 	else             s_stb_storm <= 1'b0;
+ end
+ 
++`ifdef P124_MONITOR
++integer p124_fast_span_ack_count = 0;
++always @(posedge clk) begin
++  if (ce && c_req && dut.fast_span_ack) p124_fast_span_ack_count = p124_fast_span_ack_count + 1;
++end
++`endif
++
+ ap040_cache dut
+ (
+ 	.clk(clk), .nreset(nreset), .ce(ce),
+@@ -113,6 +120,8 @@
+ );
+ 
+ integer errors = 0;
++integer qualified_acks=0;
++always @(posedge clk) if(c_req && c_ack && ce) qualified_acks=qualified_acks+1;
+ reg cross_model=0;
+ integer cross_checks=0, cross_matrix=0, cross_wrap, cross_warm, cross_kind;
+ reg [31:0] cross_base, cross_expected;
+@@ -208,8 +217,10 @@
+ 	output [31:0] d;
+ 	output integer cycles;
+ 	integer guard;
++ integer ack_start;
+ 	begin
+ 		@(negedge clk);
++		ack_start = qualified_acks;
+ 		c_req = 1; c_write = 0; c_size = sz; c_addr = a;
+ 		guard = 0;
+ 		while (!(c_ack && ce) && guard < 200) begin
+@@ -224,7 +235,8 @@
+ 		cycles = guard;
+ 		@(negedge clk);
+ 		c_req = 0;
+-		@(posedge clk);
++		@(posedge clk); #1;
++        if (qualified_acks-ack_start != 1) $fatal(1,"counted read ack mismatch addr=%h count=%0d",a,qualified_acks-ack_start);
+ 	end
+ endtask
+ 
+@@ -1222,6 +1234,24 @@
+     $display("EXPLICIT_CROSS checks=%0d",cross_checks);
+     $display("EXPLICIT_SPANS checks=%0d",span_checks);
+ 
++
++    @(negedge clk);
++    mem['hC900>>2]='h11223344;mem['hC904>>2]='h55667788;
++    mem['hC908>>2]='h99aabbcc;mem['hC90c>>2]='hddeeff00;
++    snoop('hC900);
++    cpu_read_count_sized('hC900,2'b10,d,normal_cycles);
++    repeat(24) @(posedge clk);
++    line_base=qualified_acks;
++    cpu_read_btb('hC902,1'b0,'hC904,d,d2);
++    #1;
++    if(d!==32'h33445566 || d2!==32'h55667788 || qualified_acks-line_base != 2)
++      $fatal(1,"span-to-aligned no-gap mismatch first=%h second=%h acks=%0d",d,d2,qualified_acks-line_base);
++    $display("SPAN_BACK_TO_BACK PASS expected=33445566/55667788 acks=2");
++
++`ifdef P124_MONITOR
++	if (p124_fast_span_ack_count <= 0) begin $display("FAIL: fast_span_ack coverage missing count=%0d", p124_fast_span_ack_count); errors++; end
++	else $display("P124_FAST_SPAN_ACK_COUNT=%0d", p124_fast_span_ack_count);
++`endif
+ 	if (errors == 0) $display("ALL TESTS PASSED");
+ 	else $display("TEST FAILED with %0d errors", errors);
+ 	$finish;

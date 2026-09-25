@@ -1,0 +1,32 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -10325,15 +10325,23 @@
+ 		// words from the buffer land last, over any ring write earlier in
+ 		// this cycle (a killed fetch's append, a line offer).
+ 		if (brf_seed_req) begin : brf_seed_data
+-			reg [5:0] sw;
+-			integer   si;
++			reg [15:0] lane_word [0:7];
++			reg [1:0] row;
++			reg [2:0] lane_sel;
++			integer lane, si;
++			// One word from each of eight lanes, then rotate the lanes.
++			// Address wrap is identical to the original 5-bit sector index.
++			for (lane = 0; lane < 8; lane = lane + 1) begin
++				row = brf_seed_a[4:3] + (lane[2:0] < brf_seed_a[2:0]);
++				lane_word[lane] = lane[0] ? brf_data[{row, lane[2:1]}][15:0]
++				                             : brf_data[{row, lane[2:1]}][31:16];
++			end
+ 			for (si = 0; si < 8; si = si + 1) begin
+-				sw = {1'b0, brf_seed_a} + si[5:0];
+-				if (si[3:0] < brf_seed_n)
+-					epf_data[si] <= sw[0] ? brf_data[sw[4:1]][15:0]
+-					                      : brf_data[sw[4:1]][31:16];
++				lane_sel = brf_seed_a[2:0] + si[2:0];
++				if (si[3:0] < brf_seed_n) epf_data[si] <= lane_word[lane_sel];
+ 			end
+ 		end
++
+ 		// Queue bookkeeping in one place, so that a pop and an append in the
+ 		// same cycle cannot lose each other's update.  A flush has already
+ 		// written the whole set and wins.

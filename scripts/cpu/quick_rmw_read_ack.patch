@@ -1,0 +1,30 @@
+--- rtl/ap68040/rtl/ap040_core.v
++++ rtl/ap68040/rtl/ap040_core.v
+@@ -537,7 +537,13 @@
+ wire        shift_fire = (state == S_PIPE_REGS) && (exec_kind == EK_SHIFT) &&
+                          (p_dst == DK_REG);
+ wire  [5:0] shift_cnt  = (p_src == SK_REG) ? rf_capture_a[5:0] : src_val[5:0];
+-wire [31:0] alu_dst = (regs_alu_fire || shift_fire) ? rf_capture_b : dst_val;
++// ADDQ/SUBQ to memory can compute once the ordinary read succeeds.
++// This select depends on registered operand/state fields, not acknowledge.
++wire quick_rmw_direct = state == S_MRD && r_m_ret == S_PIPE_DDONE &&
++    exec_kind == EK_ALU && p_dst == DK_MEM && p_src == SK_IMPL &&
++    p_rmw && !p_wbsup && ir[15:12] == 4'h5;
++wire [31:0] alu_dst = quick_rmw_direct ? mem_rdata :
++                     (regs_alu_fire || shift_fire) ? rf_capture_b : dst_val;
+ wire [31:0] alu_a = alu_is_bitop ? (p_dst_mem_bit ? {29'd0, alu_src[2:0]}
+                                                   : {27'd0, alu_src[4:0]}) :
+                     p_sextw      ? {{16{alu_src[15]}}, alu_src[15:0]} : alu_src;
+@@ -5288,6 +5294,12 @@
+ 					    p_dst == DK_REG && exec_kind == EK_ALU) begin
+ 						retire_operand_alu;
+ 					end
++                    // A completed quick arithmetic read can prepare its ordered
++                    // store now. Split reads keep DDONE/EXEC; errors win above.
++                    else if (quick_rmw_direct) begin
++                        if (p_flags) sr[4:0] <= alu_fl;
++                        mwr(dst_addr, p_dsize, alu_res, S_NEXT);
++                    end
+                     // Begin the destination EA once the source read succeeds.
+                     // Faulting or page-split reads retain their original path.
+                     else if (r_m_ret == S_PIPE_SDONE && p_src == SK_MEM &&

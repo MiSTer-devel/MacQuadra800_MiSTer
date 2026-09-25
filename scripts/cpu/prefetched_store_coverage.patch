@@ -1,0 +1,61 @@
+--- a/rtl/ap68040/tb/tb_ap040_program.v
++++ b/rtl/ap68040/tb/tb_ap040_program.v
+@@ -858,4 +858,58 @@
+ 	$finish;
+ end
+ 
++
++// Root coverage: save the qualified context before the CPU clock edge, then
++// examine its registered request after nonblocking updates have settled.
++reg root_prepare;
++reg root_fallback;
++reg [1:0] root_size;
++reg [2:0] root_mode, root_rn;
++reg root_alias;
++reg [31:0] root_pc;
++reg [11:0] root_classes=0;
++reg [1:0] root_a7=0;
++integer root_alias_count=0, root_fallback_count=0, root_early_count=0;
++always @(posedge clk) begin
++ if (!nreset) begin
++  root_classes=0; root_a7=0; root_alias_count=0;
++  root_fallback_count=0; root_early_count=0;
++ end else if (clkena_in) begin
++`ifdef P141_TRACE
++  root_prepare=dut.core.reg_move_store_prepare;
++`else
++  root_prepare=0;
++`endif
++  root_fallback=dut.core.state==dut.core.S_PIPE_START &&
++    dut.core.exec_kind==dut.core.EK_ALU && dut.core.alu_op==`AP040_ALU_MOVE &&
++    dut.core.p_src==dut.core.SK_REG && dut.core.p_dst==dut.core.DK_MEM &&
++    !dut.core.p_rmw && !dut.core.p_wbsup && !dut.core.p_dst_mem_bit &&
++    dut.core.rr_b==dut.core.p_sreg && !dut.core.epf_ready_pc2;
++  root_size=dut.core.p_dsize;
++  root_mode=dut.core.dst_mode_r;
++  root_rn=dut.core.dst_rn_r;
++  root_alias=dut.core.p_sreg=={1'b1,root_rn};
++  root_pc=dut.core.pc_i;
++  #1;
++  if(root_fallback && dut.core.state==dut.core.S_EXEC) root_fallback_count++;
++  if(root_prepare && dut.core.state==dut.core.S_MWR && dut.core.m_issued &&
++     dut.core.mem_req && dut.core.mem_write && !dut.core.mem_instr_q) begin
++   root_early_count++;
++   if(root_size<=2 && root_mode>=2 && root_mode<=5)
++    root_classes[root_size*4+root_mode-2]=1;
++   if(root_size==0 && root_rn==7 && root_mode==3) root_a7[0]=1;
++   if(root_size==0 && root_rn==7 && root_mode==4) root_a7[1]=1;
++   if(root_alias) root_alias_count++;
++   $display("ROOT_EARLY pc=%h mode=%0d rn=%0d size=%0d alias=%b addr=%h data=%h",root_pc,root_mode,root_rn,root_size,root_alias,dut.core.mem_addr_q,dut.core.mem_wdata);
++  end
++ end
++end
++always @(negedge clk) if(nreset && dut.core.mem_req && dut.core.mem_write && !dut.core.mem_instr_q && dut.core.mem_addr_q==32'hf102 && dut.core.mem_wdata[15:0]==16'h600d) begin
++ $display("ROOT_COVERAGE classes=%h a7=%b alias=%0d fallback=%0d early=%0d",root_classes,root_a7,root_alias_count,root_fallback_count,root_early_count);
++`ifdef P141_TRACE
++ if(root_classes!==12'hfff || root_a7!==2'b11 || root_alias_count==0 || root_fallback_count==0)
++  $fatal(1,"missing actual P141 early-store/fallback coverage");
++`endif
++end
++
+ endmodule

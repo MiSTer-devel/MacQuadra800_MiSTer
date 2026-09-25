@@ -1,0 +1,116 @@
+--- rtl/ap68040/rtl/ap040_cache.v
++++ rtl/ap68040/rtl/ap040_cache.v
+@@ -148,6 +148,7 @@
+ (* ramstyle = "no_rw_check" *) reg [31:0] cdata3 [0:(1<<DIDXW)-1];
+ 
+ wire [ROWW-1:0] tag_q;
++wire [ROWW-1:0] hint_tag_q;
+ reg  [31:0] data_q0, data_q1, data_q2, data_q3;
+ 
+ // RAM control (driven combinationally from the FSM state so the arrays
+@@ -173,10 +174,10 @@
+ 	.data_a    (tag_wdat),
+ 	.wren_a    (ce & tag_we),
+ 	.q_a       (tag_q),
+-	.address_b (inv_idx),
++	.address_b (inv_wren ? inv_idx : x_row),
+ 	.data_b    ({ROWW{1'b0}}),
+ 	.wren_b    (inv_wren),
+-	.q_b       ()
++	.q_b       (hint_tag_q)
+ );
+ 
+ wire  [DIDXW-1:0] cd_ridx0, cd_ridx1, cd_ridx2, cd_ridx3;
+@@ -694,6 +695,35 @@
+ // AFTER translation, permissions and cacheability have been resolved.
+ // Remember which synchronous read actually produced the RAM outputs. The
+ // tag read free-runs even with ce low, whereas data reads are ce-gated.
++// Port B prepares the hinted tag row while port A serves a posted store.
++// A read is still admitted only after the store has left C_PASS.
++reg hint_tag_valid;
++reg [ROWIW-1:0] hint_tag_idx;
++always @(posedge clk) begin
++    if (!nreset) begin hint_tag_valid <= 0; hint_tag_idx <= 0; end
++    else begin
++        hint_tag_idx <= x_row;
++        hint_tag_valid <= !inv_wren && !tag_we;
++    end
++end
++// Save the original word before speculative reads replace the RAM outputs.
++// Partial stores must merge against this word when their bus ack arrives.
++reg posted_word_valid;
++reg [31:0] posted_word;
++always @(posedge clk) begin
++    if (!nreset) begin posted_word_valid <= 0; posted_word <= 0; end
++    else if (ce) begin
++        if (!post_active) posted_word_valid <= 0;
++        else if (!posted_word_valid) begin
++            posted_word <= data_hit;
++            posted_word_valid <= 1;
++        end
++    end
++end
++wire [31:0] store_merge_word = (post_active && posted_word_valid) ? posted_word : data_hit;
++wire posted_hint_read = (cst == C_PASS) && post_active &&
++    !r_span2 && !cross_store && !pass_ci_chk && !winv_pend &&
++    !ci_inv_pend && !store_inv_lost;
+ reg idle_data_valid, idle_tag_valid;
+ reg [DIDXW-1:0] idle_data_idx;
+ reg [ROWIW-1:0] idle_tag_idx;
+@@ -710,8 +740,9 @@
+ 		if (inv_wren || (ce && |cd_we)) idle_data_valid <= 0;
+ 		if (ce && cd_rd_en) begin
+ 			idle_data_idx <= {x_instr, x_set, x_addr[3:2]};
+-			idle_data_valid <= (cst == C_IDLE) && !iline_read &&
+-			                   !inv_wren && !(|cd_we);
++			idle_data_valid <= ((cst == C_IDLE) || posted_hint_read) && !iline_read &&
++                               !inv_wren && (!(|cd_we) ||
++                               (cd_widx[DIDXW-1:2] != x_row));
+ 		end
+ 	end
+ end
+@@ -732,10 +763,10 @@
+                 (idle_data_idx == {c_instr, c_addr[SETW+3:2]}) &&
+                 (idle_tag_idx == a_row) && look_hit &&
+                 !tag_we && !inv_wren && !look_snooped && !snoop_look_row;
+-wire hh0 = v_w0 && (t_w0 == c_hint_ptag[21:22-TAGW]);
+-wire hh1 = v_w1 && (t_w1 == c_hint_ptag[21:22-TAGW]);
+-wire hh2 = v_w2 && (t_w2 == c_hint_ptag[21:22-TAGW]);
+-wire hh3 = v_w3 && (t_w3 == c_hint_ptag[21:22-TAGW]);
++wire hh0 = hint_tag_q[4*TAGW+0] && (hint_tag_q[0*TAGW +: TAGW] == c_hint_ptag[21:22-TAGW]);
++wire hh1 = hint_tag_q[4*TAGW+1] && (hint_tag_q[1*TAGW +: TAGW] == c_hint_ptag[21:22-TAGW]);
++wire hh2 = hint_tag_q[4*TAGW+2] && (hint_tag_q[2*TAGW +: TAGW] == c_hint_ptag[21:22-TAGW]);
++wire hh3 = hint_tag_q[4*TAGW+3] && (hint_tag_q[3*TAGW +: TAGW] == c_hint_ptag[21:22-TAGW]);
+ wire       hint_look_hit = hh0 | hh1 | hh2 | hh3;
+ // The fast hit's own view of the request: the hint bus repeats the
+ // registered request address while it is presented, so the offset bits
+@@ -780,9 +811,9 @@
+     (hint_word3 & {32{!hh0 && !hh1 && !hh2}});
+ // idle_hit without look_hit (the live translation's tag compare)
+ assign fast_hit  = fast_accept && !err_hold && !m_err && fast_lane &&
+-                   idle_data_valid && idle_tag_valid &&
++                   idle_data_valid && hint_tag_valid &&
+                    (idle_data_idx == {1'b0, hq_lo[SETW+3:2]}) &&
+-                   (idle_tag_idx == {1'b0, hq_lo[SETW+3:4]}) && hint_look_hit &&
++                   (hint_tag_idx == {1'b0, hq_lo[SETW+3:4]}) && hint_look_hit &&
+                    // !snoop_wr, not !inv_wren: with cst == C_IDLE, !c_write,
+                    // !ci_inv_pend and !store_inv_lost already required, every
+                    // other term of inv_wren is zero, and inv_wren's store term
+@@ -822,7 +853,7 @@
+ wire [ROWIW-1:0] line_read_row = (iline_idle_read || idle_span_hit) ? {c_instr, c_addr[SETW+3:4]} : r_row;
+ wire [1:0] line_read_way = iline_tagw_read ? r_way : hit_way;
+ 
+-assign cd_rd_en  = (cst == C_IDLE) || rd_accept || store_lookup_accept || iline_read ||
++assign cd_rd_en  = (cst == C_IDLE) || posted_hint_read || rd_accept || store_lookup_accept || iline_read ||
+                    xlook_read || cross_lookup;
+ // word-wise: array k at way (k - w); line-wise: every array at the hit way;
+ // the crossing read's second lookup: word 0 of the next row
+@@ -867,7 +898,7 @@
+ wire [63:0] cross_last_merge = span_merge({32'd0,data_hit}, r_wdata, r_size, r_off);
+ assign cd_wdat   = store_hit_write ? (cross_store ?
+                       (cross_second ? cross_last_merge[31:0] : cross_first_merge[63:32]) :
+-                      lw_merge(data_hit, r_wdata, r_size, r_off)) :
++                      lw_merge(store_merge_word, r_wdata, r_size, r_off)) :
+ 	                  (fill_line_write ? fill_line_word : m_rdata);
+ 
+ 

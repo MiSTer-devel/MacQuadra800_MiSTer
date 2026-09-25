@@ -1,0 +1,60 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -539,7 +539,12 @@
+ wire [31:0] move_store_read_addr = dst_mode_r == 3'b100 ?
+     rf_rdata_a - an_adj(dst_rn_r,p_dsize) : rf_rdata_a;
+ wire move_store_read_handoff = move_store_read_ready && m_issued && d_ack && !d_err;
+-wire [31:0] alu_src = move_store_read_context ? mem_rdata :
++// Settled register MOVE store; require the following instruction prefetched.
++wire reg_move_store_prepare = state == S_PIPE_START && exec_kind == EK_ALU &&
++    alu_op == `AP040_ALU_MOVE && p_src == SK_REG && p_dst == DK_MEM &&
++    !p_rmw && !p_wbsup && !p_dst_mem_bit && rr_b == p_sreg && epf_ready_pc2;
++wire [31:0] alu_src = reg_move_store_prepare ? rf_capture_b :
++                     move_store_read_context ? mem_rdata :
+                      (regs_alu_fire && state == S_MRD) ? mem_rdata :
+                      (regs_alu_fire && state == S_PIPE_SDONE) ? m_val :
+                      (regs_alu_fire && p_src == SK_REG) ? rf_capture_a : src_val;
+@@ -2034,7 +2039,7 @@
+ 		                  state == S_PIPE_DEA || state == S_DECODE ||
+ 		                  state == S_RET1 || state == S_UNLK1 ||
+ 		                  state == S_MOVEM_LOOP || hint_early_read || hint_fpu_read || pipe_load_launch)) ||
+-		     (mgo_wr && (move_store_read_handoff || state == S_EXEC || state == S_PIPE_DEA || state == S_MOVEM_LOOP ||
++		     (mgo_wr && (reg_move_store_prepare || move_store_read_handoff || state == S_EXEC || state == S_PIPE_DEA || state == S_MOVEM_LOOP ||
+ 		                 // the pushes: BSR.B from decode, BSR.W, JSR, PEA,
+ 		                 // LINK -- registered data (pc, ea_addr, port A
+ 		                 // selected a state earlier) at dbg_a7 - 4
+@@ -2186,6 +2191,10 @@
+ 		// the one read issue of this task: every direct path above lands here
+ 		if (direct) begin
+ 			if (drd) mrd(da, size, dret);
++            else if (reg_move_store_prepare) begin
++                if (p_flags) sr[4:0] <= alu_fl;
++                mwr(da, size, alu_res, S_NEXT);
++            end
+ 			else state <= S_EXEC;
+ 		end
+ 	end
+@@ -3340,6 +3349,10 @@
+ // and the cache acknowledges a posted store in its request cycle
+ // (fast_store).  A store that was not hinted takes the registered
+ // acknowledge as before.  (2026-09-19)
++wire hint_st_reg_move = reg_move_store_prepare &&
++    rr_a == {1'b1, dst_rn_r} && !base_landing && !aux_we &&
++    ((dst_mode_r == 3'b101 && epf_ready_pc) || dst_mode_r == 3'b010 ||
++     dst_mode_r == 3'b011 || dst_mode_r == 3'b100);
+ wire        hint_st_exec  = (state == S_EXEC) && (p_dst == DK_MEM);
+ wire        hint_st_move_ea = (state == S_PIPE_DEA) && !p_rmw &&
+     exec_kind == EK_ALU && p_dst == DK_MEM && !p_wbsup &&
+@@ -3361,9 +3374,10 @@
+ wire hint_st_fmovem = state == S_FPU_MVM2 && fp_st && fp_n != 4'd3;
+ wire [31:0] hint_st_fpu_addr = t_a +
+     ((hint_st_fpu && fp_nb <= 4'd2) ? 32'd0 : {26'd0, fp_n, 2'b00});
+-wire        hint_store    = hint_st_move_ea || hint_st_exec || hint_st_pushf || hint_st_push ||
++wire        hint_store    = hint_st_reg_move || hint_st_move_ea || hint_st_exec || hint_st_pushf || hint_st_push ||
+                             hint_st_movem || hint_st_mwr || hint_st_fpu || hint_st_fmovem;
+-wire [31:0] hint_store_addr = hint_st_move_ea ? ea_addr :
++wire [31:0] hint_store_addr = hint_st_reg_move ? hint_dst_addr :
++                              hint_st_move_ea ? ea_addr :
+                               hint_st_exec  ? dst_addr :
+                               hint_st_mwr   ? m_addr_r :
+                               (hint_st_fpu || hint_st_fmovem) ? hint_st_fpu_addr :

@@ -1,0 +1,17 @@
+--- a/ap040_core.v
++++ b/ap040_core.v
+@@ -5496,7 +5496,13 @@
+                             4'd2: fpb[63:32] <= mem_rdata;
+                             default: fpb[31:0] <= mem_rdata;
+                         endcase
+-                        state <= S_FPU_MVM2;
++                        if (fp_n == 4'd1 || fp_n == 4'd2) begin
++                            // Keep the register uncommitted until all three
++                            // words succeed; only queue the next memory beat.
++                            mrd(t_a + {28'd0, fp_n[1:0], 2'b00},
++                                `AP040_SZ_L, S_FPU_MVM3);
++                            fp_n <= fp_n + 4'd1;
++                        end else state <= S_FPU_MVM2;
+                     end
+ 					else if (r_m_ret == S_UNLK3) begin
+ 						rfw({1'b1, d_rn}, mem_rdata);

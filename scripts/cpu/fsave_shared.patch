@@ -1,0 +1,122 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -1541,58 +1541,45 @@
+ // fpuop_save writer (WBTEMP at +24, FPIARCU at +40, CMDREG3B at +52,
+ // STAG/GRS at +60, CMDREG1B at +64, DTAG/WBTE15 at +68, flags at +72,
+ // FPTEMP at +76, ETEMP at +88; CU_SAVEPC and the reserved words zero)
+-function [31:0] fsave_busy_word;
+-	input [4:0] n;
++function [31:0] fsave_common_word;
++	input [3:0] n;
+ 	begin
+ 		case (n)
+-			5'd0:  fsave_busy_word = FPU_BUSY_HEADER;
+-			5'd6:  fsave_busy_word = {fpu_fstate_wbt[95:80], 16'd0};
+-			5'd7:  fsave_busy_word = fpu_fstate_wbt[63:32];
+-			5'd8:  fsave_busy_word = fpu_fstate_wbt[31:0];
+-			5'd10: fsave_busy_word = fpu_fstate_fpiar_c;
+-			5'd13: fsave_busy_word = {fpu_fstate_cmd3, 16'd0};
+-			5'd15: fsave_busy_word = {fpu_fstate_stag, 3'd0,
+-			                          fpu_fstate_grs, 23'd0};
+-			5'd16: fsave_busy_word = {fpu_fstate_cmd1, 16'd0};
+-			5'd17: fsave_busy_word = {fpu_fstate_dtag, 8'd0,
+-			                          fpu_fstate_wbte15, 20'd0};
+-			5'd18: fsave_busy_word = {5'd0, fpu_fstate_flags[2],
+-			                                fpu_fstate_flags[1], 4'd0,
+-			                                fpu_fstate_flags[0], 20'd0};
+-			5'd19: fsave_busy_word = fpu_fstate_fpt[95:64];
+-			5'd20: fsave_busy_word = fpu_fstate_fpt[63:32];
+-			5'd21: fsave_busy_word = fpu_fstate_fpt[31:0];
+-			5'd22: fsave_busy_word = fpu_fstate_et[95:64];
+-			5'd23: fsave_busy_word = fpu_fstate_et[63:32];
+-			5'd24: fsave_busy_word = fpu_fstate_et[31:0];
+-			default: fsave_busy_word = 32'd0;
++			4'd1: fsave_common_word = {fpu_fstate_cmd3, 16'd0};
++			4'd2: fsave_common_word = 32'd0;
++			4'd3: fsave_common_word = {fpu_fstate_stag, 3'd0, fpu_fstate_grs, 23'd0};
++			4'd4: fsave_common_word = {fpu_fstate_cmd1, 16'd0};
++			4'd5: fsave_common_word = {fpu_fstate_dtag, 8'd0, fpu_fstate_wbte15, 20'd0};
++			4'd6: fsave_common_word = {5'd0, fpu_fstate_flags[2], fpu_fstate_flags[1], 4'd0, fpu_fstate_flags[0], 20'd0};
++			4'd7: fsave_common_word = fpu_fstate_fpt[95:64];
++			4'd8: fsave_common_word = fpu_fstate_fpt[63:32];
++			4'd9: fsave_common_word = fpu_fstate_fpt[31:0];
++			4'd10: fsave_common_word = fpu_fstate_et[95:64];
++			4'd11: fsave_common_word = fpu_fstate_et[63:32];
++			4'd12: fsave_common_word = fpu_fstate_et[31:0];
++			default: fsave_common_word = 32'd0;
+ 		endcase
+ 	end
+ endfunction
+ 
+-function [31:0] fsave_unimp_word;
+-	input [3:0] n;
++// One indexed mux serves both frame formats. BUSY-only fields are selected
++// before the shared normalized payload map; all reserved words stay zero.
++function [31:0] fsave_frame_word;
++	input busy;
++	input [4:0] n;
++	reg [3:0] common_n;
+ 	begin
+-		// Internal fields use the $41 indices. $40 skips words 1 and 2.
+-		case ((FPU_REV40 && n != 0) ? n + 4'd2 : n)
+-			4'd0:  fsave_unimp_word = FPU_UNIMP_HEADER;
+-			4'd1:  fsave_unimp_word = {fpu_fstate_cmd3, 16'd0};
+-			4'd2:  fsave_unimp_word = 32'd0;
+-			4'd3:  fsave_unimp_word = {fpu_fstate_stag, 3'd0,
+-			                           fpu_fstate_grs, 23'd0};
+-			4'd4:  fsave_unimp_word = {fpu_fstate_cmd1, 16'd0};
+-			4'd5:  fsave_unimp_word = {fpu_fstate_dtag, 8'd0,
+-			                           fpu_fstate_wbte15, 20'd0};
+-			4'd6:  fsave_unimp_word = {5'd0, fpu_fstate_flags[2],
+-			                                  fpu_fstate_flags[1], 4'd0,
+-			                                  fpu_fstate_flags[0], 20'd0};
+-			4'd7:  fsave_unimp_word = fpu_fstate_fpt[95:64];
+-			4'd8:  fsave_unimp_word = fpu_fstate_fpt[63:32];
+-			4'd9:  fsave_unimp_word = fpu_fstate_fpt[31:0];
+-			4'd10: fsave_unimp_word = fpu_fstate_et[95:64];
+-			4'd11: fsave_unimp_word = fpu_fstate_et[63:32];
+-			default: fsave_unimp_word = fpu_fstate_et[31:0];
+-		endcase
++		if (n == 0) fsave_frame_word = busy ? FPU_BUSY_HEADER : FPU_UNIMP_HEADER;
++		else if (busy && n == 5'd6) fsave_frame_word = {fpu_fstate_wbt[95:80], 16'd0};
++		else if (busy && n == 5'd7) fsave_frame_word = fpu_fstate_wbt[63:32];
++		else if (busy && n == 5'd8) fsave_frame_word = fpu_fstate_wbt[31:0];
++		else if (busy && n == 5'd10) fsave_frame_word = fpu_fstate_fpiar_c;
++		else if (busy && n < 5'd13) fsave_frame_word = 32'd0;
++		else begin
++			if (busy) common_n = n - 5'd12;
++			else common_n = (FPU_REV40 ? n + 5'd2 : n);
++			fsave_frame_word = fsave_common_word(common_n);
++		end
+ 	end
+ endfunction
+ 
+@@ -7580,9 +7567,14 @@
+ 				             fpu_used ? FPU_IDLE_HEADER : 32'h0000_0000, S_NEXT);
+ 			end
+ 
+-			S_FSAVE_U:
+-				mwr(t_a + {26'd0, fp_n, 2'b00}, `AP040_SZ_L,
+-				    fsave_unimp_word(fp_n), S_FSAVE_UD);
++			S_FSAVE_U, S_FSAVE_B: begin
++				// A single selected index and function call share the payload mux.
++				mwr(t_a + {25'd0, (state == S_FSAVE_B ? fpb_n : {1'b0, fp_n}), 2'b00},
++				    `AP040_SZ_L,
++				    fsave_frame_word(state == S_FSAVE_B,
++				                    state == S_FSAVE_B ? fpb_n : {1'b0, fp_n}),
++				    state == S_FSAVE_B ? S_FSAVE_BD : S_FSAVE_UD);
++			end
+ 
+ 			S_FSAVE_UD: begin
+ 				if (fp_n == FPU_UNIMP_LAST) begin
+@@ -7596,10 +7588,6 @@
+ 					state <= S_FSAVE_U;
+ 				end
+ 			end
+-
+-			S_FSAVE_B:
+-				mwr(t_a + {25'd0, fpb_n, 2'b00}, `AP040_SZ_L,
+-				    fsave_busy_word(fpb_n), S_FSAVE_BD);
+ 
+ 			S_FSAVE_BD: begin
+ 				if (fpb_n == 5'd24) begin

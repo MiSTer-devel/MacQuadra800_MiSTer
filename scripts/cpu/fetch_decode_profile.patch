@@ -1,0 +1,31 @@
+--- rtl/ap68040/rtl/ap040_core.v
++++ rtl/ap68040/rtl/ap040_core.v
+@@ -909,6 +909,28 @@
+ // Blocking per-clock carrier: only fetch_next's qualified resident-opcode
+ // branch sets this. Descriptor controls are written once after case(state),
+ // rather than expanded inside every caller of the generic completion task.
++// Simulation-only fetch/decode attribution; no architectural changes.
++integer prof_fetch[0:1][0:15];
++integer prof_decode[0:1][0:15];
++integer prof_r,prof_k;
++initial for(prof_r=0;prof_r<2;prof_r=prof_r+1)
++ for(prof_k=0;prof_k<16;prof_k=prof_k+1) begin
++  prof_fetch[prof_r][prof_k]=0;prof_decode[prof_r][prof_k]=0;
++ end
++final for(prof_r=0;prof_r<2;prof_r=prof_r+1)
++ for(prof_k=0;prof_k<16;prof_k=prof_k+1) begin
++  if(prof_fetch[prof_r][prof_k])
++   $display("FETCH_PROFILE rom=%0d flags=%h cycles=%0d",prof_r,prof_k,prof_fetch[prof_r][prof_k]);
++  if(prof_decode[prof_r][prof_k])
++   $display("DECODE_PROFILE rom=%0d family=%h cycles=%0d",prof_r,prof_k,prof_decode[prof_r][prof_k]);
++ end
++always @(posedge clk) if (nreset && ce) begin
++ if(state==S_FETCH)
++  prof_fetch[pc[31:24]==8'h40][{epf_armed,mem_req,epf_pend,(epf_ready_pc || epf_fwd_pc)}] =
++   prof_fetch[pc[31:24]==8'h40][{epf_armed,mem_req,epf_pend,(epf_ready_pc || epf_fwd_pc)}]+1;
++ if(state==S_DECODE)
++  prof_decode[pc_i[31:24]==8'h40][ir[15:12]] = prof_decode[pc_i[31:24]==8'h40][ir[15:12]]+1;
++end
+ reg        rd_queue_pop;
+ reg        retire_req;
+ reg        dgo;                   // an arm dispatched a resident branch target (decode_dbcc_brf): done once

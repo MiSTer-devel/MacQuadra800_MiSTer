@@ -1,0 +1,13 @@
+--- rtl/ap68040/rtl/ap040_core.v
++++ rtl/ap68040/rtl/ap040_core.v
+@@ -5286,7 +5286,9 @@
+                     else if (r_m_ret == S_PIPE_SDONE && p_src == SK_MEM &&
+                              p_dst == DK_MEM && exec_kind == EK_ALU &&
+                              alu_op == `AP040_ALU_MOVE && !p_rmw &&
+-                             (dst_mode_r == 3'b110 || dst_mode_r == 3'b101)) begin
++                             (dst_mode_r == 3'b110 || dst_mode_r == 3'b101 ||
++                              dst_mode_r == 3'b010 || dst_mode_r == 3'b011 ||
++                              dst_mode_r == 3'b100)) begin
+                         src_val <= mem_rdata;
+                         ea_start(dst_mode_r, dst_rn_r, p_dsize, S_PIPE_DEA);
+                         // d16 destination: select its base and request the

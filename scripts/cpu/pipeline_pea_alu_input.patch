@@ -1,0 +1,15 @@
+--- rtl/ap68040/experimental/ap040_pipeline_integer.sv
++++ rtl/ap68040/experimental/ap040_pipeline_integer.sv
+@@ -345,7 +345,11 @@
+     // handles its own delayed MLAB write beneath this bypass.
+     wire [31:0] source_full = ex_imm ? ex_immediate :
+         (wb_v && wb_we && wb_dst == ex_src) ? wb_data : rf_a;
+-    wire [31:0] src = ex_store ? load_wdata : ex_load ? (load_done ? load_value : load_data) : ex_word_src ? {{16{source_full[15]}}, source_full[15:0]} : source_full;
++    // PEA's calculated push value belongs only to the memory data path.
++    // PEA preserves CCR and writes back the updated SP, so its integer ALU
++    // input is unused. Ordinary stores still use exactly their held/live data.
++    wire [31:0] store_alu_data = load_pending ? load_wdata_r : source_full;
++    wire [31:0] src = ex_store ? store_alu_data : ex_load ? (load_done ? load_value : load_data) : ex_word_src ? {{16{source_full[15]}}, source_full[15:0]} : source_full;
+     wire [31:0] dst = (wb_v && wb_we && wb_dst == read_dst) ? wb_data : rf_b;
+     wire [31:0] old_dst = wb_v && wb_we && wb_dst == ex_dst ? wb_data : rf_old_dst;
+     wire [31:0] merge_dst = is_indexload(ex_opcode) ? old_dst : dst;

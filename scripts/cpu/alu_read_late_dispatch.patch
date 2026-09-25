@@ -1,0 +1,13 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -2915,6 +2915,10 @@
+                 if (retire_move_read) begin
+                     x_ext <= imm;
+                     mrd(alu_res,n_p_ssize,S_PIPE_SDONE);
++                    // Lookahead runs after the common mgo dispatcher.
++                    // Consume this new request here; do not leave it queued.
++                    mem_issue;
++                    mgo = 0;
+                 end else state <= S_PIPE_START;
+             end
+ 			NX_PREGS:  state <= S_PIPE_REGS;

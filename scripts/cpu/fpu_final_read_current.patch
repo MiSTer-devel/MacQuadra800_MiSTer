@@ -1,0 +1,26 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -5378,6 +5378,23 @@
+                              !mem_rdata[0] && !tr_t1 && !tr_t0 && !irq_pend) begin
+                         rfw(4'd15, dbg_a7 + 32'd4);
+                         go_pc(mem_rdata);
++                    end
++                    // Final ordinary FPU operand beat can launch at ack.
++                    // Split transfers still return through S_FPU_RD.
++                    else if (r_m_ret == S_FPU_RD &&
++                             ((fp_nb <= 4'd4 && fp_n != 4'd0) ||
++                              (fp_nb == 4'd8 && fp_n == 4'd2) ||
++                              (fp_nb == 4'd12 && fp_n == 4'd3))) begin
++                        if (fp_nb == 4'd1) fpb[95:88] <= mem_rdata[7:0];
++                        else if (fp_nb == 4'd2) fpb[95:80] <= mem_rdata[15:0];
++                        else case (fp_n)
++                            4'd1: fpb[95:64] <= mem_rdata;
++                            4'd2: fpb[63:32] <= mem_rdata;
++                            default: fpb[31:0] <= mem_rdata;
++                        endcase
++                        fpu_iawe <= 1;
++                        fpu_req <= 1;
++                        state <= S_FPU_GO;
+                     end
+ 					else if (r_m_ret == S_UNLK3) begin
+ 						rfw({1'b1, d_rn}, mem_rdata);

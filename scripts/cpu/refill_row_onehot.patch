@@ -1,0 +1,16 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -10372,8 +10372,11 @@
+ 			// Address wrap is identical to the original 5-bit sector index.
+ 			for (lane = 0; lane < 8; lane = lane + 1) begin
+ 				row = brf_seed_a[4:3] + (lane[2:0] < brf_seed_a[2:0]);
+-				lane_word[lane] = lane[0] ? brf_data[{row, lane[2:1]}][15:0]
+-				                             : brf_data[{row, lane[2:1]}][31:16];
++				lane_word[lane] =
++					({16{row == 2'd0}} & (lane[0] ? brf_data[{2'd0, lane[2:1]}][15:0] : brf_data[{2'd0, lane[2:1]}][31:16])) |
++					({16{row == 2'd1}} & (lane[0] ? brf_data[{2'd1, lane[2:1]}][15:0] : brf_data[{2'd1, lane[2:1]}][31:16])) |
++					({16{row == 2'd2}} & (lane[0] ? brf_data[{2'd2, lane[2:1]}][15:0] : brf_data[{2'd2, lane[2:1]}][31:16])) |
++					({16{row == 2'd3}} & (lane[0] ? brf_data[{2'd3, lane[2:1]}][15:0] : brf_data[{2'd3, lane[2:1]}][31:16]));
+ 			end
+ 			for (si = 0; si < 8; si = si + 1) begin
+ 				lane_sel = brf_seed_a[2:0] + si[2:0];

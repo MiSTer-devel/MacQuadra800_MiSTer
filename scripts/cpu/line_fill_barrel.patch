@@ -1,0 +1,24 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -5442,10 +5442,17 @@
+ 				avail = 4'd8 - {1'b0, epf_ftail[3:1]};
+ 				room  = 4'd8 - epf_count;
+ 				n = (avail < room) ? avail : room;
+-				for (i = 0; i < 8; i = i + 1)
+-					if (i < n)
+-						epf_data[epf_fill + i[2:0]] <=
+-							mem_line_data[(127 - 16 * (epf_ftail[3:1] + i[2:0])) -: 16];
++				begin : rotate_line
++					reg [2:0] rotation, distance;
++					reg [255:0] rotated;
++					rotation = epf_ftail[3:1] - epf_fill;
++					rotated = {mem_line_data, mem_line_data} << {rotation, 4'b0};
++					for (i = 0; i < 8; i = i + 1) begin
++						distance = i[2:0] - epf_fill;
++						if ({1'b0, distance} < n)
++							epf_data[i] <= rotated[(255 - 16*i) -: 16];
++					end
++				end
+ 				epf_fillw = n;
+ 				epf_issue = 1;
+ 			end

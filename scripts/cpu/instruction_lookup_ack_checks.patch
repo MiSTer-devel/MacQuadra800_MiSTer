@@ -1,0 +1,134 @@
+--- tb_ap040_cache_snoop.v
++++ tb_ap040_cache_iread_ack.v
+@@ -41,7 +41,7 @@
+ 
+ `timescale 1ns/1ps
+ 
+-module tb_ap040_cache_snoop;
++module tb_ap040_cache_iread_ack;
+ 
+ reg clk = 0;
+ always #5 clk = ~clk;
+@@ -113,6 +113,27 @@
+ );
+ 
+ integer errors = 0;
++integer iread_req_count = 0, iread_ack_count = 0, iread_mem_count = 0;
++integer idle_path_cycles = 0, look_path_cycles = 0;
++integer cinv_cycles = 0, ce_paused_cycles = 0, snoop_cycles = 0;
++integer fast_idle_accepts = 0, fast_look_accepts = 0;
++reg iread_req_seen = 0;
++always @(posedge clk) begin
++    if (c_req && !ce) ce_paused_cycles = ce_paused_cycles + 1;
++    if (c_instr && c_req) begin
++        if (!iread_req_seen) begin iread_req_count = iread_req_count + 1; iread_req_seen = 1; end
++        if (dut.cst == 3'd0) idle_path_cycles = idle_path_cycles + 1;
++        if (dut.cst == 3'd1) look_path_cycles = look_path_cycles + 1;
++    end else iread_req_seen = 0;
++    if (c_instr && c_req && c_ack && ce) iread_ack_count = iread_ack_count + 1;
++    if (m_req && m_instr && !m_write) iread_mem_count = iread_mem_count + 1;
++`ifdef P122_CANDIDATE_COVERAGE
++    if (ce && c_req && c_instr && dut.fast_ifetch_idle) fast_idle_accepts = fast_idle_accepts + 1;
++    if (ce && c_req && c_instr && dut.fast_ifetch_look) fast_look_accepts = fast_look_accepts + 1;
++`endif
++    if (cinv_req) cinv_cycles = cinv_cycles + 1;
++    if (s_stb) snoop_cycles = snoop_cycles + 1;
++end
+ 
+ //---------------------------------------------------------------------------
+ // flat memory with a 2-cycle grant: enough latency that fill beats and
+@@ -194,7 +215,11 @@
+ 	output [31:0] d;
+ 	output integer cycles;
+ 	integer guard;
++    integer ack_start;
++    reg was_instr;
+ 	begin
++        was_instr = c_instr;
++        ack_start = iread_ack_count;
+ 		@(negedge clk);
+ 		c_req = 1; c_write = 0; c_size = sz; c_addr = a;
+ 		guard = 0;
+@@ -211,6 +236,10 @@
+ 		@(negedge clk);
+ 		c_req = 0;
+ 		@(posedge clk);
++        if (was_instr && (iread_ack_count - ack_start != 1)) begin
++            $display("FAIL: instruction request %h acknowledgements=%0d", a, iread_ack_count - ack_start);
++            errors = errors + 1;
++        end
+ 	end
+ endtask
+ 
+@@ -1064,7 +1093,7 @@
+ 		errors = errors + 1;
+ 	end
+ 	cpu_write(32'hC010, 32'h9999_8888);                          // store into the second line
+-	repeat (8) @(posedge clk);
++	repeat (2) @(posedge clk);
+ 	line_base = mread_count;
+ 	cpu_read_count_sized(32'hC00E, 2'b10, d, normal_cycles);
+ 	if (d !== 32'h3344_9999) begin
+@@ -1086,6 +1115,62 @@
+ 	end
+ 	$display("CROSSING_READ_TESTS_COMPLETE");
+ 
++    // Targeted I-cache sequence: prime a warm line, consume its buffered
++    // lookahead, replace the buffer with another instruction line, then
++    // revisit the still-resident first line through the ordinary C_LOOK path.
++    // Finally invalidate the I-bank, change backing memory, and require a
++    // fresh refill rather than stale buffered/tag data.
++    ce_run = 1; c_instr = 1;
++    mem[32'hF200>>2] = 32'h1020_3040;
++    mem[32'hF204>>2] = 32'h5060_7080;
++    mem[32'hF300>>2] = 32'h90A0_B0C0;
++    cpu_read_count_sized(32'h0000_F200, 2'b10, d, fill_cycles);
++    if (d !== 32'h1020_3040) $fatal(1, "target I-fill got %h", d);
++    cpu_read_count_sized(32'h0000_F204, 2'b10, d, fast_cycles);
++    if (d !== 32'h5060_7080) $fatal(1, "target buffered I-read got %h", d);
++    cpu_read_count_sized(32'h0000_F300, 2'b10, d, fill_cycles);
++    if (d !== 32'h90A0_B0C0) $fatal(1, "target replacement I-fill got %h", d);
++    // Clear only the line buffer while preserving the I-cache tags/data.
++    // Prime the registered F200 hint while no request is active so the
++    // resident F200 line takes fast_ifetch_idle.
++    cinv_req = 1; cinv_ic = 0; cinv_dc = 1;
++    @(negedge clk);
++    while (!cinv_done) @(posedge clk);
++    cinv_req = 0; cinv_dc = 0;
++    @(negedge clk); c_req = 0; c_addr = 32'h0000_F200;
++    repeat (8) @(posedge clk);
++    cpu_read_count_sized(32'h0000_F200, 2'b10, d, normal_cycles);
++    if (d !== 32'h1020_3040) $fatal(1, "target unprimed I-lookup got %h", d);
++    cinv_req = 1; cinv_ic = 1; cinv_dc = 0;
++    @(negedge clk);
++    while (!cinv_done) @(posedge clk);
++    cinv_req = 0; cinv_ic = 0;
++    mem[32'hF200>>2] = 32'hCAFEBABE;
++    cpu_read_count_sized(32'h0000_F200, 2'b10, d, fill_cycles);
++    if (d !== 32'hCAFEBABE) $fatal(1, "target CINV I-refill got %h", d);
++    c_instr = 0;
++
++    // Hold an instruction request through a CE-frozen window, then release it.
++    // This exercises acceptance deferral without changing the cache contents.
++    c_instr = 1;
++    ce_run = 0;
++    fork
++        begin cpu_read_count_sized(32'h0000_F100, 2'b10, d, fill_cycles); end
++        begin repeat (3) @(negedge clk); ce_run = 1; end
++    join
++    c_instr = 0;
++
++`ifdef P122_CANDIDATE_COVERAGE
++    if (fast_idle_accepts == 0 || fast_look_accepts == 0)
++        $fatal(1, "candidate I-fast-path coverage missing fast_idle=%0d fast_look=%0d", fast_idle_accepts, fast_look_accepts);
++`endif
++    if (iread_req_count == 0 || iread_ack_count != iread_req_count)
++        $fatal(1, "IREAD exact-once mismatch requests=%0d acks=%0d", iread_req_count, iread_ack_count);
++    if (idle_path_cycles == 0 || look_path_cycles == 0)
++        $fatal(1, "IREAD path coverage missing idle=%0d look=%0d", idle_path_cycles, look_path_cycles);
++    if (ce_paused_cycles == 0 || snoop_cycles == 0 || cinv_cycles == 0)
++        $fatal(1, "IREAD environment coverage missing ce_pause=%0d snoop=%0d cinv=%0d", ce_paused_cycles, snoop_cycles, cinv_cycles);
++    $display("IREAD PASS requests=%0d acks=%0d mem_reads=%0d idle_cycles=%0d look_cycles=%0d fast_ifetch_idle=%0d fast_ifetch_look=%0d ce_paused=%0d snoop_cycles=%0d cinv_cycles=%0d", iread_req_count, iread_ack_count, iread_mem_count, idle_path_cycles, look_path_cycles, fast_idle_accepts, fast_look_accepts, ce_paused_cycles, snoop_cycles, cinv_cycles);
+ 	if (errors == 0) $display("ALL TESTS PASSED");
+ 	else $display("TEST FAILED with %0d errors", errors);
+ 	$finish;

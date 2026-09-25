@@ -1,0 +1,22 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -2881,7 +2881,18 @@
+ 		if (n_md_sign_v) md_sign <= n_md_sign;
+ 		if (n_lk_cyc_v) lk_cyc <= n_lk_cyc;
+ 		case (n_next)
+-			NX_PSTART: state <= S_PIPE_START;
++			NX_PSTART: begin
++                state <= S_PIPE_START;
++                // A resident MOVE source will claim the shared port on the
++                // next edge. Reserve this retire slot while two following
++                // words remain queued; no operand is issued speculatively.
++                if (n_p_src_v && n_p_src == SK_MEM &&
++                    n_exec_kind_v && n_exec_kind == EK_ALU &&
++                    n_alu_op_v && n_alu_op == `AP040_ALU_MOVE &&
++                    n_src_mode_r_v && epf_count >= 4'd3 &&
++                    (n_src_mode_r == 3'b010 || n_src_mode_r == 3'b011 ||
++                     n_src_mode_r == 3'b100)) epf_issue = 1;
++            end
+ 			NX_PREGS:  state <= S_PIPE_REGS;
+ 			NX_IMMF_PSTART: begin
+ 				imm <= n_immv;

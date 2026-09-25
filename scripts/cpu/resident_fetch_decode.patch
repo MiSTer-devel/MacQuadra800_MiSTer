@@ -1,0 +1,25 @@
+--- rtl/ap68040/rtl/ap040_core.v
++++ rtl/ap68040/rtl/ap040_core.v
+@@ -2702,7 +2702,7 @@
+ // dovi: the descriptor dispatch bounded to the ALU/shift/store producers
+ // again (step C); the record handover stays at every retire.
+ wire        n_desc_ok  = rd_valid && (state != S_DECODE) && !aux_we &&
+-                         (regs_alu_fire || shift_fire || pipe_drain ||
++                         ((state == S_FETCH) || regs_alu_fire || shift_fire || pipe_drain ||
+                           ((state == S_MWR) && d_ack && (r_m_ret == S_NEXT)));
+ // The unconditional transfers whose target the queue already holds --
+ // BRA.W/.L, BSR.W/.L, JSR and JMP abs.W, abs.L and d16(PC) -- dispatch
+@@ -5082,6 +5082,13 @@
+ 					// All four exception-prefetch longwords are now resident; the
+ 					// first buffered handler instruction begins normal execution.
+ 					in_exc <= 0;
++                    // A resident opcode can use the existing shared decoder
++                    // on this fetch edge. Forwarded fetches retain ordinary
++                    // decode because the queue head is not yet registered.
++                    // Only descriptor/record classes enter here; downstream
++                    // pipeline admission guards may still defer them.
++                    if (epf_ready_pc && !epf_fwd_pc && !aux_we &&
++                        (rd_valid || n_apply_ok)) rd_queue_pop = 1;
+ 					epf_pop = 2'd1;
+ 					ir <= fw;
+ 					if (!movem_mem_op(fw)) mm_resume <= 0;

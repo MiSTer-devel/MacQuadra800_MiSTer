@@ -1,0 +1,61 @@
+--- a/rtl/ap68040/rtl/ap040_mmu.v
++++ b/rtl/ap68040/rtl/ap040_mmu.v
+@@ -202,27 +202,27 @@
+ // and on reset, so it can never disagree with the array it mirrors.  It
+ // carries no state of its own: permissions, cache mode and the M bit come
+ // from the copied entry and go through the same fault/walk decisions.
+-reg          u_valid [0:1];   // one copy per space: instruction, data
+-reg    [4:0] u_row   [0:1];
+-reg   [16:0] u_tag   [0:1];
+-reg [EW-1:0] u_ent   [0:1];
++reg          u_valid [0:7];   // four direct-mapped copies per space, indexed by page set
++reg    [4:0] u_row   [0:7];
++reg   [16:0] u_tag   [0:7];
++reg [EW-1:0] u_ent   [0:7];
+ reg   [31:0] u_tc;
+ integer      ui;
+ always @(posedge clk) begin
+ 	u_tc <= tc;
+ 	if (!nreset || fill_we || sweep_on || pf_req || (tc != u_tc)) begin
+-		for (ui = 0; ui < 2; ui = ui + 1) u_valid[ui] <= 0;
++		for (ui = 0; ui < 8; ui = ui + 1) u_valid[ui] <= 0;
+ 	end
+ 	else if (pipe_hit) begin
+-		u_valid[l_row[4]] <= 1;
+-		u_row[l_row[4]]   <= l_row;
+-		u_tag[l_row[4]]   <= l_tag;
+-		u_ent[l_row[4]]   <= pipe_ent;
++		u_valid[{l_row[4],l_row[1:0]}] <= 1;
++		u_row[{l_row[4],l_row[1:0]}]   <= l_row;
++		u_tag[{l_row[4],l_row[1:0]}]   <= l_tag;
++		u_ent[{l_row[4],l_row[1:0]}]   <= pipe_ent;
+ 	end
+ end
+-wire u_hit = u_valid[c_instr] && (u_row[c_instr] == a_row) &&
+-             (u_tag[c_instr] == a_tag);
+-wire [EW-1:0] u_sel = u_ent[c_instr];
++wire u_hit = u_valid[{c_instr,a_row[1:0]}] && (u_row[{c_instr,a_row[1:0]}] == a_row) &&
++             (u_tag[{c_instr,a_row[1:0]}] == a_tag);
++wire [EW-1:0] u_sel = u_ent[{c_instr,a_row[1:0]}];
+ 
+ wire atc_hit = u_hit | pipe_hit;
+ 
+@@ -805,15 +805,15 @@
+ wire [4:0]    hn_row = {c_hint_instr, hn_set};
+ wire [16:0]   hn_tag = tc_p ? {a_super, c_hint_addr[31:17], 1'b0}
+                            : {a_super, c_hint_addr[31:16]};
+-wire          uh_hit = u_valid[c_hint_instr] && (u_row[c_hint_instr] == hn_row) &&
+-                       (u_tag[c_hint_instr] == hn_tag);
++wire          uh_hit = u_valid[{c_hint_instr,hn_row[1:0]}] && (u_row[{c_hint_instr,hn_row[1:0]}] == hn_row) &&
++                       (u_tag[{c_hint_instr,hn_row[1:0]}] == hn_tag);
+ // A held request repeats itself on the hint bus, so when the lookup pipe
+ // resolves the request this cycle (the copy is being refilled from it)
+ // the same entry translates the hint: without this every first access
+ // to a page after a copy miss lost the one-clock hit (3 % of boot
+ // dispatches).
+ wire          hn_pipe = pipe_hit && (c_hint_addr == c_addr) && (c_hint_instr == c_instr);
+-wire [EW-1:0] uh_ent = uh_hit ? u_ent[c_hint_instr] : pipe_ent;
++wire [EW-1:0] uh_ent = uh_hit ? u_ent[{c_hint_instr,hn_row[1:0]}] : pipe_ent;
+ wire [19:0]   uh_pa  = uh_ent[27:8];
+ wire [31:0]   hn_ttra = c_hint_instr ? itt0 : dtt0;
+ wire [31:0]   hn_ttrb = c_hint_instr ? itt1 : dtt1;

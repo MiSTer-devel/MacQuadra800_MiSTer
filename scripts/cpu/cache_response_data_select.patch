@@ -1,0 +1,26 @@
+--- a/rtl/ap68040/rtl/ap040_cache.v
++++ b/rtl/ap68040/rtl/ap040_cache.v
+@@ -605,12 +605,19 @@
+ assign m_posted    = post_active && (!r_span2 || sline_ready);
+ assign c_line_tag  = iline_tag;
+ assign c_line_data = iline_data;
++// Read data is meaningful only with c_ack. Choose the data by response
++// state and registered request/hint shape; late MMU/request qualification
++// remains solely on c_ack. ack_r owns registered idle completions.
++wire idle_read_select = (cst == C_IDLE) && !ack_r;
++wire instruction_look_select = (cst == C_LOOK) && r_bank &&
++    !look2 && !xlook && !r_xline && !r_span2;
+ assign c_rdata = pass_active ? m_rdata :
+-    fast_pair_idle ? hint_pair_data : pair_look_select ? pair_read_data :
++    idle_read_select ? (c_instr ? lw_extract(data_hit, c_size, c_addr[1:0]) :
++                        hint_pair_lane ? hint_pair_data : fast_data) :
++    pair_look_select ? pair_read_data :
+     span_data_select ? span_extract({sp_w0, sp_w1}, r_size, r_off) :
+-    data_look_select ? lw_extract(data_hit, r_size, r_off) :
+-    fast_ifetch_idle ? lw_extract(data_hit, c_size, c_addr[1:0]) :
+-    fast_ifetch_look ? lw_extract(data_hit, r_size, r_off) : (fast_hit ? fast_data : rdata_r);
++    (data_look_select || instruction_look_select) ? lw_extract(data_hit, r_size, r_off) :
++    rdata_r;
+ 
+ assign rd_accept = (cst == C_IDLE) && !(cinv_req && !cinv_done) &&
+                    c_req && !ack_r && !c_write && !bypass &&

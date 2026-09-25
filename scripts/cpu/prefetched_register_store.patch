@@ -1,0 +1,11 @@
+--- a/rtl/ap68040/rtl/ap040_core.v
++++ b/rtl/ap68040/rtl/ap040_core.v
+@@ -532,7 +532,7 @@
+ // simple destination EA is formed, before src_val is latched on this edge.
+ wire reg_move_store_prepare = state == S_PIPE_START && exec_kind == EK_ALU &&
+     alu_op == `AP040_ALU_MOVE && p_src == SK_REG && p_dst == DK_MEM &&
+-    !p_rmw && !p_wbsup && !p_dst_mem_bit && rr_b == p_sreg;
++    !p_rmw && !p_wbsup && !p_dst_mem_bit && rr_b == p_sreg && epf_ready_pc2;
+ wire [31:0] alu_src = reg_move_store_prepare ? rf_capture_b :
+                      (regs_alu_fire && state == S_MRD) ? mem_rdata :
+                      (regs_alu_fire && state == S_PIPE_SDONE) ? m_val :
