@@ -21,9 +21,22 @@ SRC="$RTL/ap040_tg68k_compat.v $RTL/ap040_core.v $RTL/ap040_bus16_adapter.v \
      $RTL/ap040_bus_timeout.v $RTL/ap040_regfile.v $RTL/ap040_alu.v \
      $RTL/ap040_muldiv.v $RTL/ap040_mmu.v $RTL/ap040_cache.v $RTL/ap040_fpu.v \
      $RTL/ap040_walker_cdc.v $RTL/primitives/dpram.v"
+# CPU_TEST_RELEASE=1: the configuration the MacQuadra800 core ships (the ten
+# AP040_* macros of MacQuadra800.qsf and the second integer pipeline).  The
+# 2026-09-23 read-after-store handoff sent the read after a MOVES store out
+# in the MOVES space and none of these programs noticed; t_aux_copyout and
+# t_moves_next do, in every leg.
+if [ "${CPU_TEST_RELEASE:-0}" = 1 ]; then
+	OPT_FLAGS="-DAP040_EXPERIMENTAL_XSTORE -DAP040_EXPERIMENTAL_LEA"
+	OPT_FLAGS="$OPT_FLAGS -DAP040_EXPERIMENTAL_PIPELINE -DAP040_EXPERIMENTAL_PIPELINE_LOADS"
+	OPT_FLAGS="$OPT_FLAGS -DAP040_EXPERIMENTAL_PIPELINE_STORES -DAP040_EXPERIMENTAL_PIPELINE_PEA"
+	OPT_FLAGS="$OPT_FLAGS -DAP040_EXPERIMENTAL_PIPELINE_P6 -DAP040_PIPELINE_MEMORY_ENTRY"
+	OPT_FLAGS="$OPT_FLAGS -DAP040_PIPELINE_COMPARE -DAP040_PIPELINE_EARLY_DRAIN"
+	SRC="$SRC ../experimental/ap040_pipeline_integer.sv"
+fi
 
 echo "== assembling test programs =="
-for t in t_integer t_exceptions t_mmu t_bitfield_mmu t_bitfield_cache t_moves_fc t_movem_restart t_atcprobe t_fpu_frames t_fpu_resume t_cache t_fpu t_fpu_addr t_branch_early t_loops_irq t_refill_load t_lea_d16 t_lea_fault bench_loop pipe_bench branch_bench; do
+for t in t_integer t_exceptions t_mmu t_bitfield_mmu t_bitfield_cache t_moves_fc t_moves_next t_aux_copyout t_movem_restart t_atcprobe t_fpu_frames t_fpu_resume t_cache t_fpu t_fpu_addr t_branch_early t_loops_irq t_refill_load t_lea_d16 t_lea_fault bench_loop pipe_bench branch_bench; do
 	$VASM -Fbin -m68040 -no-opt -o "$WORK/$t.bin" "asm/$t.s" >/dev/null
 	python3 bin2hex.py "$WORK/$t.bin" "$WORK/$t.hex"
 done
@@ -91,7 +104,7 @@ run bus16_gap    "$WORK/tb_bus16.vvp"
 run bus_timeout  "$WORK/tb_timeout.vvp"
 run cache_snoop  "$WORK/tb_snoop.vvp"
 run cache_xstore "$WORK/tb_xstore.vvp"
-for t in integer exceptions mmu bitfield_mmu bitfield_cache moves_fc movem_restart atcprobe fpu_frames fpu_resume cache fpu fpu_addr branch_early loops_irq refill_load lea_d16 lea_fault; do
+for t in integer exceptions mmu bitfield_mmu bitfield_cache moves_fc moves_next aux_copyout movem_restart atcprobe fpu_frames fpu_resume cache fpu fpu_addr branch_early loops_irq refill_load lea_d16 lea_fault; do
 	run "$t" "$WORK/tb_prog.vvp" "+prog=$WORK/t_$t.hex"
 done
 

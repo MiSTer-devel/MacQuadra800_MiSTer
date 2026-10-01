@@ -1,6 +1,6 @@
 #!/bin/bash
-# Run t_aux_copyout (and any other *.s in this directory or rtl/ap68040/tb/asm
-# named on the command line) on the vendored AP68040 in two macro sets:
+# Run t_aux_copyout (now rtl/ap68040/tb/asm/t_aux_copyout.s; and any other *.s
+# in this directory or rtl/ap68040/tb/asm named on the command line) on the vendored AP68040 in two macro sets:
 #   rel  = the 20261001 release's ten AP040_* macros (MacQuadra800.qsf)
 #   base = the self-test suite's configuration (LEA + XSTORE only)
 # Run inside WSL (iverilog/vvp/vasmm68k_mot in ~/local/bin):
@@ -23,7 +23,7 @@ cp -r "$SRCROOT/rtl/ap68040/tb" "$W/tb"
 mkdir -p "$W/exp"
 [ -d "$SRCROOT/rtl/ap68040/experimental" ] && cp -r "$SRCROOT/rtl/ap68040/experimental/." "$W/exp/"
 find "$W" -type f \( -name "*.v" -o -name "*.sv" -o -name "*.svh" -o -name "*.py" -o -name "*.s" \) -exec sed -i 's/\r$//' {} +
-for f in "$HERE"/*.s; do cp "$f" "$W/tb/asm/"; sed -i 's/\r$//' "$W/tb/asm/$(basename "$f")"; done
+for f in "$HERE"/*.s; do [ -f "$f" ] || continue; cp "$f" "$W/tb/asm/"; sed -i 's/\r$//' "$W/tb/asm/$(basename "$f")"; done
 python3 -c 'import sys;p=sys.argv[1];s=open(p).read();open(p,"w").write(s.replace("if (errors == 0 && $value$plusargs(\"dump=","if ($value$plusargs(\"dump="))' "$W/tb/tb_ap040_program.v"
 RTL=$W/rtl
 SRC="$RTL/ap040_tg68k_compat.v $RTL/ap040_core.v $RTL/ap040_bus16_adapter.v \

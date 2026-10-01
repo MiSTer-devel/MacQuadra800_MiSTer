@@ -3930,6 +3930,12 @@ wire        hint_rsr = (state == S_MWR) && (r_m_ret == S_NEXT) && m_issued &&
 `ifdef AP040_EXPERIMENTAL_PIPELINE
                        !pipe_rf_owner && !pipe_write &&
 `endif
+                       // not after a MOVES store: fc_ovr_v/fc_ovr (its DFC) clear only on
+                       // this edge, and mem_issue would stamp the next instruction's read
+                       // with them -- A/UX's copyout "move.l -(a1),d1 / moves.l d1,-(a0)"
+                       // read the kernel's own data from user space (t_aux_copyout,
+                       // t_moves_next)
+                       !fc_ovr_v &&
                        !sr[15];
 wire        retire_store_read = hint_rsr && d_ack;
 // P219: the same handoff after a read that retires in its own acknowledge
