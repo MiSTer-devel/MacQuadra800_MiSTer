@@ -54,9 +54,8 @@ assign BUTTONS = 0;
 //////////////////////////////////////////////////////////////////
 
 wire [1:0] ar = status[122:121];
-
-assign VIDEO_ARX = (!ar) ? 12'd4 : (ar - 1'd1);
-assign VIDEO_ARY = (!ar) ? 12'd3 : 12'd0;
+// VIDEO_ARX/ARY and VGA_DE come from the framework's video_freak below
+// (aspect ratio plus the OSD's integer-scaling choice, status[13:12]).
 
 `include "build_id.v"
 localparam CONF_STR = {
@@ -74,6 +73,9 @@ localparam CONF_STR = {
 	// LBMacTwo) uses SC0 for this reason.
 	"SC0,HDAVHD,Mount SCSI disk 0;",
 	"SC1,HDAVHD,Mount SCSI disk 1;",
+	// slot 2 is the 512-byte PRAM image (rtl/rtc3430042.sv's XPRAM): loaded
+	// before the machine leaves reset, saved back when the guest changes it
+	"SC2,NVR,Mount PRAM;",
 	// slot 4 is the CD-ROM (SCSI ID 3).  CUE/BIN/CHD need the Main fork's
 	// Mac CD layer (support/mac/mac_cdrom.cpp), which serves them as a flat
 	// 2048-byte-sector disc plus a TOC blob; ISO/TOAST work on a stock Main.
@@ -87,6 +89,7 @@ localparam CONF_STR = {
 	"O[5],Monitor (on reset),13in 640x480,12in 512x384;",
 `endif
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	"O[13:12],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	// Built-in Ethernet (rtl/sonic_mbx.sv + the Main fork's support/mac).  Off by
 	// default: the machine is then bit for bit the one without it.  The core reads
 	// only [6]; the interface choice is the Main's.  The guest's MAC is 08:00:07 +
@@ -95,11 +98,9 @@ localparam CONF_STR = {
 	"-;",
 	"O[6],Ethernet (on reset),Off,On;",
 	"O[8:7],Net interface,eth0,eth1,wlan0,tap0;",
-	// BRING-UP ONLY (2026-09-18, remove before a release): machine fast paths off, to find what
-	// Open Transport's CAS/CAS2 list code trips over.  All latched under reset.
-	"O[9],Dbg store buffer,On,Off;",
-	"O[10],Dbg SDRAM line,On,Off;",
-	"O[11],Dbg DMA snoop,On,Off;",
+	"-;",
+	"O[46:44],ADB controller (on reset),Gravis GamePad,None,Gravis MouseStick II,Gravis Firebird,SideWinder 3D Pro;",
+	"O[47],Stick moves pointer,No,Yes;",
 `endif
 	"-;",
 	"T[0],Reset;",
@@ -127,6 +128,9 @@ localparam CONF_STR = {
 	"MT32-pi: CM-32L,",
 	"MT32-pi: Unknown mode;",
 	"v,0;",
+	"J,Trigger,Thumb,Button 3,Button 4,Button 5,Base 1,Base 2,Base 3;",
+	"jn,A,B,X,Y,L,R,Select,Start;",
+	"jp,B,A,Y,X,L,R,Select,Start;",
 	"V,v",`BUILD_DATE
 };
 
@@ -134,6 +138,9 @@ wire  [1:0] buttons;
 wire [127:0] status;
 wire [10:0] ps2_key;
 wire [24:0] ps2_mouse;
+wire [31:0] joystick_0;                    // [3:0] R L D U, [11:4] the J buttons
+wire [15:0] joystick_l_analog_0;           // {Y, X}, signed, up and left negative
+wire [15:0] joystick_r_analog_0;           // Y [15:8] is the Firebird throttle
 
 wire        ioctl_download;
 wire [15:0] ioctl_index;
@@ -144,10 +151,10 @@ reg         ioctl_wait;
 
 // hps_io virtual drives.  The slot numbers follow the Main fork's Mac SCSI
 // family layout (support/mac/mac.cpp) so its Toolbox / CD handlers apply:
-//   0 SCSI disk 0   1 SCSI disk 1   2 (unused; PRAM in MacLC)
+//   0 SCSI disk 0   1 SCSI disk 1   2 PRAM image (.nvr, as in MacLC)
 //   3 BlueSCSI Toolbox control   4 CD-ROM image   5 CD changer control
 localparam VDNUM      = 6;
-localparam VD_DISK0   = 0, VD_DISK1 = 1, VD_TOOLBOX = 3, VD_CDROM = 4, VD_CDTB = 5;
+localparam VD_DISK0   = 0, VD_DISK1 = 1, VD_PRAM = 2, VD_TOOLBOX = 3, VD_CDROM = 4, VD_CDTB = 5;
 wire [31:0] sd_lba[VDNUM];
 wire  [VDNUM-1:0] sd_rd, sd_wr;
 wire  [VDNUM-1:0] sd_ack;
@@ -173,20 +180,23 @@ assign sd_lba[VD_DISK0] = scsi_lba;  assign sd_lba[VD_DISK1] = scsi_lba;  assign
 assign sd_rd[VD_DISK0]   = scsi_rd[0];
 assign sd_rd[VD_DISK1]   = scsi_rd[1];
 assign sd_rd[VD_CDROM]   = scsi_rd[2];
-assign sd_rd[2]          = 1'b0;
+assign sd_rd[VD_PRAM]    = pram_rd;
 assign sd_rd[VD_TOOLBOX] = 1'b0;
 assign sd_rd[VD_CDTB]    = 1'b0;
 assign sd_wr[VD_DISK0]   = scsi_wr[0];
 assign sd_wr[VD_DISK1]   = scsi_wr[1];
-assign sd_wr[2]          = 1'b0;
+assign sd_wr[VD_PRAM]    = pram_wr;
 assign sd_wr[VD_TOOLBOX] = 1'b0;
 assign sd_wr[VD_CDROM]   = scsi_wr[2];                            // only the command block (LBA $7D......) is ever written
 assign sd_wr[VD_CDTB]    = 1'b0;
 assign sd_buff_din[VD_DISK0] = scsi_buff_din;
 assign sd_buff_din[VD_DISK1] = scsi_buff_din;
 assign sd_buff_din[VD_CDROM] = scsi_buff_din;
-assign sd_lba[2] = 0; assign sd_lba[VD_TOOLBOX] = 0; assign sd_lba[VD_CDTB] = 0;
-assign sd_buff_din[2] = 0; assign sd_buff_din[VD_TOOLBOX] = 0; assign sd_buff_din[VD_CDTB] = 0;
+// the PRAM image: words 0..127 are the 256 bytes, the rest of the sector pads with zeros
+assign sd_lba[VD_PRAM] = 32'd0;
+assign sd_buff_din[VD_PRAM] = (sd_buff_addr[12:7] == 6'd0) ? pram_h_rdata : 16'h0000;
+assign sd_lba[VD_TOOLBOX] = 0; assign sd_lba[VD_CDTB] = 0;
+assign sd_buff_din[VD_TOOLBOX] = 0; assign sd_buff_din[VD_CDTB] = 0;
 wire  [2:0] scsi_ack = {sd_ack[VD_CDROM], sd_ack[VD_DISK1], sd_ack[VD_DISK0]};
 
 hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(VDNUM), .BLKSZ(2)) hps_io
@@ -210,6 +220,9 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(VDNUM), .BLKSZ(2)) hps_io
 
 	.ps2_key(ps2_key),
 	.ps2_mouse(ps2_mouse),
+	.joystick_0(joystick_0),
+	.joystick_l_analog_0(joystick_l_analog_0),
+	.joystick_r_analog_0(joystick_r_analog_0),
 
 	.TIMESTAMP(TIMESTAMP),
 
@@ -376,8 +389,147 @@ always @(posedge clk_sys) begin
 	if (dl_d && !ioctl_download && rom_index) rom_loaded <= 1;
 end
 
+// ... and, at core start, until the PRAM image has been loaded (below)
 wire reset = RESET | status[0] | buttons[1] | ioctl_download |
-             ~rom_loaded | ~pll_locked;
+             ~rom_loaded | ~pll_locked | ~pram_ready | pram_force_reset;
+
+//////////////////////////////////////////////////////////////////
+// PRAM persistence: the 512-byte .nvr image on hps_io slot 2 (MacLC's
+// scheme, without the Egret's staging copy: the RTC's XPRAM is the only
+// copy and the host port writes and reads it in place).
+//   load  : when the image mounts (img_mounted[2], size != 0) -- one
+//           sd_rd of LBA 0, the 128 words landing straight in the XPRAM
+//   flush : when the OSD opens, or ~2 s after the guest's last PRAM
+//           write, if the guest has written PRAM since the last save
+//           (the settle timer restarts on every write, so the ROM's and
+//           System's bursts coalesce into one sector save)
+// The machine is held in reset until the FIRST load has landed, the slot
+// reports no image, or a ~3 s backstop expires, so a missing or slow
+// image never hangs the boot.  A load that lands after that (a slow HPS,
+// or a manual re-mount from the OSD) writes the XPRAM under the running
+// ROM and then pulses a machine reset, so the machine comes up on the
+// loaded PRAM.  The request handshake is the SCSI one: drop rd/wr when
+// sd_ack rises, the sector is done when it falls.  The read is watchdogged
+// (the HPS is busiest at core start, with the ROM download and every slot
+// mounting) and re-issued up to three times before the boot goes ahead
+// on defaults.
+//////////////////////////////////////////////////////////////////
+reg         pram_rd = 0, pram_wr = 0;
+wire        pram_ack = sd_ack[VD_PRAM];
+wire [15:0] pram_h_rdata;
+wire        pram_wr_stb;
+localparam [2:0] P_IDLE = 3'd0, P_LD_RD = 3'd1, P_LD_KICK = 3'd2, P_LD_DAT = 3'd3,
+                 P_SV_WR = 3'd4, P_SV_DAT = 3'd5, P_RST = 3'd6;
+reg   [2:0] pst = P_IDLE;
+// the load's words go into the XPRAM as they arrive (words 128+ are the pad)
+wire        pram_h_we   = (pst == P_LD_DAT) && pram_ack && sd_buff_wr && (sd_buff_addr[12:7] == 6'd0);
+wire  [6:0] pram_h_addr = sd_buff_addr[6:0];
+reg         pram_ena = 0;              // an image is mounted (size != 0)
+reg         pram_dirty = 0;            // the guest wrote PRAM since the last save
+reg         pram_ready = 0;            // the boot may proceed
+reg         pram_force_reset = 0;      // restart on a late load
+reg         pram_load_pending = 0, pram_flush_pending = 0;
+// the three timers count milliseconds from one shared prescaler
+reg  [15:0] pram_ms_div = 0;
+wire        pram_ms = (pram_ms_div == 16'd32999);
+reg  [11:0] pram_settle = 0;           // eager-flush settle timer
+reg  [11:0] pram_ld_wd = 0;            // load watchdog
+reg   [1:0] pram_ld_try = 0;
+reg  [11:0] pram_rdy_cnt = 0;          // ready backstop
+reg   [6:0] pram_rst_hold = 0;
+reg         old_pack = 0, old_osd = 0, old_pmnt = 0;
+localparam [11:0] PRAM_SETTLE  = 12'd2000;   // ms
+localparam [11:0] PRAM_LD_WD   = 12'd2000;   // ms per load attempt
+localparam [11:0] PRAM_RDY_MAX = 12'd3000;   // ms backstop
+
+always @(posedge clk_sys) begin
+	if (!pll_locked) begin
+		pst <= P_IDLE; pram_rd <= 0; pram_wr <= 0;
+		pram_ena <= 0; pram_dirty <= 0; pram_ready <= 0; pram_force_reset <= 0;
+		pram_load_pending <= 0; pram_flush_pending <= 0;
+		pram_ms_div <= 0;
+		pram_settle <= 0; pram_ld_wd <= 0; pram_ld_try <= 0; pram_rdy_cnt <= 0;
+		pram_rst_hold <= 0; old_pack <= 0; old_osd <= 0; old_pmnt <= 0;
+	end
+	else begin
+		old_pack <= pram_ack;
+		old_osd  <= OSD_STATUS;
+		old_pmnt <= img_mounted[VD_PRAM];
+		pram_ms_div <= pram_ms ? 16'd0 : pram_ms_div + 1'b1;
+
+		if (pram_wr_stb) pram_dirty <= 1'b1;
+
+		if (img_mounted[VD_PRAM] && !old_pmnt) begin
+			pram_ena <= (img_size != 0);
+			if (img_size != 0) pram_load_pending <= 1'b1;
+			else               pram_ready        <= 1'b1;   // no image: boot on defaults now
+		end
+		if (OSD_STATUS && !old_osd && pram_dirty && pram_ena) pram_flush_pending <= 1'b1;
+		if (pram_wr_stb)                 pram_settle <= PRAM_SETTLE;
+		else if (pram_ms && pram_settle > 12'd1) pram_settle <= pram_settle - 1'b1;
+		else if (pram_ms && pram_settle == 12'd1) begin
+			pram_settle <= 12'd0;
+			if (pram_dirty && pram_ena) pram_flush_pending <= 1'b1;
+		end
+		if (!pram_ready && pram_ms) begin
+			if (pram_rdy_cnt >= PRAM_RDY_MAX) pram_ready <= 1'b1;
+			else pram_rdy_cnt <= pram_rdy_cnt + 1'b1;
+		end
+		if (pram_force_reset) begin
+			if (pram_rst_hold == 0) pram_force_reset <= 1'b0;
+			else pram_rst_hold <= pram_rst_hold - 1'b1;
+		end
+
+		case (pst)
+		P_IDLE:
+			if (pram_load_pending) begin
+				pram_load_pending <= 0; pram_rd <= 1'b1;
+				pram_ld_wd <= 0; pram_ld_try <= 0; pst <= P_LD_RD;
+			end
+			else if (pram_flush_pending) begin
+				// a guest write from here on makes the image dirty again and
+				// schedules another save after it settles
+				pram_flush_pending <= 0; pram_dirty <= 0;
+				pram_wr <= 1'b1; pst <= P_SV_WR;
+			end
+
+		// ---- LOAD: one sector, straight into the XPRAM ----
+		P_LD_RD:
+			if (pram_ack) begin pram_rd <= 1'b0; pram_ld_wd <= 0; pst <= P_LD_DAT; end
+			else if (pram_ld_wd == PRAM_LD_WD) begin
+				pram_ld_wd <= 0;
+				if (pram_ld_try == 2'd3) begin      // give up: boot on defaults
+					pram_rd <= 1'b0; pram_ready <= 1'b1; pst <= P_IDLE;
+				end
+				else begin                          // drop and re-arm the request
+					pram_ld_try <= pram_ld_try + 1'b1;
+					pram_rd <= 1'b0; pst <= P_LD_KICK;
+				end
+			end
+			else if (pram_ms) pram_ld_wd <= pram_ld_wd + 1'b1;
+		P_LD_KICK: begin pram_rd <= 1'b1; pst <= P_LD_RD; end
+		P_LD_DAT:
+			if (old_pack && !pram_ack) begin
+				pram_dirty <= 0; pram_ena <= 1'b1;
+				// landed after the machine was released: restart it on the
+				// loaded PRAM (a manual mount-then-reset, automated)
+				if (pram_ready) pst <= P_RST;
+				else begin pram_ready <= 1'b1; pst <= P_IDLE; end
+			end
+			else if (pram_ld_wd == PRAM_LD_WD) begin
+				pram_ld_wd <= 0; pram_ready <= 1'b1; pst <= P_IDLE;   // wedged ack: boot as-is
+			end
+			else if (pram_ms) pram_ld_wd <= pram_ld_wd + 1'b1;
+
+		// ---- SAVE: the XPRAM read out through the host port ----
+		P_SV_WR:  if (pram_ack) begin pram_wr <= 1'b0; pst <= P_SV_DAT; end
+		P_SV_DAT: if (old_pack && !pram_ack) pst <= P_IDLE;
+
+		P_RST: begin pram_force_reset <= 1'b1; pram_rst_hold <= 7'd127; pst <= P_IDLE; end
+		default: pst <= P_IDLE;
+		endcase
+	end
+end
 
 // Re-announce the mounted image to the machine after EVERY reset.
 //
@@ -445,6 +597,7 @@ wire [31:0] mem_wdata;
 wire  [1:0] mem_memsel;
 wire [31:0] mem_rdata;                     // VRAM/ROM reg, or the SDRAM bridge
 wire        mem_ack;
+wire        mem_vram_wp;                   // direct VRAM write (mem_req low)
 reg  [31:0] mem_rdata_r;
 reg         mem_ack_r;
 
@@ -510,11 +663,32 @@ localparam SONIC_EN = 0;
 localparam SONIC_EN = 1;
 `endif
 reg         eth_ena = 1'b0;
-reg   [2:0] dbg_sw  = 3'd0;
+// The machine's three fast-path switches (store buffer, SDRAM line, DMA
+// snoop) were OSD "Dbg" options during the Ethernet bring-up; the paths
+// have been on in every release since, so the OSD lines are gone and the
+// switches are tied to their normal state.
+wire  [2:0] dbg_sw  = 3'd0;
 always @(posedge clk_sys) if (reset) begin
 	eth_ena <= (SONIC_EN != 0) && status[6];
-	dbg_sw  <= status[11:9];
 end
+// ADB game controller (docs/adb-joystick.md): the mode is latched under reset
+// like the RAM size (the Mac identifies ADB devices once, at boot), so a change
+// takes effect at the next restart; "Stick moves pointer" changes no device's
+// identity and applies at once.  The
+// OSD lists the GamePad first so that it is the default (status 0); adb.sv's
+// mode is 0 = none (the ADB bus behaves exactly as without it), 1 = Gravis
+// MouseStick II, 2 = Gravis Firebird, 3 = Gravis Mac GamePad, 4 = SideWinder
+// 3D Pro.  hps_io runs on clk_sys, so the joystick buses are already
+// synchronous to the machine.
+wire [2:0] adb_joy_osd  = status[46:44];
+wire [2:0] adb_joy_mode = (adb_joy_osd == 3'd0) ? 3'd3 :    // Gravis GamePad (default)
+                          (adb_joy_osd == 3'd2) ? 3'd1 :    // Gravis MouseStick II
+                          (adb_joy_osd == 3'd3) ? 3'd2 :    // Gravis Firebird
+                          (adb_joy_osd == 3'd4) ? 3'd4 :    // SideWinder 3D Pro
+                                                  3'd0;     // None
+reg  [2:0] adb_joy_cfg = 3'd0;
+always @(posedge clk_sys) if (reset) adb_joy_cfg <= adb_joy_mode;
+wire [51:0] adb_joy = {status[47], adb_joy_cfg, joystick_r_analog_0, joystick_l_analog_0, joystick_0[15:0]};
 wire [11:0] eth_mem_addr;
 wire        eth_mem_rd, eth_mem_we;
 wire [63:0] eth_mem_wdata;
@@ -543,9 +717,13 @@ quadra800 #(.RAM_ADDR_BITS(RAM_ADDR_BITS), .CDROM(CDROM_EN), .SONIC(SONIC_EN)) m
 	.mem_wp_be(mem_wp_be),
 	.mem_wp_data(mem_wp_data),
 	.mem_wq_room(sdr_wq_room),
+	.mem_vram_wp(mem_vram_wp),
 	.mem_line_valid(sdr_line_valid),
 	.mem_line_tag(sdr_line_tag),
 	.mem_line_data(sdr_line_data),
+	.mem_rom_line_valid(rom_line_valid),
+	.mem_rom_line_tag(rom_line_tag),
+	.mem_rom_line_data(rom_line),
 	.mem_line_pending(sdr_line_pending),
 	.mem_line_pending_tag(sdr_line_pending_tag),
 
@@ -568,7 +746,13 @@ quadra800 #(.RAM_ADDR_BITS(RAM_ADDR_BITS), .CDROM(CDROM_EN), .SONIC(SONIC_EN)) m
 
 	.ps2_key(ps2_key),
 	.ps2_mouse(ps2_mouse),
+	.adb_joy(adb_joy),
 	.timestamp(TIMESTAMP),
+	.pram_h_we(pram_h_we),
+	.pram_h_addr(pram_h_addr),
+	.pram_h_wdata(sd_buff_dout),
+	.pram_h_rdata(pram_h_rdata),
+	.pram_wr_stb(pram_wr_stb),
 
 	.scc_rxd_a(serialIn),
 	.scc_txd_a(serialOut),
@@ -610,7 +794,29 @@ quadra800 #(.RAM_ADDR_BITS(RAM_ADDR_BITS), .CDROM(CDROM_EN), .SONIC(SONIC_EN)) m
 
 wire m_hblank, m_vblank;
 assign CLK_VIDEO = clk_vid;
-assign VGA_DE = ~(m_hblank | m_vblank);
+wire mac_de = ~(m_hblank | m_vblank);
+
+// Aspect ratio and integer scaling are the framework's: video_freak turns
+// the OSD's Scale choice into the VIDEO_ARX/ARY scaled-size form the
+// scaler understands (V-Integer keeps every Mac line an integer number of
+// output lines).  No crop.
+video_freak video_freak
+(
+	.CLK_VIDEO(clk_vid),
+	.CE_PIXEL(CE_PIXEL),
+	.VGA_VS(VGA_VS),
+	.HDMI_WIDTH(HDMI_WIDTH),
+	.HDMI_HEIGHT(HDMI_HEIGHT),
+	.VGA_DE(VGA_DE),
+	.VIDEO_ARX(VIDEO_ARX),
+	.VIDEO_ARY(VIDEO_ARY),
+	.VGA_DE_IN(mac_de),
+	.ARX((!ar) ? 12'd4 : (ar - 1'd1)),
+	.ARY((!ar) ? 12'd3 : 12'd0),
+	.CROP_SIZE(12'd0),
+	.CROP_OFF(5'd0),
+	.SCALE({1'b0, status[13:12]})
+);
 
 //////////////////////////////////////////////////////////////////
 // SCC serial — MidiLink / PPP / console on channel A, MT32-pi on the user port
@@ -634,7 +840,13 @@ assign VGA_DE = ~(m_hblank | m_vblank);
 //////////////////////////////////////////////////////////////////
 wire serialOut, serialRTS;
 wire serialOutB;                           // printer port TX — unused for now
-wire serialCTS = 1'b1;                     // idle/deasserted: no device attached
+// The HPS UART's RTS, as the framework presents it (active low): a printer
+// daemon or pppd opened with RTS/CTS asserts it (low) when it can take data.
+// It reaches RR0's CTS bit uninverted, which is the polarity the Mac's
+// drivers want (hardware-settled, docs/perf/p262_trial_hw_20260929): 0 =
+// clear to send, and a daemon that is not running or drops RTS holds the
+// Mac off.  It used to be a constant 1 (never reaching RR0, which read 0).
+wire serialCTS = UART_CTS;
 wire [7:0] uart_mode;                      // from hps_io; 3 = MIDI
 
 wire userport_midi_in = (uart_mode == 8'd3) ? mt32_midi_rx : 1'b1;
@@ -772,10 +984,14 @@ assign LED_DISK = {1'b1, (|sd_rd) | (|sd_wr)};
 wire        sdr_ack;
 wire [31:0] sdr_rdata;
 
-// The ack the machine sees is this bridge's or the VRAM/ROM one; they are
-// never asserted together, because mem_memsel picks exactly one consumer.
-assign mem_ack   = mem_ack_r | sdr_ack;
-assign mem_rdata = sdr_ack ? sdr_rdata : mem_rdata_r;
+// The ack the machine sees is this bridge's, the VRAM port's or the ROM one;
+// they are never asserted together, because mem_memsel picks exactly one
+// consumer.  A VRAM beat is acknowledged in its second clock, straight from
+// the block RAM's output (vram_ack, below).
+wire        vram_ack;
+reg  [31:0] vram_qa;
+assign mem_ack   = mem_ack_r | sdr_ack | vram_ack;
+assign mem_rdata = sdr_ack ? sdr_rdata : mem_is_vram ? vram_qa : mem_rdata_r;
 
 sdram_beat32 sdr
 (
@@ -869,12 +1085,14 @@ function [16:0] vram_map(input [16:0] w);  // window word -> storage word
 	end
 endfunction
 
-reg [31:0] vram_qa;
 reg        vram_ph;                        // port-A phase: 0 capture, 1 deliver
 
 wire [16:0]  va_addr     = vram_map(mem_addr[18:2]);
 wire [16:0]  vb_addr     = vram_map(vid_addr[18:2]);
-wire         va_we       = mem_req && mem_is_vram && mem_write && !vram_ph;
+// a beat writes in its capture clock; a direct write (the store buffer's
+// drain, quadra800 bus_vram_direct) is a one-clock pulse with mem_req low
+wire         va_we       = (mem_req && mem_is_vram && mem_write && !vram_ph) || mem_vram_wp;
+assign       vram_ack    = mem_req && mem_is_vram && vram_ph;
 
 // Storage is one byte-wide array per lane rather than one 32-bit array
 // with byte enables: mem_be becomes each lane's write enable, so nothing
@@ -938,7 +1156,15 @@ reg        ioctl_pend;
 reg [26:0] ioctl_a;
 reg [15:0] ioctl_d;
 reg        ddr_wait_data;                  // read issued, awaiting DOUT_READY
-reg        ddr_rd_hi;
+// The ROM's retained line: every ROM read fetches its whole 16-byte line in
+// one two-beat burst, and the machine answers the line's other longwords from
+// here (quadra800 bus_rom_match) -- the I-cache's fill of a ROM line is one
+// DDR3 round trip instead of four.  ROM changes only by a boot.rom download.
+reg [127:0] rom_line;                      // longword 0 in [127:96]
+reg  [19:4] rom_line_tag;
+reg         rom_line_valid = 1'b0;
+reg   [1:0] ddr_rd_word;
+reg         ddr_rd_beat1;                  // the line's first 64-bit beat is in
 reg        ddr_wait_eth = 1'b0;            // ... for the Ethernet window instead
 assign     eth_mem_rvalid = ddr_wait_eth && DDRAM_DOUT_READY;
 
@@ -959,21 +1185,29 @@ always @(posedge clk_sys) begin
 		ddram_rd <= 0;
 	end
 
-	// VRAM beats (BRAM port A): capture edge, then deliver vram_qa
-	if (mem_req && !mem_ack && mem_is_vram) begin
-		if (!vram_ph) vram_ph <= 1;
-		else begin
-			vram_ph <= 0;
-			mem_rdata_r <= vram_qa;
-			mem_ack_r <= 1;
-		end
-	end
+	// VRAM beats (BRAM port A): the capture edge, then vram_qa is delivered
+	// with the combinational vram_ack; the machine drops mem_req on it
+	if (mem_req && mem_is_vram) vram_ph <= !vram_ph;
 
 	if (ddr_wait_data) begin
 		if (DDRAM_DOUT_READY) begin
-			mem_rdata_r <= ddr_rd_hi ? DDRAM_DOUT[63:32] : DDRAM_DOUT[31:0];
-			mem_ack_r   <= 1;
-			ddr_wait_data <= 0;
+			// beat 0 holds longwords 0 (low half) and 1, beat 1 longwords 2 and 3
+			if (!ddr_rd_beat1) begin
+				rom_line[127:64] <= {DDRAM_DOUT[31:0], DDRAM_DOUT[63:32]};
+				ddr_rd_beat1 <= 1;
+			end
+			else begin
+				rom_line[63:0] <= {DDRAM_DOUT[31:0], DDRAM_DOUT[63:32]};
+				rom_line_valid <= 1;
+				case (ddr_rd_word)
+					2'd0: mem_rdata_r <= rom_line[127:96];
+					2'd1: mem_rdata_r <= rom_line[95:64];
+					2'd2: mem_rdata_r <= DDRAM_DOUT[31:0];
+					2'd3: mem_rdata_r <= DDRAM_DOUT[63:32];
+				endcase
+				mem_ack_r   <= 1;
+				ddr_wait_data <= 0;
+			end
 		end
 	end
 	else if (ddr_wait_eth) begin
@@ -998,10 +1232,13 @@ always @(posedge clk_sys) begin
 				mem_ack_r <= 1;            // djMEMC discards ROM writes
 			end
 			else begin
-				ddram_addr     <= DDR_ROM_BASE | {12'd0, mem_addr[19:3]};
-				ddram_burstcnt <= 8'd1;
+				ddram_addr     <= DDR_ROM_BASE | {12'd0, mem_addr[19:4], 1'b0};
+				ddram_burstcnt <= 8'd2;
 				ddram_rd       <= 1;
-				ddr_rd_hi      <= mem_addr[2];
+				ddr_rd_word    <= mem_addr[3:2];
+				ddr_rd_beat1   <= 0;
+				rom_line_valid <= 0;
+				rom_line_tag   <= mem_addr[19:4];
 				ddr_wait_data  <= 1;
 			end
 		end
@@ -1023,6 +1260,7 @@ always @(posedge clk_sys) begin
 		// access never waits on the DDR3 side of this block.
 	end
 
+	if (ioctl_download && rom_index) rom_line_valid <= 0;
 	if (reset && !ioctl_download) begin
 		vram_ph <= 0;
 		ddr_wait_data <= 0;

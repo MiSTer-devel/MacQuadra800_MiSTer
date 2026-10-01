@@ -42,9 +42,12 @@ That is all that is required **to build**. (Deploy additionally needs `MISTER_HO
 bash scripts/build_only.sh
 ```
 
-A full compile takes roughly **35-40 minutes** on this design (it fits at ~81 % of the
-5CSEBA6 and closes 33 MHz with well under a nanosecond to spare, so the fitter works
-hard). Run it in a terminal you can leave open, or as a background task.
+Compile time depends on host, candidate and seed. Earlier builds took 35–40
+minutes at about 81% ALMs; the 2026-09-28 experimental seed31 fit took about
+18 minutes at 92% ALMs, with positive timing on every clock. See the
+[current handoff](HANDOFF-20260928.md) for its exact identity. On the current
+Linux host use a durable supervised process with captured exit status/logs,
+and preserve its inputs until completion. Only one Quartus flow may run globally.
 
 | command | what it does |
 |---|---|
@@ -109,13 +112,21 @@ It refuses to deploy if `MacQuadra800.fit.summary` does not say `Successful`, th
 to `tools/misterdeploy/launch_unstable_core.py`: scp (md5-verified) into `_Unstable`,
 reboot for a clean menu, and blind-OSD navigation generated from the live menu listing.
 
-Alongside the `.rbf` it seeds two things, both **create-only-if-missing** so real user
-data is never clobbered:
+Alongside the `.rbf` it seeds four things, all **create-only-if-missing** so real user
+data (including a saved PRAM) is never clobbered:
 
 | what | where | from |
 |---|---|---|
 | pristine 1 MB Quadra 800 ROM | `/media/fat/games/MacQuadra800/boot.rom` | `releases/quadra800.rom` |
 | SD slot 0 mount memory | `/media/fat/config/MacQuadra800.s0` | points at `games/MacQuadra800/QuadSquad8.hda` |
+| PRAM image (512 bytes, hps_io slot 2) | `/media/fat/games/MacQuadra800/MacQuadra800.nvr` | `releases/MacQuadra800.nvr` (all zeros: the ROM writes its defaults on the first boot and the core saves them back) |
+| SD slot 2 mount memory | `/media/fat/config/MacQuadra800.s2` | points at `games/MacQuadra800/MacQuadra800.nvr` |
+
+The PRAM rows come from `scripts/deploy_screenshot.sh` itself (`PRAM_SEED_*` in
+`scripts/local.env`, empty disables); the core loads the image before the machine
+leaves reset and saves it back ~2 s after the guest's last PRAM write or when the
+OSD opens (`docs/pram-nvr.md`). Without an image mounted the boot waits for a
+~3 s backstop and runs on defaults, as before.
 
 See `tools/misterdeploy/README.md` for the launcher's full flag set.
 
@@ -227,13 +238,10 @@ The pre-hardware gate is the Verilator testbench in `verilator/` — see
 - **The same core twice at once — don't.** Both compiles share `db/`, `incremental_db/`,
   and `output_files/`, so they would corrupt each other. `build_only.sh` prevents this:
   the second invocation waits (30 s poll) until the first Quartus finishes.
-- **Two *different* cores** (e.g. MacQuadra800 and MacLC, in separate repo directories):
-  Quartus *can* build them in parallel — they share no working state, and Lite has no
-  concurrency license lock. **But** `build_only.sh`'s wait-gate is host-global (it matches
-  *any* running `quartus_*` process), so by default the second build **waits** and they run
-  sequentially. To force them to run at the same time, launch the second with `--no-wait`.
-  Note that two full compiles contend for RAM/CPU, so each becomes slower — running them
-  sequentially is often nearly as fast and is safer.
+- **Different cores or isolated copies:** the current project policy still allows
+  only one Quartus flow globally. Keep the host-global wait gate enabled; do
+  not use `--no-wait` to bypass it. Check for any running `quartus_*` process
+  before launching, including flows owned by other work.
 
 ## Portability to other cores
 

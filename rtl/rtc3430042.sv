@@ -7,7 +7,9 @@
 //  registers, or the $38 extended-command path into full XPRAM.
 //
 //  PRAM powers up zeroed — the ROM sees an invalid checksum and writes
-//  its defaults, exactly like a Mac with a dead battery.
+//  its defaults, exactly like a Mac with a dead battery — unless the
+//  platform loads a saved image through the host port below before the
+//  machine leaves reset (MacQuadra800.sv, the .nvr image on hps_io slot 2).
 //============================================================================
 
 module rtc3430042
@@ -29,7 +31,24 @@ module rtc3430042
 	input        clk_in,                // PB1
 	input        data_in,               // PB0 as driven by the host
 	output       data_out,              // PB0 read-back
-	output       data_oe                // chip is driving PB0 (send phase)
+	output       data_oe,               // chip is driving PB0 (send phase)
+
+	// Host port into the XPRAM, for the platform's PRAM image (load at
+	// core start, save when the guest has changed it).  One 16-bit word
+	// per index i is the byte pair {byte 2i+1, byte 2i}, which is exactly
+	// the hps_io WIDE sector layout.  h_we is a one-clock pulse writing
+	// h_wdata at h_addr; pulses must be at least two clocks apart (the
+	// odd byte lands in the clock after).  h_rdata is the word at h_addr,
+	// valid three clocks after h_addr settles and refreshed continuously
+	// while no write is in flight.  Host writes bypass the guest's
+	// write-protect bit and do not count as guest writes.  The wall clock
+	// (seconds[]) is not part of the image: it keeps seeding from the host
+	// timestamp.
+	input        h_we,
+	input  [6:0] h_addr,
+	input [15:0] h_wdata,
+	output [15:0] h_rdata,
+	output       pram_wr_stb            // a guest PRAM byte write landed this clock
 );
 
 localparam [31:0] MAC_UNIX_DELTA = 32'd2082844800;  // 1904-01-01 -> 1970-01-01
@@ -61,20 +80,31 @@ wire [31:0] sec_n = sec_q + 32'd1;
 wire [4:0] regsel = cmd[6:2];
 
 //----------------------------------------------------------------------------
-// XPRAM storage.  One write port and one registered read port, so the
-// array infers as block RAM (three read address expressions, three write
-// sites and an initial clear kept the old bare array in logic: 1,137
-// ALUTs / 2,142 registers).  All accesses funnel through exec_cmd, which
-// fires on a single falling-clock-edge cycle, so at most one access is
-// live at a time.  Reads launch in the exec cycle and land in data_byte
-// one clock later via rd_pend — the bit-banged VIA clock is thousands of
-// core clocks per edge, so the host cannot observe the extra cycle.
+// XPRAM storage: one 256 x 8 true-dual-port M10K (the project's dpram
+// wrapper, an altsyncram in BIDIR_DUAL_PORT mode).  Port A is the chip's
+// own access, port B the host port's.
 //
-// The initial clear is gone: M10K powers up zeroed on this device, and
-// the sim's two-state arrays start zeroed too — the ROM still sees an
-// invalid checksum and rewrites its defaults (dead-battery path).
+// Port A: every guest access funnels through exec_cmd, which fires on a
+// single falling-clock-edge cycle, so at most one access is live at a time
+// and a read and a write never share a cycle (they come from different
+// command states).  Reads launch in the exec cycle and land in data_byte
+// one clock later via rd_pend -- the bit-banged VIA clock is thousands of
+// core clocks per edge, so the host cannot observe the extra cycle.  The
+// old bare array (one write port, one registered read port) inferred the
+// same block; three read address expressions, three write sites and an
+// initial clear had once kept it in logic: 1,137 ALUTs / 2,142 registers.
+//
+// Port B: a byte sequencer behind the 16-bit host word.  A write lands its
+// even byte in the h_we clock and its odd byte in the next; otherwise the
+// port reads the two bytes of h_addr alternately into h_rdata, so the word
+// follows the address within three clocks.  hps_io strobes one word per
+// SPI transfer (many clocks apart) and holds the address between strobes,
+// which is all the timing this needs.
+//
+// M10K powers up zeroed on this device, and the sim's two-state arrays
+// start zeroed too, so without a loaded image the ROM sees an invalid
+// checksum and rewrites its defaults (the dead-battery path).
 //----------------------------------------------------------------------------
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] pram [0:255];
 reg  [7:0] pram_q;
 reg        rd_pend;
 
@@ -92,10 +122,57 @@ wire       pram_we    = exec_now &&
                          (state == ST_WRITE && !wprot &&
                           (cmd[6] || cmd[6:4] == 3'b010)));
 wire [7:0] pram_waddr = (state == ST_XPWRITE) ? xpaddr : {3'b000, cmd[6:2]};
+assign     pram_wr_stb = pram_we;
+
+// host byte sequencer (port B)
+reg        hb_odd_pend;                // the odd byte of a host write is owed
+reg  [6:0] hb_odd_addr;
+reg  [7:0] hb_odd_data;
+reg        hb_ph;                      // which byte the idle read fetches
+reg        hb_ph_d;                    // ... and which one q_b now holds
+reg  [7:0] hb_lo, hb_hi;
+wire       hb_we    = h_we || hb_odd_pend;
+wire [7:0] hb_addr  = h_we        ? {h_addr, 1'b0} :
+                      hb_odd_pend ? {hb_odd_addr, 1'b1} :
+                                    {h_addr, hb_ph};
+wire [7:0] hb_wdata = h_we ? h_wdata[7:0] : hb_odd_data;
+wire [7:0] hb_q;
+reg        hb_we_d;                    // port B wrote in the previous clock
+assign h_rdata = {hb_hi, hb_lo};
+
+dpram #(8, 8) pram_ram (
+	.clock     (clk),
+	.address_a (pram_we ? pram_waddr : pram_raddr),
+	.data_a    (bnow),
+	.wren_a    (pram_we),
+	.q_a       (pram_q),
+	.address_b (hb_addr),
+	.data_b    (hb_wdata),
+	.wren_b    (hb_we),
+	.q_b       (hb_q)
+);
 
 always @(posedge clk) begin
-	if (pram_we) pram[pram_waddr] <= bnow;
-	pram_q <= pram[pram_raddr];
+	if (!nreset) begin
+		hb_odd_pend <= 0; hb_odd_addr <= 0; hb_odd_data <= 0;
+		hb_ph <= 0; hb_ph_d <= 0; hb_lo <= 0; hb_hi <= 0; hb_we_d <= 0;
+	end
+	else begin
+		hb_odd_pend <= h_we;
+		if (h_we) begin
+			hb_odd_addr <= h_addr;
+			hb_odd_data <= h_wdata[15:8];
+		end
+		// q_b holds the byte addressed in the previous clock; only an idle
+		// read's byte is captured (a write cycle's read-back is not a word)
+		hb_ph_d <= hb_ph;
+		if (!hb_we) hb_ph <= !hb_ph;
+		hb_we_d <= hb_we;
+		if (!hb_we_d) begin
+			if (hb_ph_d) hb_hi <= hb_q;
+			else         hb_lo <= hb_q;
+		end
+	end
 end
 
 always @(posedge clk) begin

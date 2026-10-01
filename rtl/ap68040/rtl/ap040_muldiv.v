@@ -48,11 +48,15 @@ reg [31:0] mcand;                 // multiplicand (absolute)
 reg [63:0] prod;                  // registered DSP product
 reg [96:0] acc;
 
-// absolute values for signed operations
+// absolute values for signed operations.  The dividend's and the
+// multiplicand's negations share one low-half negator: the low 32 bits of
+// -{op_hi, op_lo} are -op_lo, and its high half is ~op_hi plus the borrow
+// (op_lo == 0).
 wire [31:0] abs_a  = (sign_op && op_a[31]) ? (32'd0 - op_a) : op_a;
-wire [63:0] dvd    = {op_hi, op_lo};
-wire [63:0] abs_d  = (sign_op && op_hi[31]) ? (64'd0 - dvd) : dvd;
-wire [31:0] abs_m  = (sign_op && op_lo[31]) ? (32'd0 - op_lo) : op_lo;
+wire [31:0] neg_lo = 32'd0 - op_lo;
+wire        lo_z   = (op_lo == 32'd0);
+wire [63:0] abs_d  = (sign_op && op_hi[31]) ? {~op_hi + {31'd0, lo_z}, neg_lo} : {op_hi, op_lo};
+wire [31:0] abs_m  = (sign_op && op_lo[31]) ? neg_lo : op_lo;
 
 // divide: four cascaded restoring steps per cycle (64 bits = 16 rounds),
 // each exactly one former one-bit iteration; the divisor is an explicit
@@ -75,6 +79,14 @@ wire [96:0] div4 = div_step(div_step(div_step(div_step(acc, den), den), den), de
 
 wire [63:0] q_raw = div_r ? acc[63:0] : prod;
 wire [31:0] r_raw = acc[95:64];
+// one negator each for the result halves: the low half is -q_raw[31:0]
+// for both paths; the high half is ~x + 1 for the remainder (-r_raw) and
+// ~x + (low == 0) for the product (the upper half of -{hi, lo})
+wire [31:0] res_lo_neg = 32'd0 - q_raw[31:0];
+wire [31:0] hi_src     = div_r ? r_raw : q_raw[63:32];
+wire        hi_neg     = div_r ? neg_r : neg_q;
+wire [31:0] hi_negated = ~hi_src + {31'd0, (div_r ? 1'b1 : (q_raw[31:0] == 32'd0))};
+wire [31:0] res_hi_v   = hi_neg ? hi_negated : hi_src;
 
 always @(posedge clk) begin
 	if (!nreset) begin
@@ -129,19 +141,14 @@ always @(posedge clk) begin
 			else begin
 				running <= 1'b0;
 				done    <= 1'b1;
-				if (div_r) begin
-					res_lo <= neg_q ? (32'd0 - q_raw[31:0]) : q_raw[31:0];
-					res_hi <= neg_r ? (32'd0 - r_raw) : r_raw;
-					ovf    <= (|q_raw[63:32]) |
-					          (sign_op & (neg_q ? (q_raw[31:0] > 32'h8000_0000)
-					                            : q_raw[31]));
-				end
-				else begin
-					res_lo <= neg_q ? (32'd0 - q_raw[31:0]) : q_raw[31:0];
-					res_hi <= neg_q ? (~q_raw[63:32] + {31'd0, (q_raw[31:0] == 32'd0)})
-					                : q_raw[63:32];
-					ovf    <= 0;
-				end
+				res_lo <= neg_q ? res_lo_neg : q_raw[31:0];
+				res_hi <= res_hi_v;
+				if (div_r)
+					ovf <= (|q_raw[63:32]) |
+					       (sign_op & (neg_q ? (q_raw[31] && (q_raw[30:0] != 31'd0))
+					                         : q_raw[31]));
+				else
+					ovf <= 0;
 			end
 		end
 	end

@@ -91,9 +91,17 @@ module iosb
 	// ADB input devices
 	input  [10:0] ps2_key,
 	input  [24:0] ps2_mouse,
+	input  [51:0] adb_joy,
 
 	// Unix seconds from the HPS, straight through to the RTC
 	input  [32:0] timestamp,
+	// PRAM image host port (rtl/rtc3430042.sv): one hps_io WIDE word per
+	// index, load at core start, save when the guest has written PRAM
+	input         pram_h_we,
+	input   [6:0] pram_h_addr,
+	input  [15:0] pram_h_wdata,
+	output [15:0] pram_h_rdata,
+	output        pram_wr_stb,
 
 	// DEBUG: the bus adapter's fault channel, so the SCSI trace below can
 	// report WHERE a driver went when it did not reach this chip.
@@ -171,6 +179,11 @@ rtc3430042 rtc (
 	.clk(clk),
 	.nreset(nreset),
 	.timestamp(timestamp),
+	.h_we(pram_h_we),
+	.h_addr(pram_h_addr),
+	.h_wdata(pram_h_wdata),
+	.h_rdata(pram_h_rdata),
+	.pram_wr_stb(pram_wr_stb),
 	.ce_n(rtc_ce_n),
 	.clk_in(rtc_clk),
 	.data_in(rtc_din),
@@ -262,6 +275,7 @@ adb adbx (
 
 	.ps2_mouse(ps2_mouse),
 	.ps2_key(ps2_key),
+	.adb_joy(adb_joy),
 	.resp_pending(adb_resp_pending),
 	.dbg_adb(),
 	.mouse_has_event_o()
@@ -1120,9 +1134,21 @@ always @(posedge clk) begin
 				if (sel_via2) begin
 					if (write) begin
 						case (rsel)
-						// bit 1 (any slot) is a live level: see above
+						// bit 1 (any slot) is a live level: see above.  This
+						// assignment covers all of via2_ifr[6:0] and comes after
+						// the edge latches above, so it must carry what they
+						// set in this very clock: bit 3 is the 53C96 INT level
+						// (the chip holds INT until its ISR is read, and the
+						// latch above follows the level at both edges), bit 0
+						// the DRQ level likewise, bit 4 an ASC edge arriving
+						// now.  Without that, the VBL dispatcher's move.b #$02
+						// (which clears nothing) landing in the clock of a SCSI
+						// INT edge erased it: no level-2 interrupt again for
+						// that command and the Finder copy hung mid-write, one
+						// copy in ten to twenty on hardware, deterministic in
+						// the sim (docs/scsi-write-hang-20260928.md).
 						4'd13:   via2_ifr[6:0] <= (via2_ifr[6:0] & ~(wbyte[6:0] & 7'h19) & 7'h7D)
-						                          | {5'd0, slot_any, 1'b0};
+						                          | {2'd0, asc_irq_i && !asc_d, scsi_irq_i, 1'b0, slot_any, scsi_drq_i};
 						4'd14:   via2_ier[6:0] <= wbyte[7]
 						             ? (via2_ier[6:0] |  (wbyte[6:0] & 7'h1b))
 						             : (via2_ier[6:0] & ~(wbyte[6:0] & 7'h1b));
@@ -1297,7 +1323,10 @@ always @(posedge clk) begin
 		// = vector 2 = bus error, and it moved around between boots exactly as a
 		// latency-dependent fault would. Only idle waiting counts toward the
 		// timeout, which is the condition the escape was actually written for.
-		else if (io_rd == 3'b000 && io_wr == 3'b000) sdma_watch <= sdma_watch + 1'b1;
+		// The request lines drop when the acknowledge rises, so the ack itself
+		// (Main's SPI transfer of the sector, tens of ms if Main is preempted
+		// mid-transfer) must not age it either (docs/scsi-write-hang-20260928.md).
+		else if (io_rd == 3'b000 && io_wr == 3'b000 && io_ack == 3'b000) sdma_watch <= sdma_watch + 1'b1;
 		default: astate <= A_IDLE;
 		endcase
 	end

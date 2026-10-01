@@ -59,15 +59,79 @@ wire [31:0] am = a & szmask;
 wire [31:0] bm = b & szmask;
 wire        a_msb = (size == `AP040_SZ_B) ? a[7]  : (size == `AP040_SZ_W) ? a[15] : a[31];
 wire        b_msb = (size == `AP040_SZ_B) ? b[7]  : (size == `AP040_SZ_W) ? b[15] : b[31];
+// ---- one funnel shifter for every shift and rotate ----------------------
+// The operand goes into a 66-bit container that the funnel shifts RIGHT by
+// shf_k (arithmetically: bit 65 is the fill); the shift arm takes bits
+// [32:0] of the result.  Per class:
+//  - LSR/ASR: {fill, value} shifted by n, the fill being the sign for ASR
+//    and zero for LSR (the last bit out is selected separately);
+//  - LSL/ASL: the value at [2W-1:W] over W zeros, shifted by W-n, so the
+//    result is [W-1:0] and the last bit out is [W] (n > W gives zeros);
+//  - ROL/ROR: the value replicated with period W, shifted by n mod W (a
+//    left rotate is a right one by W - n mod W), the result is [W-1:0];
+//  - ROXL/ROXR: {X, value} replicated with period W+1, shifted by n mod
+//    (W+1) the same way; the result is [W-1:0] and its X is [W].
+// Closed forms equal to composing shcnt (1..63) one-bit steps, as before:
+// shifts have C = X = the last bit out and ASL V when the top shcnt+1 bits
+// of the source are not all equal; plain rotates leave X and take C from
+// the bit that wrapped last; ROXx rotates the (W+1)-bit {X, value}
+// container by shcnt mod (W+1) and reports C = the rotated X.
 wire shift_left = (op == `AP040_ALU_ASL1) || (op == `AP040_ALU_LSL1);
-wire shift_arithmetic = (op == `AP040_ALU_ASR1);
-wire shift_signfill = shift_arithmetic && b_msb;
-wire [31:0] shift_input = shift_left ? reverse32(bm) :
-	(shift_signfill ? (bm | ~szmask) : bm);
-wire signed [32:0] shift_signed_input = {shift_signfill, shift_input};
-wire [31:0] shift_right_result = shift_signed_input >>> shcnt;
-wire [31:0] shared_shift_result =
-	(shift_left ? reverse32(shift_right_result) : shift_right_result) & szmask;
+wire shf_asr    = (op == `AP040_ALU_ASR1);
+wire shf_right  = shf_asr || (op == `AP040_ALU_LSR1);
+wire shf_rox    = (op == `AP040_ALU_ROXL1) || (op == `AP040_ALU_ROXR1);
+wire shf_rleft  = (op == `AP040_ALU_ROL1) || (op == `AP040_ALU_ROXL1);
+wire [5:0] shf_nm = shcnt & (nbits - 6'd1);
+// n mod (W+1) for the ROXx container without a variable-modulus divider:
+// the three sizes give constant moduli 9, 17 and 33, and with n < 64 each
+// is a few conditional subtractions (a variable form synthesized a 33-bit
+// divider in every shift's result and flag path, 6 ns, 2026-09-17)
+wire [5:0] shf_nx = (size == `AP040_SZ_B) ?
+                    ((shcnt >= 6'd63) ? shcnt - 6'd63 : (shcnt >= 6'd54) ? shcnt - 6'd54 :
+                     (shcnt >= 6'd45) ? shcnt - 6'd45 : (shcnt >= 6'd36) ? shcnt - 6'd36 :
+                     (shcnt >= 6'd27) ? shcnt - 6'd27 : (shcnt >= 6'd18) ? shcnt - 6'd18 :
+                     (shcnt >= 6'd9)  ? shcnt - 6'd9  : shcnt) :
+                    (size == `AP040_SZ_W) ?
+                    ((shcnt >= 6'd51) ? shcnt - 6'd51 : (shcnt >= 6'd34) ? shcnt - 6'd34 :
+                     (shcnt >= 6'd17) ? shcnt - 6'd17 : shcnt) :
+                    ((shcnt >= 6'd33) ? shcnt - 6'd33 : shcnt);
+wire [5:0] shf_period = nbits + {5'd0, shf_rox};            // 8/9/16/17/32/33
+wire [5:0] shf_ramt   = shf_rox ? shf_nx : shf_nm;
+wire [5:0] shf_rk     = (shf_rleft && shf_ramt != 6'd0) ? (shf_period - shf_ramt) : shf_ramt;
+wire       shf_n_gt_w = (shcnt > nbits);
+wire [5:0] shf_k      = shf_right ? shcnt :
+                        shift_left ? (shf_n_gt_w ? 6'd0 : (nbits - shcnt)) : shf_rk;
+// a right shift's last bit out, bit n-1 of the sized value (zero beyond it
+// and for a zero count; the sign for ASR at or past the width)
+wire [31:0] shf_rsel  = bm >> (shcnt - 6'd1);
+wire        shf_rc    = (shf_asr && shcnt >= nbits) ? b_msb : shf_rsel[0];
+// the rotate element: the sized value with X just above it for ROXx
+wire [32:0] shf_elem = {1'b0, bm} | (shf_rox ? ({32'd0, f_x} << nbits) : 33'd0);
+wire [65:0] shf_rep8  = {shf_elem[1:0],  {8{shf_elem[7:0]}}};
+wire [65:0] shf_rep9  = {shf_elem[2:0],  {7{shf_elem[8:0]}}};
+wire [65:0] shf_rep16 = {shf_elem[1:0],  {4{shf_elem[15:0]}}};
+wire [65:0] shf_rep17 = {shf_elem[14:0], {3{shf_elem[16:0]}}};
+wire [65:0] shf_rep32 = {shf_elem[1:0],  {2{shf_elem[31:0]}}};
+wire [65:0] shf_rep33 = {2{shf_elem[32:0]}};
+wire [65:0] shf_crot  = (size == `AP040_SZ_B) ? (shf_rox ? shf_rep9  : shf_rep8) :
+                        (size == `AP040_SZ_W) ? (shf_rox ? shf_rep17 : shf_rep16) :
+                                                (shf_rox ? shf_rep33 : shf_rep32);
+// a left shift's container is the period-W replication with its low copy
+// cleared (the value at [2W-1:W] over zeros)
+wire        shf_fill  = shf_asr & b_msb;
+wire [65:0] shf_cright = {{34{shf_fill}}, bm | (shf_fill ? ~szmask : 32'd0)};
+wire signed [65:0] shf_c = shf_right ? shf_cright :
+                           {shf_crot[65:32], shf_crot[31:0] & (shift_left ? ~szmask : 32'hFFFF_FFFF)};
+wire [65:0] shf_shifted = shf_c >>> shf_k;
+wire [32:0] shf_o = shf_shifted[32:0];
+// the bit at position W of the funnel's output, and W-1 of a result
+wire        shf_o_w   = (size == `AP040_SZ_B) ? shf_o[8]  : (size == `AP040_SZ_W) ? shf_o[16] : shf_o[32];
+// ASL V: the top shcnt+1 bits of the source are not all equal, i.e. some
+// bit at or above W-1-n differs from the sign
+wire [31:0] shf_vd    = (bm ^ (b_msb ? szmask : 32'd0)) & szmask;
+wire [5:0]  shf_vpos  = nbits - 6'd1 - shcnt;
+wire [31:0] shf_vmask = 32'hFFFF_FFFF << shf_vpos;
+wire        shf_asl_v = (shcnt >= nbits) ? (bm != 32'd0) : (|(shf_vd & shf_vmask));
 
 function res_msb;
 	input [31:0] r;
@@ -132,22 +196,22 @@ wire [9:0] bcd_asum = {2'd0, b[7:0]} + {2'd0, a[7:0]} + {9'd0, f_x}
 wire       bcd_ac   = ((bcd_asum & 10'h3F0) > 10'h090);
 wire [9:0] bcd_ares = bcd_asum + (bcd_ac ? 10'h060 : 10'd0);
 
+// NBCD is the SBCD chain with a zero destination and b as the source (b is
+// the pipeline dst operand -- single-operand ops must not touch port a,
+// which still holds the previous instruction's source): one chain serves
+// both, its operands selected by the opcode
+wire       bcd_nb   = (op == `AP040_ALU_NBCD);
+wire [7:0] bcd_sb   = bcd_nb ? 8'd0 : b[7:0];
+wire [7:0] bcd_sa   = bcd_nb ? b[7:0] : a[7:0];
+
 // SBCD: b - a - X; the $60 adjust keys off the uncorrected byte borrow,
 // the carry flag off the borrow after the low-nibble correction
-wire       bcd_slb  = ({1'b0, b[3:0]} < ({1'b0, a[3:0]} + {4'd0, f_x}));
-wire [9:0] bcd_sraw = {2'd0, b[7:0]} - {2'd0, a[7:0]} - {9'd0, f_x};
+wire       bcd_slb  = ({1'b0, bcd_sb[3:0]} < ({1'b0, bcd_sa[3:0]} + {4'd0, f_x}));
+wire [9:0] bcd_sraw = {2'd0, bcd_sb} - {2'd0, bcd_sa} - {9'd0, f_x};
 wire [9:0] bcd_scor = bcd_sraw - (bcd_slb ? 10'd6 : 10'd0);
 wire [9:0] bcd_sres = bcd_scor - (bcd_sraw[9] ? 10'h060 : 10'd0);
 wire       bcd_sc   = bcd_scor[9];
 
-// NBCD: 0 - b - X (the SBCD datapath with a zero destination; b is the
-// pipeline dst operand -- single-operand ops must not touch port a,
-// which still holds the previous instruction's source)
-wire       nbc_lb   = (b[3:0] != 4'd0) | f_x;
-wire [9:0] nbc_raw  = 10'd0 - {2'd0, b[7:0]} - {9'd0, f_x};
-wire [9:0] nbc_cor  = nbc_raw - (nbc_lb ? 10'd6 : 10'd0);
-wire [9:0] nbc_res  = nbc_cor - (nbc_raw[9] ? 10'h060 : 10'd0);
-wire       nbc_c    = nbc_cor[9];
 
 // single-bit shift/rotate primitives on the sized value bm
 wire sh_msb  = b_msb;
@@ -166,8 +230,9 @@ wire [31:0] roxr_r = shr_l | (f_x ? (szmask ^ (szmask >> 1)) : 32'd0);
 wire [31:0] bit_mask = 32'd1 << a[4:0];
 wire        bit_set  = |(b & bit_mask);
 
-// shared intermediate results
-wire [31:0] negx_res = (32'd0 - bm - {31'd0, f_x}) & szmask;
+// shared intermediate results: NEG is NEGX with the extend forced off
+wire        neg_ext  = (op == `AP040_ALU_NEGX) && f_x;
+wire [31:0] negx_res = (32'd0 - bm - {31'd0, neg_ext}) & szmask;
 wire [31:0] ext_res  = (size == `AP040_SZ_W) ? {16'd0, {8{b[7]}}, b[7:0]}
                                              : {{16{b[15]}}, b[15:0]};
 
@@ -227,14 +292,14 @@ always @* begin
 		end
 
 		`AP040_ALU_NEG: if (!PIPELINE_SUBSET) begin
-			// 0 - b
-			result = (32'd0 - bm) & szmask;
-			flags_out = {|bm ? 1'b1 : 1'b0,
-			             res_msb(32'd0 - bm),
-			             res_zero(32'd0 - bm),
-			             res_msb(bm) & res_msb(32'd0 - bm),
-			             |bm ? 1'b1 : 1'b0};
-		end
+				// 0 - b: negx_res with the extend off
+				result = negx_res;
+				flags_out = {|bm ? 1'b1 : 1'b0,
+				             res_msb(negx_res),
+				             res_zero(negx_res),
+				             res_msb(bm) & res_msb(negx_res),
+				             |bm ? 1'b1 : 1'b0};
+			end
 
 		`AP040_ALU_NEGX: if (!PIPELINE_SUBSET) begin
 			// 0 - b - X
@@ -286,100 +351,39 @@ always @* begin
 		end
 
 		`AP040_ALU_NBCD: if (!PIPELINE_SUBSET) begin
-			result = {24'd0, nbc_res[7:0]};
-			flags_out = {nbc_c, flags_in[3], f_z & (nbc_res[7:0] == 8'd0), flags_in[1], nbc_c};
-		end
+				result = {24'd0, bcd_sres[7:0]};
+				flags_out = {bcd_sc, flags_in[3], f_z & (bcd_sres[7:0] == 8'd0), flags_in[1], bcd_sc};
+			end
 
 		`AP040_ALU_ASL1, `AP040_ALU_LSL1, `AP040_ALU_ASR1,
 		`AP040_ALU_LSR1, `AP040_ALU_ROL1, `AP040_ALU_ROR1,
 		`AP040_ALU_ROXL1, `AP040_ALU_ROXR1: begin : sh_barrel
-			// single-cycle barrel: closed forms equal to composing shcnt
-			// (1..63) of the former one-bit steps.  Verified equivalences:
-			// shifts: C=X=last bit out; ASL V = the top shcnt+1 bits of the
-			// source are not all equal (any-step MSB change); plain rotates
-			// leave X and take C from the bit that wrapped last; ROXx
-			// rotates the (size+1)-bit {X,value} container by shcnt mod
-			// (size+1) and reports C = the rotated X for every nonzero
-			// count, including exact multiples of size+1.
-			reg  [5:0] n, nm, nx, ne;
-			reg [32:0] w, rot, cmask, rotate_in, rotate_mask;
-			reg [5:0] rotate_width, rotate_amount, rotate_left;
-			reg rotate_extend, rotate_right;
-			reg [31:0] r, sext, win;
+			// single-cycle barrel through the one funnel shifter above
+			reg [31:0] r;
 			reg        c, x2, vf;
-			n  = shcnt;
-			r  = 32'd0; c = 1'b0; x2 = f_x; vf = 1'b0;
-			nm = n & (nbits - 6'd1);
-			// n mod (size+1) for the ROXx container without a variable-modulus
-			// divider: the three sizes give constant moduli 9, 17 and 33, and
-			// with n < 64 each is a few conditional subtractions.  The
-			// variable form synthesized a 33-bit divider that sat in every
-			// register shift's result and flag path (6 ns, 2026-09-17).
-			case (nbits)
-				6'd8:  nx = (n >= 6'd63) ? n - 6'd63 : (n >= 6'd54) ? n - 6'd54 :
-				            (n >= 6'd45) ? n - 6'd45 : (n >= 6'd36) ? n - 6'd36 :
-				            (n >= 6'd27) ? n - 6'd27 : (n >= 6'd18) ? n - 6'd18 :
-				            (n >= 6'd9)  ? n - 6'd9  : n;
-				6'd16: nx = (n >= 6'd51) ? n - 6'd51 : (n >= 6'd34) ? n - 6'd34 :
-				            (n >= 6'd17) ? n - 6'd17 : n;
-				default: nx = (n >= 6'd33) ? n - 6'd33 : n;
-			endcase
-			ne = (n > nbits) ? nbits : n;
-			cmask = (33'd2 << nbits) - 33'd1;
-			w = ({32'd0, f_x} << nbits) | {1'b0, bm};
-			rotate_extend = (op == `AP040_ALU_ROXL1) || (op == `AP040_ALU_ROXR1);
-			rotate_right = (op == `AP040_ALU_ROR1) || (op == `AP040_ALU_ROXR1);
-			rotate_width = nbits + rotate_extend;
-			rotate_amount = rotate_extend ? nx : nm;
-			rotate_left = rotate_right ? (rotate_width - rotate_amount) : rotate_amount;
-			rotate_in = rotate_extend ? w : {1'b0, bm};
-			rotate_mask = rotate_extend ? cmask : {1'b0, szmask};
-			rot = ((rotate_in << rotate_left) | (rotate_in >> (rotate_width - rotate_left))) & rotate_mask;
-			case (op)
-				`AP040_ALU_ASL1, `AP040_ALU_LSL1: begin
-					r = shared_shift_result;
-					c = (n <= nbits) && (((bm >> (nbits - n)) & 32'd1) != 0);
-					x2 = c;
-					if (op == `AP040_ALU_ASL1) begin
-						if (n >= nbits) vf = (bm != 0);
-						else begin
-							win = bm >> (nbits - 6'd1 - n);
-							vf = !((win == 0) ||
-							       (win == ((32'd2 << n) - 32'd1)));
-						end
-					end
+			vf = 1'b0;
+			if (shf_right) begin
+				r  = shf_o[31:0] & szmask;
+				c  = shf_rc;
+				x2 = c;
+			end
+			else if (shift_left) begin
+				r  = shf_o[31:0] & szmask;
+				c  = (shf_n_gt_w || shcnt == 6'd0) ? 1'b0 : shf_o_w;
+				x2 = c;
+				vf = (op == `AP040_ALU_ASL1) && shf_asl_v;
+			end
+			else begin
+				r = shf_o[31:0] & szmask;
+				if (shf_rox) begin
+					x2 = shf_o_w;
+					c  = x2;
 				end
-				`AP040_ALU_LSR1: begin
-					r = shared_shift_result;
-					c = (n <= nbits) && (((bm >> (n - 6'd1)) & 32'd1) != 0);
-					x2 = c;
+				else begin
+					x2 = f_x;
+					c  = shf_rleft ? r[0] : res_msb(r);
 				end
-				`AP040_ALU_ASR1: begin
-					// Sign-extend for arithmetic shifts before the shared signed right shift.
-					r = shared_shift_result;
-					c = (n >= nbits) ? b_msb
-					                 : (((bm >> (n - 6'd1)) & 32'd1) != 0);
-					x2 = c;
-				end
-				`AP040_ALU_ROL1: begin
-					r = rot[31:0] & szmask;
-					c = r[0];
-				end
-				`AP040_ALU_ROR1: begin
-					r = rot[31:0] & szmask;
-					c = ((r >> (nbits - 6'd1)) & 32'd1) != 0;
-				end
-				`AP040_ALU_ROXL1: begin
-					x2 = ((rot >> nbits) & 33'd1) != 0;
-					r = rot[31:0] & szmask;
-					c = x2;
-				end
-				default: begin // AP040_ALU_ROXR1
-					x2 = ((rot >> nbits) & 33'd1) != 0;
-					r = rot[31:0] & szmask;
-					c = x2;
-				end
-			endcase
+			end
 			result = r;
 			flags_out = {x2, res_msb(r), res_zero(r), vf, c};
 		end
