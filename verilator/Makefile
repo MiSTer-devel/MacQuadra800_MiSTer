@@ -309,3 +309,11 @@ tb_adb:
 tb_rtc_pram:
 	$(IOSB_TB) --top-module tb_rtc_pram --Mdir ./obj_dir_tb_rtc_pram -o tb_rtc_pram tb_rtc_pram.sv $(RTL)/rtc3430042.sv $(RTL)/dpram.v
 	./obj_dir_tb_rtc_pram/tb_rtc_pram
+
+# rtl/via6522.sv (VIA1): an event beats a same-clock IFR clear -- the Timer 2
+# timeout lost to the VBL acknowledge stopped the Time Manager (DOTT, DOOM II,
+# Dracula; 2026-10-01).  29 rows over T2, T1, CA1 and the shift register.
+#   make tb_via_irq_race
+tb_via_irq_race:
+	$(IOSB_TB) --timing --top-module tb_via_irq_race --Mdir ./obj_dir_tb_via_irq_race -o tb_via_irq_race tb_via_irq_race.v $(RTL)/via6522.sv
+	./obj_dir_tb_via_irq_race/tb_via_irq_race > obj_dir_tb_via_irq_race/run.log 2>&1; grep "^TB" obj_dir_tb_via_irq_race/run.log; ! grep -q "^TB FAIL" obj_dir_tb_via_irq_race/run.log && grep -q "^TB PASS" obj_dir_tb_via_irq_race/run.log

@@ -241,6 +241,12 @@ module via6522 (
     end
 
     always @(posedge clock) begin
+        // The IFR bits the CPU access of this clock clears.  Collected here
+        // and applied once, below, with the events on top: see there.
+        reg [6:0] ifr_clr;
+
+        ifr_clr = 7'h00;
+
         // CA1/CA2/CB1/CB2 edge detect flipflops
         ca1_c <= ca1_i;
         ca2_c <= ca2_i;
@@ -301,19 +307,15 @@ module via6522 (
             end
         end
 
-        // Interrupt logic
-        irq_flags <= irq_flags |
-                     irq_events;
-
         // Writes
         if (wen == 1'b1 && falling == 1'b1) begin
             case (addr)
                 4'h0: begin // ORB
                     pio_i_prb <= data_in;
                     if (cb2_no_irq_clr == 1'b0) begin
-                        irq_flags[3] <= 1'b0;
+                        ifr_clr[3] = 1'b1;
                     end
-                    irq_flags[4] <= 1'b0;
+                    ifr_clr[4] = 1'b1;
                 end
                 
                 4'h1: begin // ORA
@@ -321,9 +323,9 @@ module via6522 (
                     $display("VIA1 ORA WRITE: addr=%h data_in=%h old_pra=%h wen=%b falling=%b",
                         addr, data_in, pio_i_pra, wen, falling);
                     if (ca2_no_irq_clr == 1'b0) begin
-                        irq_flags[0] <= 1'b0;
+                        ifr_clr[0] = 1'b1;
                     end
-                    irq_flags[1] <= 1'b0;
+                    ifr_clr[1] = 1'b1;
                 end
                     
                 4'h2: begin // DDRB
@@ -340,7 +342,7 @@ module via6522 (
                     
                 4'h5: begin // TA HI counter
                     timer_a_latch[15:8] <= data_in;
-                    irq_flags[6] <= 1'b0;
+                    ifr_clr[6] = 1'b1;
                 end
                     
                 4'h6: begin // TA LO latch
@@ -349,7 +351,7 @@ module via6522 (
                     
                 4'h7: begin // TA HI latch
                     timer_a_latch[15:8] <= data_in;
-                    irq_flags[6] <= 1'b0;
+                    ifr_clr[6] = 1'b1;
                 end
                     
                 4'h8: begin // TB LO latch
@@ -357,11 +359,11 @@ module via6522 (
                 end
                     
                 4'h9: begin // TB HI counter
-                    irq_flags[5] <= 1'b0;
+                    ifr_clr[5] = 1'b1;
                 end
                     
                 4'hA: begin // Serial port
-                    irq_flags[2] <= 1'b0;
+                    ifr_clr[2] = 1'b1;
                 end
                     
                 4'hB: begin // ACR (Auxiliary Control Register)
@@ -373,7 +375,7 @@ module via6522 (
                 end
                                     
                 4'hD: begin // IFR
-                    irq_flags <= irq_flags & ~data_in[6:0];
+                    ifr_clr = data_in[6:0];
                 end
                     
                 4'hE: begin // IER
@@ -474,17 +476,17 @@ module via6522 (
                 4'h0: begin // ORB
  
                     if (cb2_no_irq_clr == 1'b0) begin
-                        irq_flags[3] <= 1'b0;
+                        ifr_clr[3] = 1'b1;
                     end
-                    irq_flags[4] <= 1'b0;
+                    ifr_clr[4] = 1'b1;
                 end
                                             
                 4'h1: begin // ORA
                     if (ca2_no_irq_clr == 1'b0) begin
 
-                        irq_flags[0] <= 1'b0;
+                        ifr_clr[0] = 1'b1;
                     end
-                    irq_flags[1] <= 1'b0;
+                    ifr_clr[1] = 1'b1;
                 end
 
                 4'hF: begin // ORA no-handshake
@@ -492,27 +494,47 @@ module via6522 (
                     // (../snow/core/src/mac/via.rs:374-375). Real 6522 does not,
                     // but Mac II ROM apparently expects this behavior.
                     if (ca2_no_irq_clr == 1'b0) begin
-                        irq_flags[0] <= 1'b0;
+                        ifr_clr[0] = 1'b1;
                     end
-                    irq_flags[1] <= 1'b0;
+                    ifr_clr[1] = 1'b1;
                 end
 
                 4'h4: begin // TA LO counter
-                    irq_flags[6] <= 1'b0;
+                    ifr_clr[6] = 1'b1;
                 end
                     
                 4'h8: begin // TB LO counter
-                    irq_flags[5] <= 1'b0;
+                    ifr_clr[5] = 1'b1;
                 end
                     
                 4'hA: begin // SR
-                    irq_flags[2] <= 1'b0;
+                    ifr_clr[2] = 1'b1;
                 end
     
                 default: begin
                 end
             endcase
         end
+
+        // Interrupt logic.  An event beats a clear that lands on the same
+        // clock.  The clears used to be later assignments that overrode the
+        // event OR -- the IFR write a full-vector one, discarding every event
+        // of that clock; the port, SR and counter-low accesses their own bit.
+        // On the Quadra the timers tick on the E falling edge and so does
+        // every CPU access (iosb.sv), and the ROM acknowledges the 60 Hz VBL
+        // with "move.b #$02,vIFR": a Timer 2 timeout on that E clock was
+        // erased.  T2 is one-shot and the Time Manager re-arms it only from
+        // its interrupt, so the Time Manager stopped for good and anything
+        // waiting on a Time Manager task hung with the rest of the system
+        // alive (Day of the Tentacle, DOOM II, Dracula Unleashed, 2026-10-01;
+        // docs/resume-20261001/tb_via_t2_race.v).  The same went for CA1/CA2
+        // and the shift register's completion (ADB).
+        // The one exception is a write that restarts the timer whose flag it
+        // clears (T1C-H, T2C-H): the timeout of this clock belongs to the
+        // countdown being replaced, and letting it through would raise an
+        // interrupt for the new one before it has run.
+        irq_flags <= (irq_flags & ~ifr_clr) |
+                     (irq_events & ~{write_t1c_h, write_t2c_h, 5'b00000});
 
         if (reset == 1'b1) begin
             pio_i_pra       <= 8'h00;
