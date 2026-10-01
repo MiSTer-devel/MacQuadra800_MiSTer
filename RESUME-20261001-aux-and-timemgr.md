@@ -507,3 +507,65 @@ CODE 1`), `g_hi.bin` (guest `$07890000+$40000`), `g_3c.bin`, `g_4e.bin`,
   `backup/`, or should it run from a fresh copy?
 - Should the CPU self-test runner gain a release-macro leg as part of this
   work?
+
+## 9. Status after the fixing session (2026-10-01 evening, Fable)
+
+Both fixes are in the RTL; sections 3.4 and 4.3 above are what was applied,
+with the changes noted here. The user's answers to section 8: the A/UX gate
+overwrites `HD60_512-AUX3.1-Installed.hda` from `backup/` (done, 17:25-17:35,
+menu core loaded); the release-macro test leg was added.
+
+### 9.1 CPU (`e3fc1a0`)
+
+- `hint_rsr` requires `!fc_ovr_v` (`ap040_core.v`), exactly the proposed line.
+- `rtl/ap68040/tb/asm/t_aux_copyout.s` (moved from `docs/resume-20261001/`)
+  and the new `t_moves_next.s` are in `run_tests.sh`. `t_moves_next` runs
+  twelve shapes of "the instruction after a MOVES", each once with MOVES
+  against a user page and once with MOVE against a supervisor copy, and
+  compares registers and memory; only user page 0 is mapped, so a leaked
+  access faults. `-DONLY=n` assembles one shape. On the unfixed core:
+
+  | shape | what follows the MOVES | unfixed core |
+  |---|---|---|
+  | 1 copyout `-(An)` .l | kernel read | fault, SSW `$0501` FA `$6018` |
+  | 2 `(An)+` .w | kernel read | fault, FA `$6002` |
+  | 3 bytes, `(An)` / `d16(An)` | kernel read | fault, FA `$6000` |
+  | 4 ADD/OR/SUB/TST/CMP from memory | kernel read | fault, FA `$6000` |
+  | 5 mem-to-mem, kernel stores, probe + push | kernel read | fault, FA `$6000` |
+  | 6 BSR/JSR/PEA/LINK/UNLK/MOVEM/pops | **a stack pop** | fault, FA `$33f0` |
+  | 7 Bcc / DBRA | kernel read | fault, FA `$6024` |
+  | 8 copyin, 9 fuword/probe, 10 calls after a MOVES read | | pass |
+  | 11, 12 MOVES then MOVES in the other space | | pass |
+
+  So every leak went through `hint_rsr` (the pushes and the descriptor /
+  branch-lookahead dispatches of section 3.5 were already correct), and the
+  guard closes all of them: 34/34 in the default, `CPU_TEST_LEA=1
+  CPU_TEST_XSTORE=1` and the new `CPU_TEST_RELEASE=1` legs (the ten qsf
+  macros + `experimental/ap040_pipeline_integer.sv`; no leg built those
+  before). The unfixed core fails exactly the two new tests in each leg.
+- Cycle counts, unfixed vs fixed, identical in all three legs: bench_loop
+  54176 / 54974 / 54974, pipe_bench 99070 / 134348 / 134348, branch_bench
+  103134 / 123456 / 123456 (default) and 102136 / 122458 / 122458 (LEA+XSTORE,
+  release); first-100 corpus 28,041,145 cycles (default) and 28,020,477
+  (release macros), REAL diffs 0.
+- On this Windows checkout the corpus gate's sha check fails until the CRs
+  are stripped from `scripts/fixtures/corpus100/cpu.hex` and
+  `scripts/fixtures/tb_cpu_corpus100.v` in the WSL copy (autocrlf).
+
+### 9.2 VIA (`a9cbda8`)
+
+- `via6522.sv`: the clears of a clock are collected in `ifr_clr` and applied
+  once, events on top: `irq_flags <= (irq_flags & ~ifr_clr) | (irq_events &
+  ~{write_t1c_h, write_t2c_h, 5'b0})`. The semantic chosen for section 4.3's
+  open point: only the two writes that **restart** a timer (T1C-H, T2C-H)
+  let the clear win; T1L-H does not restart the timer, so the event wins
+  there too.
+- `verilator/tb_via_irq_race.v` (`make tb_via_irq_race`, replaces the
+  iverilog bench as the regression; the old one stays in
+  `docs/resume-20261001/` as the original evidence): 29 rows over T2, T1
+  one-shot and free-run, CA1 and the shift register's external completion,
+  each access on the event's own E clock and one E clock later. The old
+  model loses 12 rows; all pass now.
+- `tb_adb`, `tb_rtc_pram`, `tb_iosb_scc`, `tb_scsi_irq_ack_race`,
+  `tb_sdma_ack_watchdog` and `lint_sonic` pass. VIA2 (the IOSB's own model)
+  was re-read: its IFR write already carries the same-clock edges.
