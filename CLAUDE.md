@@ -1,10 +1,12 @@
 # MacQuadra800_MiSTer — working notes for Claude
 
-Start with [HANDOFF-20260930.md](HANDOFF-20260930.md): the 2026-09-30 area
-work and PRAM persistence, the candidate build and what is owed for it.
-[HANDOFF-20260928.md](HANDOFF-20260928.md) is the previous state (the
-2026-09-28/29 FPU, disk and IOSB work). `RESUME-20260927.md` is the
-historical experiment journal. `releases/README.md` is the per-build record.
+Start with [RESUME-20261001-aux-and-timemgr.md](RESUME-20261001-aux-and-timemgr.md):
+the two open bugs found on 2026-10-01 (the A/UX `copyout` panic, a CPU
+regression; the DOTT / DOOM II / Dracula hangs, a VIA1 Timer 2 lost
+interrupt), their repros and the plan to fix them. This checkout's history is
+squashed; the earlier hand-offs (`HANDOFF-20260930.md`, the
+previous state `HANDOFF-20260928.md`, the journal `RESUME-20260927.md`) live
+in `../MacQuadra800_danifunker`.
 
 Macintosh Quadra 800 core for the MiSTer FPGA (DE10-Nano). Authentic 33 MHz
 68040 bus clock, AP68040 CPU (git submodule), 128 MB SDRAM main memory, DAFB
@@ -31,7 +33,7 @@ separate codename and are deliberately unchanged.
 | `SingleStepTests/` | CPU corpus benches |
 | `scripts/` | build / deploy / hardware test tooling (see below) |
 | `tools/misterdeploy/` | the reusable rbf push + `load_core` launcher |
-| `releases/` | shipped `.rbf`s + `README.md` (table + one section per release) + `quadra800.rom` |
+| `releases/` | shipped `.rbf`s, the Main binary `MiSTer`, the `.nvr` PRAM images and `boot0.rom` (no `README.md` in this checkout) |
 | `docs/` | design notes (`sdram-fast-path.md`, `PERFORMANCE_MEASUREMENTS.md`, `scsi/`, …) |
 | `HANDOFF-20260928.md`, `RESUME-*.md` | current handoff first; dated experiment journals preserve historical state |
 | `BUILD.md` | full build/deploy/disk documentation — read it before touching hardware |
@@ -284,9 +286,9 @@ candidate bitstream, and the CD audio path must still play:
   network cannot hear it, so that half of the check belongs to the user and
   the gate is not complete without them.
 
-Then: copy the rbf to `releases/MacQuadra800_YYYYMMDD.rbf`, add a table row and
-a section to `releases/README.md` (md5, seed, slack, what changed, hardware
-results), and commit.
+Then: copy the rbf to `releases/MacQuadra800_YYYYMMDD.rbf` and commit, with
+the seed and timing recorded in the `.qsf` comment block. Do not create a
+`releases/README.md` in this checkout (user, 2026-10-01).
 
 ## Conventions
 
