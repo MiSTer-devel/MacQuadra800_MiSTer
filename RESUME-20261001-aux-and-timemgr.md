@@ -659,3 +659,15 @@ stand for the RTL (the three fixes), not for this bitstream as a release.
 The seed walk continues (`scratch/walk_20261002c`), every completed fit is
 to be screened with `vscreen.sh <rbf> <tag> 16` before anything else, and
 the shipped 20261001 release is screened the same way as the control.
+
+### 9.6 Outcome (2026-10-02, 05:45)
+
+Seed 38 without the scaler guard was released as
+`releases/MacQuadra800_20261002.rbf` at the user's request, with its known
+scaler fault (about one load in seven without a picture). The guard
+`79cb5f4` is in the tree, not in that rbf, and unproven on hardware; the
+guarded fits so far miss timing or time out. The hand-off for the next
+session, with the box state and the prompt, is
+[`RESUME-20261002-release-and-scaler.md`](RESUME-20261002-release-and-scaler.md).
+The reboot-and-load screens of section 9.5 are not to be repeated without
+asking the user first.

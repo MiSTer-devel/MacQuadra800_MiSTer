@@ -1,6 +1,10 @@
 # MacQuadra800_MiSTer — working notes for Claude
 
-Start with [RESUME-20261001-aux-and-timemgr.md](RESUME-20261001-aux-and-timemgr.md):
+Start with [RESUME-20261002-release-and-scaler.md](RESUME-20261002-release-and-scaler.md):
+the state after the 20261002 release (three fixes, one known scaler fault),
+what is open (area by code optimisation only, the unproven scaler guard) and
+the rules the user set that night -- no reboot loops or repeat-load screens
+on the MiSTer without asking. Then [RESUME-20261001-aux-and-timemgr.md](RESUME-20261001-aux-and-timemgr.md):
 the bugs found on 2026-10-01 (the A/UX `copyout` panic, a CPU regression;
 the DOTT / DOOM II / Dracula hangs, a VIA1 Timer 2 lost interrupt; the
 one-in-ten "Starting Up..." boot stall, an SCC command dropped by
