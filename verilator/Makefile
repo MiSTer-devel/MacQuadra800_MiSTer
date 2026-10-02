@@ -325,3 +325,15 @@ tb_via_irq_race:
 tb_scc_ctl_phase:
 	$(IOSB_TB) --timing --top-module tb_scc_ctl_phase --Mdir ./obj_dir_tb_scc_ctl_phase -o tb_scc_ctl_phase tb_scc_ctl_phase.v $(IOSB_TB_DEPS)
 	./obj_dir_tb_scc_ctl_phase/tb_scc_ctl_phase > obj_dir_tb_scc_ctl_phase/run.log 2>&1; grep -E "^==|^  ok|^FAIL|^RESULT" obj_dir_tb_scc_ctl_phase/run.log; grep -q "^RESULT: PASS" obj_dir_tb_scc_ctl_phase/run.log
+
+# sys/sysmem.sv: the scaler port must stay shut until the core's first reset is
+# over (the scaler fault: a write burst cut during the start-up reset leaves the
+# HPS port waiting for beats, 2026-10-02).  The real sysmem_lite, cut out of
+# sysmem.sv, around a model of the HPS hard block and an ascal-like master.
+#   make tb_sysmem_vbuf_gate
+tb_sysmem_vbuf_gate:
+	mkdir -p obj_dir_tb_vbuf_gate
+	sed -n '/^module sysmem_lite/,/^endmodule/p' ../sys/sysmem.sv > obj_dir_tb_vbuf_gate/sysmem_lite.sv
+	sed -e 's/^wire next_state_write;/logic next_state_write;/' -e '/_master,$$/ s/^	output /	output logic /' ../sys/f2sdram_safe_terminator.sv > obj_dir_tb_vbuf_gate/f2sdram_safe_terminator.sv
+	$V --binary --timing -j 8 -Wno-fatal -Wno-WIDTH -Wno-UNUSED -Wno-PINMISSING -Wno-DECLFILENAME -Wno-MULTITOP -Wno-INITIALDLY --timescale 1ns/1ps --top-module tb_sysmem_vbuf_gate --Mdir ./obj_dir_tb_vbuf_gate -o tb_sysmem_vbuf_gate tb_sysmem_vbuf_gate.sv obj_dir_tb_vbuf_gate/sysmem_lite.sv obj_dir_tb_vbuf_gate/f2sdram_safe_terminator.sv
+	./obj_dir_tb_vbuf_gate/tb_sysmem_vbuf_gate > obj_dir_tb_vbuf_gate/run.log 2>&1; grep -E "^FAIL|^RESULT" obj_dir_tb_vbuf_gate/run.log | head -40; grep -q "^RESULT: PASS" obj_dir_tb_vbuf_gate/run.log
