@@ -5,7 +5,14 @@
 proc generateBuildID_Verilog {} {
 
 	# Get the timestamp (see: http://www.altera.com/support/examples/tcl/tcl-date-time-stamp.html)
-	set buildDate "`define BUILD_DATE \"[clock format [ clock seconds ] -format %y%m%d]\""
+	set stamp [clock format [ clock seconds ] -format %y%m%d]
+	# MISTER_BUILD_DATE=yymmdd in the environment overrides the clock: a
+	# release built the evening before the date it ships under (2026-10-01,
+	# the fix builds stamped 261002 so the OSD tells them from 20261001).
+	if {[info exists ::env(MISTER_BUILD_DATE)] && [regexp {^[0-9]{6}$} $::env(MISTER_BUILD_DATE)]} {
+		set stamp $::env(MISTER_BUILD_DATE)
+	}
+	set buildDate "`define BUILD_DATE \"$stamp\""
 
 	# Create a Verilog file for output
 	set outputFileName "build_id.v"
