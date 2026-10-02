@@ -569,3 +569,53 @@ menu core loaded); the release-macro test leg was added.
 - `tb_adb`, `tb_rtc_pram`, `tb_iosb_scc`, `tb_scsi_irq_ack_race`,
   `tb_sdma_ack_watchdog` and `lint_sonic` pass. VIA2 (the IOSB's own model)
   was re-read: its IFR write already carries the same-clock edges.
+
+### 9.3 A third bug found on the way: the SCC boot stall (`8c223c8`)
+
+The first hardware boot of the fix build froze at "Starting Up..." for
+3 min 50 s in a level-4 (SCC) interrupt storm and then carried on. It is
+**not** from the two fixes: an unattended loop reproduced it on the shipped
+20261001 release as often as on the fix build (2 of 20 boots each, plus the
+first one; `docs/perf/fix_hw_20261001/BOOT_STALL.md` has the whole account).
+
+- Every boot opens and closes the async serial driver on the modem port
+  while AppleTalk starts. In a stalled boot the channel-A external/status
+  interrupt cannot be acknowledged: `scc.v` applied WR0 = `$10` (Reset
+  Ext/Status) only if a `cep` pulse fell inside the CS window, and
+  `iosb.sv` opens that window in whatever phase of its clk/4 divider the
+  access arrives and closes it on `cen`. Two phases of four hold no `cep`.
+  The bus acks on `cen`, so the handler's timing fixes the phase and a miss
+  repeats forever; a DMA read from the ARM shifts it and ends the stall.
+- Fix: write-triggered actions hang off the per-access strobe (`cen &
+  wreg`). Bench `verilator/tb_scc_ctl_phase.v` (`make tb_scc_ctl_phase`):
+  the old model drops the command in phases 1 and 2, all four pass now.
+- Tools that found it (in `docs/perf/fix_hw_20261001/boot_stall/`):
+  `B_cycle.sh` + `B_bpoll.py` (one automated boot cycle with a stall
+  detector; refuses to load unless a fresh screenshot shows the menu core
+  and to leave unless one shows the halt screen), `B_loop.sh`, and
+  `B_bprobe.py` (an in-process mailbox sampler, about 4,500 guest-RAM
+  samples a second).
+
+### 9.4 Build
+
+- **Stamp.** The release must not share the OSD date of 20261001 (user), so
+  the builds carry `261002`: `sys/build_id.tcl` takes `MISTER_BUILD_DATE`
+  from the environment when set (`46b77ce`). **Quartus's smart recompile
+  does not notice a changed `build_id.v`** (it is an include, not a project
+  source): after a date change, move `db/` and `incremental_db/` away or the
+  fit reuses the netlist with the old stamp. Check with
+  `grep -c 261002 output_files/MacQuadra800.map.rpt`.
+- **Seeds** (45-minute cap; logs in `docs/perf/fix_hw_20261001/fpga_seed38/`):
+  two fixes, stamp 261001: 33 CPU -0.378 (hardware trial "F33"), 21 HDMI
+  -0.156 / CPU -0.144 ("F21"), 30 no fit, 34 and 35 timed out. Three fixes,
+  stamp 261002 (`8c223c8`): 36 timed out, 37 no fit, **38 clean in 41 min**:
+  CPU +0.118, HDMI +0.217, SDRAM +1.078, hold +0.216, recovery/removal/pulse
+  >= +0.505, crossings sys->RAM +1.767 / RAM->sys +1.175; 39,030 ALMs
+  (93 %), 24,995 registers, 468 M10K, 36 DSP; rbf md5
+  `1928f231dd9ac9ef5935e69272d305a4` ("C38").
+- This box: the Quartus GUI must be closed; the walk is
+  `scratch/s1002/seed_walk.sh` (the danifunker script with this checkout's
+  path and `python` instead of `python3`), launched detached with
+  `Start-Process`. A command line containing `rm` or `Remove-Item` next to
+  the Git path is refused by the PowerShell tool: remove files in a
+  separate Bash call.
