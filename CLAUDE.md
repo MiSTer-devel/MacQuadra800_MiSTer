@@ -222,12 +222,12 @@ it is free.  The mouse is driven with
 `ssh ... python3 /media/fat/Scripts/q800tools/vmouse.py` (Finder Shut Down:
 `home m:111,-10 0.5 down 0.8 m:13,66 6 up`).
 **Main:** the core needs a Main with the Quadra 800 support and, for the
-`SCSI_CACHE_OFF` release recipe, the Mac disk write buffer: branch
-`mac-printer-writebuffer` of `alanswx/Main_MiSTer` (MiSTer-devel master +
-printer + write buffer; binary md5 `45182b73`, installed 2026-09-27).  A Main
-without Quadra support makes every build come up black; check
-`grep -a -c macquadra800 /media/fat/MiSTer` and
-`grep -a -c "Mac write buffer" /media/fat/MiSTer` before debugging a core.
+`SCSI_CACHE_OFF` release recipe, the Mac disk write buffer: since 2026-10-02
+`releases/MiSTer` is MiSTer-devel master + PR 1336 (`danifunker/Main_MiSTer`
+branch `fast-mac-scsi`, `bf0ae73`; binary md5 `eed636d5`, write buffer only,
+no tight service loop). A Main without Quadra support makes every build come
+up black; check `grep -a -c macquadra800 /media/fat/MiSTer` and
+`grep -a -c "mac_disk:" /media/fat/MiSTer` before debugging a core.
 **Use only this box** (user, 2026-09-16): the second MiSTer at `.92` belongs
 to another session and is not to be touched, not even read-only.
 
