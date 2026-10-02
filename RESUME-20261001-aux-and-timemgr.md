@@ -619,3 +619,43 @@ first one; `docs/perf/fix_hw_20261001/BOOT_STALL.md` has the whole account).
   `Start-Process`. A command line containing `rm` or `Remove-Item` next to
   the Git path is refused by the PowerShell tool: remove files in a
   separate Bash call.
+
+### 9.5 Hardware on the candidate C38 (seed 38, `1928f231`), and why it is NOT released yet
+
+Gates, all on `/media/fat/_Unstable/MacQuadra800_C38.rbf` (reports in
+`docs/perf/fix_hw_20261001/`):
+
+| gate | result |
+|---|---|
+| Mac OS 8.1 on `QuadSquad8.hda` + CD player transport (`REPORT_M_C38.md`) | pass |
+| DOOM II 20 min, Dracula Unleashed, Day of the Tentacle (`REPORT_H_C38.md`) | pass, Time Manager moving at 32/32 checks |
+| A/UX 3.1 at 32 MB (`REPORT_A2_C38.md`) | pass |
+| boot stall: 6 loop boots + 4 gate boots straight through Ticks `$278` | no stall in 10 boots (the old builds: 5 in 52) |
+
+**The scaler fault** (the open one from 2026-09-30, described in
+`../MacQuadra800_danifunker/RESUME-20260930-video-bisect.md` and
+`RESUME-20261001-seed33.md`; it was not in this checkout's notes): on some
+core loads the scaler's writes into the HPS DDR3 port land half a burst
+(128 bytes) early, the picture is garbled or absent, Main's screenshots fail
+and the port stays broken until the MiSTer is rebooted. The odds depend on
+the fit, so a candidate has to be screened with clean-boot loads.
+
+C38 does not pass that screen:
+
+- its 11th load of the night (the unattended loop's cycle 7, 01:21) came up
+  with no video. The guest booted normally (Ticks 60/s, no stall); it was
+  shut down blind with the walker's exact mouse sequence (`VCBQHdr` at
+  `$356` empty and `write_bytes` flat are the proof that volumes unmounted);
+- `scratch/s1002/vscreen.sh` (reboot, menu, load, five samples of the
+  scaler header at DDR3 `0x20000000`): **17 of 20 clean-boot loads** with a
+  valid header (loads 1, 4, 5 failed: header slot all zeros, markers
+  overwritten, i.e. the port alive and the data displaced);
+- `scratch/s1002/vtiming.sh` (does a slow Main start matter? plain loads
+  against loads with 24 MB of dirty pages for Main's `sync()`): failures in
+  both kinds, see `scratch/hw_20261001/vtiming.log`.
+
+So C38 is a fit with the fault at roughly one load in eight. The gates above
+stand for the RTL (the three fixes), not for this bitstream as a release.
+The seed walk continues (`scratch/walk_20261002c`), every completed fit is
+to be screened with `vscreen.sh <rbf> <tag> 16` before anything else, and
+the shipped 20261001 release is screened the same way as the control.
