@@ -1,9 +1,12 @@
 # MacQuadra800_MiSTer — working notes for Claude
 
 Start with [RESUME-20261001-aux-and-timemgr.md](RESUME-20261001-aux-and-timemgr.md):
-the two open bugs found on 2026-10-01 (the A/UX `copyout` panic, a CPU
-regression; the DOTT / DOOM II / Dracula hangs, a VIA1 Timer 2 lost
-interrupt), their repros and the plan to fix them. This checkout's history is
+the bugs found on 2026-10-01 (the A/UX `copyout` panic, a CPU regression;
+the DOTT / DOOM II / Dracula hangs, a VIA1 Timer 2 lost interrupt; the
+one-in-ten "Starting Up..." boot stall, an SCC command dropped by
+clock-enable phase), all three fixed that night -- section 9 has what was
+done, the hardware results under `docs/perf/fix_hw_20261001/` and what is
+still open. This checkout's history is
 squashed; the earlier hand-offs (`HANDOFF-20260930.md`, the
 previous state `HANDOFF-20260928.md`, the journal `RESUME-20260927.md`) live
 in `../MacQuadra800_danifunker`.
@@ -103,6 +106,15 @@ bash scripts/build_only.sh --check    # Analysis & Synthesis only (~13 min), no 
   path reports (`docs/sdram-open-row-crossing.md`) before trusting the build.
 - `SCSI_TRACE` in the `.qsf` makes a **debug** build that hijacks the serial
   port. It must stay commented out for anything released.
+- **The build stamp** (the OSD version) comes from `sys/build_id.tcl` ->
+  `build_id.v`: the clock's date, or `MISTER_BUILD_DATE=yymmdd` from the
+  environment. A release must not carry the stamp of the one already
+  shipped (user, 2026-10-01): a second release built the same day is
+  stamped with the next day's date, and the rbf is named from the stamp
+  inside it. **Smart recompile does not notice a changed `build_id.v`** and
+  skips synthesis, so after a date change (an override, or a seed walk that
+  crosses midnight) move `db/` and `incremental_db/` away first and check
+  `grep -c <stamp> output_files/MacQuadra800.map.rpt`.
 - **The qsf's default settings ARE the release recipe** (updated 2026-09-29;
   the seed and every seed tried is in the `.qsf` comment block, with
   `PLACEMENT_EFFORT_MULTIPLIER 2.0` and `ROUTER_TIMING_OPTIMIZATION_LEVEL
@@ -154,14 +166,24 @@ sector-latency harness that found the IOSB hang).
 
 ```bash
 # directed testbenches, from verilator/
-make tb_sdram tb_wombat_bus32 tb_store_buffer tb_memory_path tb_memory_path_registered_first_miss tb_ncr53c96 tb_easc tb_scsi_irq_ack_race tb_sdma_ack_watchdog tb_iosb_scc
+make tb_sdram tb_wombat_bus32 tb_store_buffer tb_memory_path tb_memory_path_registered_first_miss tb_ncr53c96 tb_easc tb_scsi_irq_ack_race tb_sdma_ack_watchdog tb_iosb_scc tb_via_irq_race tb_scc_ctl_phase
 # full machine sim: sync sources to ~/MacQuadra800 (ext4), build Vemu + ROM hexes
 bash scripts/sim_wsl.sh build
 bash scripts/sim_wsl.sh disk <image.hda>      # writable copy
 bash scripts/sim_wsl.sh run [args] ; bash scripts/sim_wsl.sh log [pattern]
-# CPU self-tests (iverilog + vasm), in the vendored CPU tree
+# CPU self-tests (iverilog + vasm), in the vendored CPU tree: three legs
 sh rtl/ap68040/tb/run_tests.sh
+CPU_TEST_LEA=1 CPU_TEST_XSTORE=1 sh rtl/ap68040/tb/run_tests.sh
+CPU_TEST_RELEASE=1 sh rtl/ap68040/tb/run_tests.sh   # the macros and pipeline the core ships with
 ```
+
+A model behind `iosb.sv` sees CS rise in any phase of the clk/4 enable
+divider and fall on `cen`: anything a write does must hang off the access's
+own strobe (`cen & wreg`), never off a `cep`-qualified one (the SCC boot
+stall, 2026-10-01, `docs/perf/fix_hw_20261001/BOOT_STALL.md`). A rare
+anomaly seen while gating a build is not evidence against that build until
+the previous release has had as many tries: the repeat-boot harness is in
+`docs/perf/fix_hw_20261001/boot_stall/`.
 
 Verilator is lenient where Quartus is not: an out-of-range bit-select on a
 too-narrow vector (`mounted[2]` on a 2-bit reg, 2026-09-07) simulated as 0
