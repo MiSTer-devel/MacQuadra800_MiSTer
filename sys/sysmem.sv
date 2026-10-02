@@ -156,20 +156,52 @@ always @(posedge vbuf_clk) begin
 	vbuf_reset_1 <= vbuf_reset_0;
 end
 
+// The scaler's port stays shut from configuration until the core has come
+// out of its first reset (MacQuadra800, 2026-10-02).
+//
+// The terminator below is transparent until it has seen the reset deasserted
+// once, and ascal's avl_write_i / avl_read_i have no reset value: whatever
+// they hold when the first reset arrives a clock or two after configuration
+// (sys_top's reset_req powers up 0) is frozen for the whole reset.  If that
+// is a 1, the HPS port takes a stream of 16-beat bursts for as long as Main
+// keeps the core in reset, and the release cuts the last one at an arbitrary
+// beat.  The port then waits for the missing beats: it takes them from the
+// first real burst and every burst after that lands that many beats early,
+// until the HPS is rebooted.  Measured on the box with a fit that fails
+// almost every load (scratch/s1002/vk_probe.py: 8, 4, 14, 10, 5, 1, 2 beats on
+// seven loads); how often a fit does it is a property of the fit (the
+// shipped 20261001 never in 52 loads, seed 38 of the next one in one of
+// seven).  With the port shut the scaler can do what it likes in reset; it
+// waits on waitrequest once released and its first burst starts whole.
+reg       vbuf_open     = 1'b0;
+reg [4:0] vbuf_open_cnt = 5'd0;
+always @(posedge vbuf_clk) begin
+	if (vbuf_reset_1) begin
+		if (!vbuf_open) vbuf_open_cnt <= 5'd0;
+	end
+	else if (!vbuf_open) begin
+		vbuf_open_cnt <= vbuf_open_cnt + 5'd1;
+		if (&vbuf_open_cnt) vbuf_open <= 1'b1;
+	end
+end
+
+wire vbuf_waitrequest_t;
+assign vbuf_waitrequest = vbuf_waitrequest_t | ~vbuf_open;
+
 f2sdram_safe_terminator #(128, 8) f2sdram_safe_terminator_vbuf
 (
 	.clk                      (vbuf_clk),
 	.rst_req_sync             (vbuf_reset_1),
 
-	.waitrequest_slave        (vbuf_waitrequest),
+	.waitrequest_slave        (vbuf_waitrequest_t),
 	.burstcount_slave         (vbuf_burstcount),
 	.address_slave            (vbuf_address),
 	.readdata_slave           (vbuf_readdata),
 	.readdatavalid_slave      (vbuf_readdatavalid),
-	.read_slave               (vbuf_read),
+	.read_slave               (vbuf_read  & vbuf_open),
 	.writedata_slave          (vbuf_writedata),
 	.byteenable_slave         (vbuf_byteenable),
-	.write_slave              (vbuf_write),
+	.write_slave              (vbuf_write & vbuf_open),
 
 	.waitrequest_master       (f2h_vbuf_waitrequest),
 	.burstcount_master        (f2h_vbuf_burstcount),
