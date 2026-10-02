@@ -244,6 +244,20 @@ module scc
 	/* Register/Data access helpers - gated by cs_access_done to ensure one access per CS assertion */
 	assign wreg_a  = cs & we & (~rs[1]) &  rs[0] & ~cs_access_done;
 	assign wreg_b  = cs & we & (~rs[1]) & ~rs[0] & ~cs_access_done;
+	/* One clock per control-register write: the cen pulse that consumes the
+	 * access.  Everything a write DOES must hang off these (or off the bare
+	 * wreg level), never off wreg qualified by cep: iosb.sv raises CS in
+	 * whatever divider phase the CPU's access arrives and drops it on the
+	 * next cen, so a window that opens in phase 1 or 2 holds no cep at all.
+	 * The external/status logic, the EOM latch and the WR8 clears used cep,
+	 * and a WR0 command landing in such a window was silently dropped: a
+	 * "Reset Ext/Status Interrupts" that never happened left the interrupt
+	 * pending, the handler ran again with the same instruction timing and
+	 * so the same phase, and Mac OS froze at "Starting Up..." in a level-4
+	 * interrupt storm for minutes (one boot in about fifteen, 2026-10-01;
+	 * verilator/tb_scc_ctl_phase.v). */
+	wire wstb_a = cen & wreg_a;
+	wire wstb_b = cen & wreg_b;
 
 `ifdef SIMULATION
 	// Control register access tracer — logs every control-register write,
@@ -1230,7 +1244,7 @@ end
 
 			// Clear on WR8 write
 
-			if (cep && (wreg_a && rindex_latch == 8)) begin
+			if (wstb_a && rindex_latch == 8) begin
 
 				tx_int_latch_a <= 1'b0;
 
@@ -1268,7 +1282,7 @@ end
 				tx_int_latch_b <= 1'b0;
 			end
 			// Clear on WR8 write for Channel B
-			if (cep && (wreg_b && rindex_latch == 8)) begin
+			if (wstb_b && rindex_latch == 8) begin
 				tx_int_latch_b <= 1'b0;
 			end
 			// Clear on Reset Tx Interrupt Pending command (WR0) for Channel B - command 5 = 3'b101
@@ -1371,44 +1385,36 @@ end
 	always@(posedge clk or posedge reset) begin
 		if (reset)
 		  ex_irq_ip_a <= 0;
-		else if(cep) begin
-			if (do_extreset_a)
-			  ex_irq_ip_a <= 0;
-			else if (do_latch_a && wr1_a[0])
-			  ex_irq_ip_a <= 1;
-		end
+		else if (cen && do_extreset_a)
+		  ex_irq_ip_a <= 0;
+		else if (cep && do_latch_a && wr1_a[0])
+		  ex_irq_ip_a <= 1;
 	end
 	always@(posedge clk or posedge reset) begin
 		if (reset)
 		  ex_irq_ip_b <= 0;
-		else if(cep) begin
-			if (do_extreset_b)
-			  ex_irq_ip_b <= 0;
-			else if (do_latch_b && wr1_b[0])
-			  ex_irq_ip_b <= 1;
-		end
+		else if (cen && do_extreset_b)
+		  ex_irq_ip_b <= 0;
+		else if (cep && do_latch_b && wr1_b[0])
+		  ex_irq_ip_b <= 1;
 	end
 
 	/* Latch open/close control */
 	always@(posedge clk or posedge reset) begin
 		if (reset)
 		  latch_open_a <= 1;
-		else if(cep) begin
-			if (do_extreset_a)
-			  latch_open_a <= 1;
-			else if (do_latch_a)
-			  latch_open_a <= 0;
-		end
+		else if (cen && do_extreset_a)
+		  latch_open_a <= 1;
+		else if (cep && do_latch_a)
+		  latch_open_a <= 0;
 	end
 	always@(posedge clk or posedge reset) begin
 		if (reset)
 		  latch_open_b <= 1;
-		else if(cep) begin
-			if (do_extreset_b)
-			  latch_open_b <= 1;
-			else if (do_latch_b)
-			  latch_open_b <= 0;
-		end
+		else if (cen && do_extreset_b)
+		  latch_open_b <= 1;
+		else if (cep && do_latch_b)
+		  latch_open_b <= 0;
 	end
 
 	/* Latches proper */
@@ -1449,17 +1455,16 @@ end
 			eom_latch_a <= 1'b0;  // Reset: EOM cleared (Z85C30 spec default)
 		end else if (reset_a) begin
 			eom_latch_a <= 1'b0;  // Channel reset: EOM cleared
-		end else if(cep) begin
+		end else if (wstb_a && rindex_latch == 0 && wdata[7:6] == 2'b11) begin
 			// WR0 command: Reset Tx Underrun/EOM Latch (bits 7:6 = 11)
-			if (wreg_a && rindex_latch == 0 && wdata[7:6] == 2'b11) begin
-				eom_latch_a <= 1'b0;  // Clear EOM latch
-			end
+			eom_latch_a <= 1'b0;  // Clear EOM latch
+		end else if(cep) begin
 			// Set on transmit underrun — SYNC MODE ONLY (2026-06-12 LocalTalk
 			// fix). The LLAP transmit tail does WR0=$C0 (reset latch) then
 			// polls RR0 bit 6 until set ("CRC+closing flag went out"); an
 			// idle/drained transmitter IS the underrun condition here. Async
 			// keeps the historical constant-0 behavior.
-			else if (sync_mode_a && tx_empty_latch_a) begin
+			if (sync_mode_a && tx_empty_latch_a) begin
 				eom_latch_a <= 1'b1;
 			end
 		end
@@ -1471,13 +1476,12 @@ end
 			eom_latch_b <= 1'b0;  // Reset: EOM cleared (Z85C30 spec default)
 		end else if (reset_b) begin
 			eom_latch_b <= 1'b0;  // Channel reset: EOM cleared
-		end else if(cep) begin
+		end else if (wstb_b && rindex_latch == 0 && wdata[7:6] == 2'b11) begin
 			// WR0 command: Reset Tx Underrun/EOM Latch (bits 7:6 = 11)
-			if (wreg_b && rindex_latch == 0 && wdata[7:6] == 2'b11) begin
-				eom_latch_b <= 1'b0;  // Clear EOM latch
-			end
+			eom_latch_b <= 1'b0;  // Clear EOM latch
+		end else if(cep) begin
 			// Set on transmit underrun — sync mode only (see channel A note).
-			else if (sync_mode_b && tx_empty_latch_b) begin
+			if (sync_mode_b && tx_empty_latch_b) begin
 				eom_latch_b <= 1'b1;
 			end
 		end
@@ -1508,7 +1512,7 @@ end
             $display("SCC_LATCH: tx_empty_latch_a <= 0 (ADATA write) baud_divid=%d WR4=%02x WR12=%02x WR13=%02x WR14=%02x", baud_divid_speed_a, wr4_a, wr12_a, wr13_a, wr14_a);
         end
         // Also clear if writing explicit WR8 via control path
-        if (cep && (wreg_a && rindex_latch == 8)) begin
+        if (wstb_a && rindex_latch == 8) begin
             tx_empty_latch_a <= 1'b0;
             $display("SCC_LATCH: tx_empty_latch_a <= 0 (WR8 write)");
         end

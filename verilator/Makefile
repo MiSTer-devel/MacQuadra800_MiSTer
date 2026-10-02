@@ -317,3 +317,11 @@ tb_rtc_pram:
 tb_via_irq_race:
 	$(IOSB_TB) --timing --top-module tb_via_irq_race --Mdir ./obj_dir_tb_via_irq_race -o tb_via_irq_race tb_via_irq_race.v $(RTL)/via6522.sv
 	./obj_dir_tb_via_irq_race/tb_via_irq_race > obj_dir_tb_via_irq_race/run.log 2>&1; grep "^TB" obj_dir_tb_via_irq_race/run.log; ! grep -q "^TB FAIL" obj_dir_tb_via_irq_race/run.log && grep -q "^TB PASS" obj_dir_tb_via_irq_race/run.log
+
+# rtl/scc.v behind iosb.sv: a WR0 command (Reset Ext/Status) must take effect in
+# every phase of the register-interface clock enables -- the dropped command
+# that froze one Mac OS boot in fifteen in an SCC interrupt storm (2026-10-01).
+#   make tb_scc_ctl_phase
+tb_scc_ctl_phase:
+	$(IOSB_TB) --timing --top-module tb_scc_ctl_phase --Mdir ./obj_dir_tb_scc_ctl_phase -o tb_scc_ctl_phase tb_scc_ctl_phase.v $(IOSB_TB_DEPS)
+	./obj_dir_tb_scc_ctl_phase/tb_scc_ctl_phase > obj_dir_tb_scc_ctl_phase/run.log 2>&1; grep -E "^==|^  ok|^FAIL|^RESULT" obj_dir_tb_scc_ctl_phase/run.log; grep -q "^RESULT: PASS" obj_dir_tb_scc_ctl_phase/run.log
