@@ -342,9 +342,10 @@ tb_sysmem_vbuf_gate:
 # acks like quadra800 (tb_cpu040/prog.s: sizes, misaligned, copyback fills
 # and pushes, an autovectored interrupt, the FPU); +fast adds next-clock acks.
 FAST040 = ../rtl/ap68040_faster/rtl
+FAST040_SRC = $(addprefix $(FAST040)/,$(shell grep -o '"[^"]*v"' $(FAST040)/ap68040.qip | tr -d '"'))
 tb_quadra_cpu040: tb_cpu040/prog.s tb_cpu040/tb_quadra_cpu040.sv ../rtl/quadra_cpu040.sv
 	vasmm68k_mot -m68040 -Fbin -quiet -o tb_cpu040/prog.bin tb_cpu040/prog.s
 	xxd -p -c4 tb_cpu040/prog.bin > tb_cpu040/prog.hex
-	$V --binary --timing -Wno-fatal -Wno-lint -Wno-style -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040 -o tb_quadra_cpu040 $(addprefix $(FAST040)/,$(shell sed -n 's/.*qip_path) "\(.*\.s*v\)".*/\1/p' $(FAST040)/ap68040.qip)) ../rtl/quadra_cpu040.sv tb_cpu040/tb_quadra_cpu040.sv
+	$V --binary --timing -Wno-fatal -Wno-lint -Wno-style -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040 -o tb_quadra_cpu040 $(FAST040_SRC) ../rtl/quadra_cpu040.sv tb_cpu040/tb_quadra_cpu040.sv
 	./obj_dir_tb_cpu040/tb_quadra_cpu040 | grep -E 'PASS|FAIL|TIMEOUT|ERROR'
 	./obj_dir_tb_cpu040/tb_quadra_cpu040 +fast | grep -E 'PASS|FAIL|TIMEOUT|ERROR'
