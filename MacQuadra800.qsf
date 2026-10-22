@@ -630,6 +630,8 @@ set_global_assignment -name VERILOG_MACRO "MISTER_DISABLE_VIDEO_CALC=1"
 set_global_assignment -name VERILOG_MACRO "CACHE_CD_OFF=1"
 #set_global_assignment -name VERILOG_MACRO "VIDEO_512_OFF=1"
 set_global_assignment -name VERILOG_MACRO "CACHE_SMALL=1"
+# the pipelined AP68040 (quadra_cpu040) in place of wombat_cpu
+set_global_assignment -name VERILOG_MACRO "CPU_AP68040=1"
 
 #use only 1MB per frame for scaler to free ~21MB DDR3 RAM
 #set_global_assignment -name VERILOG_MACRO "MISTER_SMALL_VBUF=1"
@@ -800,10 +802,11 @@ set_global_assignment -name QIP_FILE sys/sys.qip
 set_global_assignment -name QIP_FILE rtl/pll.qip
 set_global_assignment -name SDC_FILE MacQuadra800.sdc
 set_global_assignment -name SYSTEMVERILOG_FILE MacQuadra800.sv
-set_global_assignment -name QIP_FILE rtl/ap68040/rtl/ap040.qip
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ap68040/experimental/ap040_pipeline_integer.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/wombat_cpu.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/wombat_store_buffer.sv
+# CPU_AP68040 branch: the pipelined AP68040 (rtl/ap68040_faster) behind
+# rtl/quadra_cpu040.sv instead of the sequential ap040 tree + wombat_cpu
+# (their FPU module names collide, so one CPU tree per build).
+set_global_assignment -name QIP_FILE rtl/ap68040_faster/rtl/ap68040.qip
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/quadra_cpu040.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/wombat_bus32.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/quadra800.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/iosb.sv

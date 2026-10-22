@@ -293,7 +293,12 @@ scsi_cache #(.SECT0(CACHE_SECT0), .SECT1(CACHE_SECT1), .SECT2(16), .PF_DEPTH(8),
 // the CPU's stall watchdog.
 wire hps_busy = (|e_io_rd) | (|e_io_wr) | (|e_io_ack) | (|io_rd) | (|io_wr) | (|io_ack);
 wire cpu_stall_flt;
+// CPU_AP68040 (qsf): the pipelined AP68040 behind the same ports
+`ifdef CPU_AP68040
+quadra_cpu040 cpu (
+`else
 wombat_cpu cpu (
+`endif
 	.clk(clk),
 	.nreset(nreset),
 	.ce(ce),
