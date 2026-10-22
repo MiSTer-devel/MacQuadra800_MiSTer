@@ -337,3 +337,14 @@ tb_sysmem_vbuf_gate:
 	sed -e 's/^wire next_state_write;/logic next_state_write;/' -e '/_master,$$/ s/^	output /	output logic /' ../sys/f2sdram_safe_terminator.sv > obj_dir_tb_vbuf_gate/f2sdram_safe_terminator.sv
 	$V --binary --timing -j 8 -Wno-fatal -Wno-WIDTH -Wno-UNUSED -Wno-PINMISSING -Wno-DECLFILENAME -Wno-MULTITOP -Wno-INITIALDLY --timescale 1ns/1ps --top-module tb_sysmem_vbuf_gate --Mdir ./obj_dir_tb_vbuf_gate -o tb_sysmem_vbuf_gate tb_sysmem_vbuf_gate.sv obj_dir_tb_vbuf_gate/sysmem_lite.sv obj_dir_tb_vbuf_gate/f2sdram_safe_terminator.sv
 	./obj_dir_tb_vbuf_gate/tb_sysmem_vbuf_gate > obj_dir_tb_vbuf_gate/run.log 2>&1; grep -E "^FAIL|^RESULT" obj_dir_tb_vbuf_gate/run.log | head -40; grep -q "^RESULT: PASS" obj_dir_tb_vbuf_gate/run.log
+
+# The pipelined AP68040 through rtl/quadra_cpu040.sv against a memory that
+# acks like quadra800 (tb_cpu040/prog.s: sizes, misaligned, copyback fills
+# and pushes, an autovectored interrupt, the FPU); +fast adds next-clock acks.
+FAST040 = ../rtl/ap68040_faster/rtl
+tb_quadra_cpu040: tb_cpu040/prog.s tb_cpu040/tb_quadra_cpu040.sv ../rtl/quadra_cpu040.sv
+	vasmm68k_mot -m68040 -Fbin -quiet -o tb_cpu040/prog.bin tb_cpu040/prog.s
+	xxd -p -c4 tb_cpu040/prog.bin > tb_cpu040/prog.hex
+	$V --binary --timing -Wno-fatal -Wno-lint -Wno-style -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040 -o tb_quadra_cpu040 $(addprefix $(FAST040)/,$(shell sed -n 's/.*qip_path) "\(.*\.s*v\)".*/\1/p' $(FAST040)/ap68040.qip)) ../rtl/quadra_cpu040.sv tb_cpu040/tb_quadra_cpu040.sv
+	./obj_dir_tb_cpu040/tb_quadra_cpu040 | grep -E 'PASS|FAIL|TIMEOUT|ERROR'
+	./obj_dir_tb_cpu040/tb_quadra_cpu040 +fast | grep -E 'PASS|FAIL|TIMEOUT|ERROR'
