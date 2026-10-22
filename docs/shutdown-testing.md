@@ -46,3 +46,5 @@ Validation of the helper: existing batch tokens retain their wire format; intera
 `pipelined-040-min` keeps the AP68040 integration and correctness fixes. `pipelined-040` carries performance experiments, with speed, area, and timing measured for each. Test-tool corrections and their evidence belong on both branches and add no FPGA logic. The higher-area options build is a measured variant; its enabled parameters are not the defaults of the minimal branch.
 
 A/UX 3.1 boot and shutdown remain unqualified on these bitstreams. The regression needs the installed guest image and the 32 MB setting.
+
+The available Mac OS disks and the search for the missing A/UX image are recorded in the [disk-image inventory](mac-test-images.md).
