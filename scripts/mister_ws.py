@@ -5,6 +5,11 @@ Usage:
     python scripts/mister_ws.py up down confirm        # send each in order, with default delay
     python scripts/mister_ws.py --delay 0.6 osd        # custom delay before close
     python scripts/mister_ws.py --host my-mister.local osd
+    python3 scripts/mister_ws.py --host my-mister.local --interactive
+
+Interactive mode (POSIX) reads the same tokens from stdin, one per line, while keeping
+one websocket open. This lets an operator verify screenshots between a mouse
+press, drag and release. On exit it explicitly releases the left button.
 
 Each positional argument is sent as "kbd:<arg>". Special forms:
     sleep:0.5     -> wait that many seconds
@@ -39,7 +44,7 @@ profile). Falls back to MiSTer.local : 8182 if neither is set. The helper
 scripts source scripts/local.env themselves; a bare call from a fresh shell
 needs `. scripts/local.env` first, MISTER_HOST=<ip> in front of it, or --host.
 """
-import asyncio, sys, os, argparse, json
+import asyncio, sys, os, argparse, json, signal
 import websockets
 
 async def main():
@@ -50,8 +55,14 @@ async def main():
                     default=int(os.environ.get("MISTER_HTTP_PORT", "8182")))
     ap.add_argument("--delay", type=float, default=0.35,
                     help="delay between key sends (seconds)")
-    ap.add_argument("keys", nargs="+")
+    ap.add_argument("--interactive", action="store_true",
+                    help="keep the websocket open and read one token per stdin line; release left mouse on exit")
+    ap.add_argument("keys", nargs="*")
     args = ap.parse_args()
+    if not args.keys and not args.interactive:
+        ap.error("supply at least one command or --interactive")
+    if args.interactive and os.name != "posix":
+        ap.error("--interactive requires a POSIX terminal or pipe")
 
     url = f"ws://{args.host}:{args.port}/api/ws"
     async with websockets.connect(url) as ws:
@@ -63,10 +74,10 @@ async def main():
         except asyncio.TimeoutError:
             pass
 
-        for k in args.keys:
+        async def send(k):
             if k.startswith("sleep:"):
                 await asyncio.sleep(float(k.split(":", 1)[1]))
-                continue
+                return
             if k.startswith(("raw:", "down:", "up:")):
                 pfx, code = k.split(":", 1)
                 payload = {"raw": "kbdRaw", "down": "kbdRawDown",
@@ -77,9 +88,37 @@ async def main():
                 payload = "mouseBtn:" + k.split(":", 1)[1]
             else:
                 payload = f"kbd:{k}"
-            print(f">> {payload}")
+            print(f">> {payload}", flush=True)
             await ws.send(payload)
             await asyncio.sleep(args.delay)
+
+        try:
+            for k in args.keys:
+                await send(k)
+            if args.interactive:
+                print("Ready: one command per line; EOF releases left mouse and exits.", flush=True)
+                loop = asyncio.get_running_loop()
+                reader = asyncio.StreamReader()
+                transport, _ = await loop.connect_read_pipe(
+                    lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+                task = asyncio.current_task()
+                for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                    loop.add_signal_handler(sig, task.cancel)
+                try:
+                    while True:
+                        line = await reader.readline()
+                        if not line:
+                            break
+                        k = line.decode().strip()
+                        if k and not k.startswith("#"):
+                            await send(k)
+                finally:
+                    transport.close()
+                    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                        loop.remove_signal_handler(sig)
+        finally:
+            if args.interactive:
+                await ws.send("mouseBtn:left_up")
 
         # drain any final replies
         try:
@@ -90,4 +129,7 @@ async def main():
             pass
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except asyncio.CancelledError:
+        sys.exit(130)
