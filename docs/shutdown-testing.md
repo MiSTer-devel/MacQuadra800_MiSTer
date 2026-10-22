@@ -8,10 +8,12 @@ MiSTer `10.0.2.192`, Mac OS 8.1, 32 MB. These are the existing bitstreams, witho
 
 | Build | Area | Bitstream MD5 | Result |
 |---|---:|---|---|
-| Minimal (`pipelined-040-min`, `6e1b795`, seed 38), `MacQuadra800_fix2.rbf` | 33,200 ALMs | `11580e654e9fa77e391c933b668f43c5` | Finder shutdown reached halt screen within 12 s |
+| Minimal (`pipelined-040-min`, `6e1b795`, seed 38), `MacQuadra800_fix2.rbf` | 33,200 ALMs | `11580e654e9fa77e391c933b668f43c5` | Cold-boot Finder shutdown and shutdown after Speedometer Mix + PR each reached halt screen within 12 s |
 | Write buffer + FPU_PIPE/LOOP_PRED/EARLY_RES, seed 40, `MacQuadra800_opts.rbf` | 35,648 ALMs | `916b27a3190c22fb6ed62480f6237a68` | After Speedometer Mix/PR/Color/FPU runs, shutdown reached halt screen within 12 s |
 
 Screenshots: [minimal selection](perf/shutdown_20261022/min-selected.png), [minimal halt](perf/shutdown_20261022/min-halted.png), [options selection](perf/shutdown_20261022/options-selected.png), [options halt](perf/shutdown_20261022/options-halted.png). Both CPUs also reached the shutdown ROM loop in the inherited full-machine simulations (`/Users/alans/dev2/q800_hang/NOTES.md`).
+
+A second minimal-build boot repeated the original workload: Speedometer 4.02 [Benchmark Mix](perf/shutdown_20261022/min-mix-complete.png) and [Performance Rating](perf/shutdown_20261022/min-pr-complete.png) completed, the app was quit with No at the save prompt, and a verified continuous gesture selected Shut Down. The [highlighted item](perf/shutdown_20261022/min-postbench-selected.png) and [halt screen within 12 s](perf/shutdown_20261022/min-postbench-halted.png) are saved. Concurrent SD-card image transfers mean the disk rating is not a new performance baseline.
 
 ## Input method
 
