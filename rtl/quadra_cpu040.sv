@@ -94,6 +94,7 @@ wire  [1:0] c_siz, c_tt;
 wire  [2:0] c_tm;
 wire [31:0] dbg_pc;
 wire        dbg_halted;
+wire        dbg_retire;
 wire [31:0] c_di;
 wire        c_ta_n, c_tea_n, c_tci_n, c_avec_n;
 
@@ -122,7 +123,7 @@ ap68040 #(
 	.a_i(32'd0), .ts_n_i(1'b1), .rw_n_i(1'b1), .siz_i(2'd0), .tt_i(2'd0), .sc(2'b00),
 	.mi_n(c_mi_n), .ta_n_o(), .ta_oe(),
 	.rsto_n(c_rsto_n), .cdis_n(1'b1), .mdis_n(1'b1), .pst(),
-	.dbg_pc(dbg_pc), .dbg_retire(), .dbg_halted(dbg_halted)
+	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_halted(dbg_halted)
 );
 
 //----------------------------------------------------------------------------
@@ -216,7 +217,11 @@ assign vbr_out        = 32'd0;
 assign debug_busy     = xfer;
 assign debug_fault    = 1'b0;
 assign debug_halted   = dbg_halted;
-assign debug_status   = {224'd0, dbg_pc};
+// the PC of the last instruction to retire (dbg_pc alone also shows uops
+// leaving WB on a discarded path)
+reg  [31:0] retired_pc;
+always @(posedge clk) if (dbg_retire) retired_pc <= dbg_pc;
+assign debug_status   = {224'd0, retired_pc};
 assign debug_status2  = 128'd0;
 
 endmodule

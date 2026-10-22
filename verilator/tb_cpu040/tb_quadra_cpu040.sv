@@ -46,6 +46,9 @@ end
 integer nbytes;
 reg busy = 0;
 reg fast = 0;
+reg storm = 0;
+integer storm_iacks = 0;
+reg [31:0] port_cnt = 0;
 initial fast = $test$plusargs("fast");
 reg [2:0] wait_n;
 reg [31:0] lfsr = 32'h1234567;
@@ -78,7 +81,16 @@ always @(posedge clk) begin
 					$finish; end
 				end
 				if (bus_write && bus_addr[3:0] == 4) ipl <= 3'b111;
+				if (bus_write && bus_addr[3:0] == 8) begin
+					if (!bus_wdata[0]) $display("storm: %0d interrupts during the copy, %0d port reads", storm_iacks, port_cnt);
+					storm <= bus_wdata[0]; port_cnt <= 0;
+				end
 				bus_rdata <= 0;
+				if (!bus_write && bus_addr[4]) begin
+					// the read-to-pop port: each read returns the next count
+					bus_rdata <= port_cnt;
+					port_cnt  <= port_cnt + 1;
+				end
 			end
 			else if (bus_write) begin
 				writes <= writes + 1;
@@ -97,6 +109,9 @@ always @(posedge clk) begin
 		end
 	end
 	if (cyc == 20000) ipl <= 3'b110;      // level 1 pending from here (masked until test 5)
+	// the storm: a level 1 interrupt every 23..86 clocks while test 7 copies
+	if (storm && ipl == 3'b111 && lfsr[5:0] == 6'd0) ipl <= 3'b110;
+	if (storm && dut.iack) storm_iacks <= storm_iacks + 1;
 	if (cyc > 2000000) begin $display("TIMEOUT pc %h beats %0d halted %b", dut.dbg_pc, beats, dut.dbg_halted); $finish; end
 end
 initial begin

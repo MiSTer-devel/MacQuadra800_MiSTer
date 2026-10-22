@@ -350,7 +350,8 @@ wombat_cpu cpu (
 `ifdef SIMULATION
 // sim only (+ncrbus): every CPU beat into the 53C96 window, either CPU
 always @(posedge clk) if (nreset && bus_req && bus_ack && (bus_addr[31:28] == 4'h5) &&
-                          (bus_addr[17:8] == 10'h100) && $test$plusargs("ncrbus"))
+                          ((bus_addr[17:8] == 10'h100) || ((bus_addr[17:8] == 10'h101) && $test$plusargs("sdmabus"))) &&
+                          $test$plusargs("ncrbus"))
 	$display("[NCRBUS] %s %08h sz%0d %08h pc=%08h", bus_write ? "W" : "R", bus_addr, bus_size,
 	         bus_write ? bus_wdata : bus_rdata, debug_status[31:0]);
 `endif

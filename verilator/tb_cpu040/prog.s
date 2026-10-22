@@ -73,7 +73,48 @@ start:
 	subq.l	#1,d1
 	bne	.w
 	bra	fail
-.ok	moveq	#6,d7		; test 6: FPU
+.ok	moveq	#7,d7		; test 7: an unrolled copy from a read-to-pop port into copyback
+				; RAM under a storm of interrupts (the Mac SCSI driver's 4 x 32 move.l (a1),(a2)+)
+	move.l	#1,$50000008	; the bench: interrupt storm on, port counter to 0
+	lea	$50000010,a1
+	lea	$6000,a2
+	moveq	#3,d5
+.cp	rept	32
+	move.l	(a1),(a2)+
+	endr
+	dbf	d5,.cp
+	move.l	#0,$50000008	; storm off
+	lea	$6000,a2
+	moveq	#0,d0
+	move.w	#127,d1
+.ck	cmp.l	(a2)+,d0
+	bne	fail
+	addq.l	#1,d0
+	dbf	d1,.ck
+	moveq	#8,d7		; test 8: code written through the copyback D-cache runs after CPUSHA BC
+	lea	$6800,a3	; a routine: moveq #1,d0 ; rts
+	move.l	#$70014e75,(a3)
+	cpusha	bc
+	jsr	(a3)		; now in the I-cache
+	cmp.l	#1,d0
+	bne	fail
+	move.l	#$70024e75,(a3)	; rewrite it: moveq #2,d0 ; rts (dirty in the D-cache)
+	cpusha	bc
+	jsr	(a3)
+	cmp.l	#2,d0
+	bne	fail
+	moveq	#9,d7		; test 9: the same with CPUSHA DC + CINVA IC, and BlockMove-style copy
+	lea	src9,a0
+	lea	$6900,a1
+	moveq	#3,d1
+.m9	move.l	(a0)+,(a1)+
+	dbf	d1,.m9
+	cpusha	dc
+	cinva	ic
+	jsr	$6900
+	cmp.l	#$12345678,d0
+	bne	fail
+	moveq	#6,d7		; test 6: FPU
 	fmove.l	#7,fp0
 	fmul.l	#6,fp0
 	fmove.l	fp0,d0
@@ -84,10 +125,19 @@ start:
 	cpusha	dc
 .h	bra	.h
 irq1:	addq.l	#1,d6
+	move.l	d0,-(a7)	; some RAM work, as the Mac's handlers do
+	move.l	$7000,d0
+	addq.l	#1,d0
+	move.l	d0,$7000
+	move.l	(a7)+,d0
 	move.l	#1,$50000004	; the bench drops IPL on this write
 	rte
 fail:	move.l	d7,$50000000
 	cpusha	dc
 .h2	bra	.h2
+src9:	move.l	#$12345678,d0
+	rts
+	nop
+	nop
 fault:	move.l	#$EE,d7
 	bra	fail
