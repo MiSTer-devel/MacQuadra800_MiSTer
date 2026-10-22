@@ -21,7 +21,11 @@ module ap68040
 	parameter bit         EARLY_RES    = 0,      // AG's early results for younger uops' base and index
 	parameter bit         DC1_ATC      = 0,      // DC1's own ATC port and tag compare (timing)
 	parameter bit         SKID         = 0,      // the skid register in front of AG (timing)
-	parameter int         DIV_STEPS    = 2       // divide steps per cycle (2 or 4)
+	parameter int         DIV_STEPS    = 2,      // divide steps per cycle (2 or 4)
+	// platform cacheability (ap68040_dmu): 0 = as upstream
+	parameter bit          PA_IO_SERIAL = 0,
+	parameter logic [31:0] PA_C0_MASK = 32'h0, PA_C0_MATCH = 32'h0,
+	parameter logic [31:0] PA_C1_MASK = 32'h0, PA_C1_MATCH = 32'h0
 )(
 
 	input  logic        clk,
@@ -280,7 +284,9 @@ ap68040_backend #(.FPU_REVISION(FPU_REVISION), .FPU_PIPE(FPU_PIPE), .EARLY_RES(E
 	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .halted(dbg_halted), .fetch_stop(be_fstop)
 );
 
-ap68040_dmu #(.DC1_ATC(DC1_ATC)) dmu (
+ap68040_dmu #(.DC1_ATC(DC1_ATC), .PA_IO_SERIAL(PA_IO_SERIAL),
+	.PA_C0_MASK(PA_C0_MASK), .PA_C0_MATCH(PA_C0_MATCH),
+	.PA_C1_MASK(PA_C1_MASK), .PA_C1_MATCH(PA_C1_MATCH)) dmu (
 	.clk(clk), .nreset(nreset),
 	.adv_ag(adv_ag), .dm_req(dm_req), .dm_va(dm_va), .dm_mem(dm_mem),
 	.dm_msz(dm_msz), .dm_fc(dm_fc), .dm_lock(dm_lock), .dm_locke(dm_locke),

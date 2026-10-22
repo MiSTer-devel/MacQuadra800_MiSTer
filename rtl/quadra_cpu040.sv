@@ -99,7 +99,12 @@ wire        c_ta_n, c_tea_n, c_tci_n, c_avec_n;
 
 ap68040 #(
 	.FPU_REVISION(8'h41),
-	.FPU_PIPE(0), .LOOP_PRED(0), .EARLY_RES(0), .DC1_ATC(0), .SKID(0), .DIV_STEPS(2)
+	.FPU_PIPE(0), .LOOP_PRED(0), .EARLY_RES(0), .DC1_ATC(0), .SKID(0), .DIV_STEPS(2),
+	// only RAM ($0-$3FFFFFFF) and the ROM window ($4xxxxxxx) are cacheable:
+	// everything else is a device, never read speculatively
+	.PA_IO_SERIAL(1),
+	.PA_C0_MASK(32'hC000_0000), .PA_C0_MATCH(32'h0000_0000),
+	.PA_C1_MASK(32'hF000_0000), .PA_C1_MATCH(32'h4000_0000)
 ) cpu (
 	.clk(clk),
 	.bclk_en(1'b1),

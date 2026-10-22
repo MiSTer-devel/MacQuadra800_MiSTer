@@ -349,3 +349,13 @@ tb_quadra_cpu040: tb_cpu040/prog.s tb_cpu040/tb_quadra_cpu040.sv ../rtl/quadra_c
 	$V --binary --timing -Wno-fatal -Wno-lint -Wno-style -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040 -o tb_quadra_cpu040 $(FAST040_SRC) ../rtl/quadra_cpu040.sv tb_cpu040/tb_quadra_cpu040.sv
 	./obj_dir_tb_cpu040/tb_quadra_cpu040 | grep -E 'PASS|FAIL|TIMEOUT|ERROR'
 	./obj_dir_tb_cpu040/tb_quadra_cpu040 +fast | grep -E 'PASS|FAIL|TIMEOUT|ERROR'
+
+# The full machine with the pipelined AP68040 (CPU_AP68040): obj_dir040/Vemu.
+# The old core's observers and profiles in sim_main.cpp are compiled out.
+V_SRC040 = $(filter-out $(RTL)/wombat_cpu.sv $(RTL)/wombat_store_buffer.sv $(AP)/% $(RTL)/ap68040/%,$(V_SRC)) \
+	$(FAST040_SRC) $(RTL)/quadra_cpu040.sv
+V_INC040 = +incdir+$(RTL) -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu
+vemu040: $(V_SRC040) $(C_SRC) $(SIM_HEADERS) Makefile quadra800.rom.hex
+	$V -cc $(V_OPT) -LDFLAGS "$(LDFLAGS)" -exe --trace --Mdir ./obj_dir040 \
+		$(V_DEFINE) +define+CPU_AP68040=1 $(V_INC040) $(TOP) -CFLAGS "$(CFLAGS) -DCPU_AP68040" $(V_SRC040) $(C_SRC)
+	$(MAKE) -C obj_dir040 -f Vemu.mk

@@ -347,6 +347,14 @@ wombat_cpu cpu (
 	.debug_status2(debug_status2)
 );
 
+`ifdef SIMULATION
+// sim only (+ncrbus): every CPU beat into the 53C96 window, either CPU
+always @(posedge clk) if (nreset && bus_req && bus_ack && (bus_addr[31:28] == 4'h5) &&
+                          (bus_addr[17:8] == 10'h100) && $test$plusargs("ncrbus"))
+	$display("[NCRBUS] %s %08h sz%0d %08h pc=%08h", bus_write ? "W" : "R", bus_addr, bus_size,
+	         bus_write ? bus_wdata : bus_rdata, debug_status[31:0]);
+`endif
+
 wire        b_req, b_write;
 wire [31:2] b_addr;
 wire  [3:0] b_be;

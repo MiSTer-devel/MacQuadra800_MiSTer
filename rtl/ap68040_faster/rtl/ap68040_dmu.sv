@@ -55,7 +55,16 @@ module ap68040_dmu
 #(
 	// DC1's own ATC read port and tag compare beside xlate (65 MHz timing;
 	// 0: DC1's hit and way are xlate's, the port is not built)
-	parameter bit DC1_ATC = 0
+	parameter bit DC1_ATC = 0,
+	// Platform cacheability (MacQuadra800 local change): with PA_IO_SERIAL
+	// set, a physical address in neither cacheable window is treated as
+	// cache-inhibited, serialized (CM 11) whatever the TTRs or the page say,
+	// so a device register is never read on a path that is then discarded
+	// -- the Mac ROM runs with translation off, whose default mode is
+	// cacheable, and the bus's TCI comes too late to stop a speculative read.
+	parameter bit          PA_IO_SERIAL = 0,
+	parameter logic [31:0] PA_C0_MASK = 32'h0, PA_C0_MATCH = 32'h0,
+	parameter logic [31:0] PA_C1_MASK = 32'h0, PA_C1_MATCH = 32'h0
 )
 (
 	input  logic        clk,
@@ -573,6 +582,9 @@ function automatic xres_t xlate(input logic [31:0] la, input logic s, input logi
 		else x.ok = 1'b1;
 	end
 	else x.walk = 1'b1;
+	if (PA_IO_SERIAL && x.ok && !x.flt &&
+	    ((x.pa & PA_C0_MASK) != PA_C0_MATCH) && ((x.pa & PA_C1_MASK) != PA_C1_MATCH))
+		x.cm = 2'b11;
 	tg = x.pa[31:10];
 	if (x.ok && !x.flt) begin
 		if (valid[0] && t0 == tg) begin x.hit = 1'b1; x.way = 2'd0; end
