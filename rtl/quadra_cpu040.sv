@@ -217,10 +217,15 @@ assign vbr_out        = 32'd0;
 assign debug_busy     = xfer;
 assign debug_fault    = 1'b0;
 assign debug_halted   = dbg_halted;
-// the PC of the last instruction to retire (dbg_pc alone also shows uops
-// leaving WB on a discarded path)
-reg  [31:0] retired_pc;
-always @(posedge clk) if (dbg_retire) retired_pc <= dbg_pc;
+// the PC of the last instruction to retire.  dbg_retire is registered (set on
+// the edge the last uop commits) while dbg_pc is the uop in WB now: by the
+// time dbg_retire is seen, WB may hold the next uop -- on a discarded path as
+// often as not -- so the PC is the one WB held a clock earlier.
+reg  [31:0] retired_pc, wb_pc_d;
+always @(posedge clk) begin
+	wb_pc_d <= dbg_pc;
+	if (dbg_retire) retired_pc <= wb_pc_d;
+end
 assign debug_status   = {224'd0, retired_pc};
 assign debug_status2  = 128'd0;
 

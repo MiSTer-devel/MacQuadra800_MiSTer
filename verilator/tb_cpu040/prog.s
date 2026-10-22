@@ -120,6 +120,58 @@ start:
 	fmove.l	fp0,d0
 	cmp.l	#42,d0
 	bne	fail
+	moveq	#10,d7		; test 10: a word load into An forwarded to the next instruction
+	move.l	#$80008000,d0	; (the HFS node check: suba.l a0,a0 ; movea.w $2a(a4),a0 ; adda.l a1,a0)
+	movec	d0,cacr
+	lea	$6a00,a4
+	move.w	#$200,$2a(a4)
+	cpusha	dc		; the word is in memory, not the cache
+	cinva	dc
+	lea	$7000,a1
+	suba.l	a0,a0
+	movea.w	$2a(a4),a0	; D-cache miss
+	adda.l	a1,a0
+	cmpa.l	#$7200,a0
+	bne	fail
+	moveq	#12,d7		; test 12: no write of a0 just before the load
+	nop
+	nop
+	movea.w	$2a(a4),a0
+	adda.l	a1,a0
+	cmpa.l	#$7200,a0
+	bne	fail
+	moveq	#13,d7		; test 13: the long form
+	move.l	#$200,$2a(a4)
+	suba.l	a0,a0
+	movea.l	$2a(a4),a0
+	adda.l	a1,a0
+	cmpa.l	#$7200,a0
+	bne	fail
+	moveq	#14,d7		; test 14: word load into Dn, then add
+	move.w	#$200,$2a(a4)
+	moveq	#0,d0
+	move.w	$2a(a4),d0
+	add.l	a1,d0
+	cmp.l	#$7200,d0
+	bne	fail
+	moveq	#11,d7		; test 11: the same, D-cache hit
+	suba.l	a0,a0
+	movea.w	$2a(a4),a0
+	adda.l	a1,a0
+	cmpa.l	#$7200,a0
+	bne	fail
+	moveq	#15,d7		; test 15: the same word load used as an index, D-cache hit
+	suba.l	a0,a0
+	movea.w	$2a(a4),a0
+	lea	(a1,a0.l),a0
+	cmpa.l	#$7200,a0
+	bne	fail
+	moveq	#16,d7		; test 16: ... and as a base
+	suba.l	a0,a0
+	movea.w	$2a(a4),a0
+	lea	$10(a0),a0
+	cmpa.l	#$210,a0
+	bne	fail
 	cpusha	dc
 	move.l	#$A5A5A5A5,$50000000
 	cpusha	dc

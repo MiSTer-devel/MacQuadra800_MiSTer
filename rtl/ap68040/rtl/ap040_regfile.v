@@ -159,6 +159,24 @@ assign rdata_f = (raddr_f == 4'd15) ? sp_active : q_f;
 always @(posedge clk)
     if (nreset && ce && pend_we) bank_f[pend_waddr] <= pend_wdata;
 
+`ifdef SIMULATION
+// +rtrace [+rtrace_after=<clocks>]: every register write ([RW] rN=value;
+// D0-D7 are 0-7, A0-A6 8-14, the active stack pointer 15; sp0/1/2 the
+// USP/ISP/MSP written directly), to diff against another core's run
+reg [63:0] rt_clk = 0, rt_after = 0;
+reg        rt_req = 1'b0, rt_on = 1'b0;
+initial begin
+	rt_req = $test$plusargs("rtrace");
+	if (!$value$plusargs("rtrace_after=%d", rt_after)) rt_after = 0;
+end
+always @(posedge clk) begin
+	rt_clk <= rt_clk + 1;
+	if (!rt_on && rt_req && rt_clk >= rt_after) rt_on <= 1'b1;
+	if (rt_on && nreset && ce && we)     $display("[RW] r%0d=%08x @%0d", waddr, wdata, rt_clk);
+	if (rt_on && nreset && ce && aux_we) $display("[RW] sp%0d=%08x @%0d", aux_sel, aux_wdata, rt_clk);
+end
+`endif
+
 integer i;
 always @(posedge clk) begin
 	if (!nreset) begin

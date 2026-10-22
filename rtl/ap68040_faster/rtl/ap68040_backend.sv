@@ -2207,6 +2207,27 @@ always_ff @(posedge clk)
 		$finish;
 	end
 // synthesis translate_on
+`ifdef SIMULATION
+// +rtrace [+rtrace_after=<clocks>]: every retired instruction ([RT] pc, the
+// CCR after it, the clock) and every architectural register write ([RW]
+// rN=value; D0-D7 are 0-7, A0-A7 8-15, ISP/MSP 16/17), to diff against
+// another core's run (Quadra port)
+longint rt_clk = 0, rt_after = 0;
+logic   rt_req = 1'b0, rt_on = 1'b0;
+initial begin
+	rt_req = $test$plusargs("rtrace");
+	if (!$value$plusargs("rtrace_after=%d", rt_after)) rt_after = 0;
+end
+always_ff @(posedge clk) begin
+	rt_clk <= rt_clk + 1;
+	if (!rt_on && rt_req && rt_clk >= rt_after) rt_on <= 1'b1;
+	if (rt_on) begin
+		if (wb_bound) $display("[RT] %08x ccr=%02x @%0d", wb_u.pc, wb_ccr, rt_clk);
+		for (int i = 0; i < 3; i++)
+			if (bwe[i] && bwa[i] < 5'd18) $display("[RW] r%0d=%08x", bwa[i], bwd[i]);
+	end
+end
+`endif
 assign iack_lvl   = irq_lvl_r;
 assign rsto_req   = wb_v && wb_reset && !rst_issued && !wb_is_exc;
 assign dm_st_data = wb_st_data;
@@ -2309,7 +2330,11 @@ always_ff @(posedge clk) begin
 			// (an older writer's value is overwritten in time by the
 			// youngest's: AG keeps waiting for it)
 			if (stale_b && ag_u.base_v) agb_q <= exq_val;
-			stale_b <= exw_ag && ag_u.base_v && exw_reg == ag_u.base && !cap_b;
+			// not stale when a younger load hands its data over this
+			// same cycle (as the entering case's !cb): the EX write is
+			// the older writer's, and the reload would undo the capture
+			stale_b <= exw_ag && ag_u.base_v && exw_reg == ag_u.base && !cap_b &&
+			           !(dc2_capd && dc2_u.d_reg == ag_u.base);
 			if (dc2_capd && ag_u.base_v && dc2_u.d_reg == ag_u.base) begin
 				agb_q <= dc2_capv;
 				if (adv_dc2) cap_b <= 1'b1;
@@ -2323,7 +2348,8 @@ always_ff @(posedge clk) begin
 		end
 		else begin
 			if (stale_x) agx_q <= ixf(exq_val, ag_u);
-			stale_x <= exw_ag && ag_u.idx_v && exw_reg == ag_u.idx && !cap_x;
+			stale_x <= exw_ag && ag_u.idx_v && exw_reg == ag_u.idx && !cap_x &&
+			           !(dc2_capd && dc2_u.d_reg == ag_u.idx);
 			if (dc2_capd && dc2_u.d_reg == ag_u.idx) begin
 				agx_q <= ixf(dc2_capv, ag_u);
 				if (adv_dc2) cap_x <= 1'b1;
