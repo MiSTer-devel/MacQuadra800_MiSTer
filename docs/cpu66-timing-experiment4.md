@@ -23,3 +23,9 @@ The targeted cache-tag path passes at **+0.578 ns**, redirect +0.903 ns and seco
 Speed synthesis completed at **33,154 ALMs**, 30,379 registers and 490 M10Ks. CPU setup is **−1.934 ns**, TNS **−218.618 ns**. SDRAM +0.325 ns, bus +1.168 ns and minimum hold +0.098 ns pass; HDMI misses by **0.043 ns**. [Artifact and hashes](perf/cpu66_20261022/timing4/speed/fit/artifact.json).
 
 Its worst path is fetch queue `qw[0][1]` → decoder attribute-ROM address, 12 logic levels. The recipe improves CPU TNS, but does not improve the worst CPU slack and introduces an HDMI miss. Retain the normal recipe for the next targeted RTL experiment. Neither fourth-experiment RBF has been hardware qualified.
+
+## A/UX comparison
+
+The normal RBF was tried with a fresh verified copy of the known working A/UX image, 32 MB and Ethernet Off. It remained gray at 94 and 252 seconds with no disk-I/O progress. The user authorized recovery resets of the disposable test clone. The frozen 33 MHz minimal RBF then booted the **same clone with the same settings** to Unix Finder, returned normal `uname -a`, `date` and `df` results, and shut down to the explicit safe screen. [CPU66 record](perf/cpu66_20261022/timing4/aux/run.json), [matched baseline](perf/cpu66_20261022/timing4/aux/baseline33/run.json).
+
+This rules out a persistently unbootable clone/setup for that comparison, but does not distinguish physical timing from CPU66 integration or later RTL changes. No 66 MHz A/UX pass is claimed. The test MiSTer is left safely halted after the baseline check.
