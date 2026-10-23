@@ -1,0 +1,10 @@
+--- a/rtl/ap68040_faster/rtl/ap68040_fpif.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_fpif.sv
+@@ -764 +764,3 @@
+-assign taken = (sub == FC_DBCC) ? (!branch_cond && bv[15:0] != 16'd0) :
++// FDBcc's counter is a register operand: use its raw EX word,
++// without the unrelated memory-operand selection.
++assign taken = (sub == FC_DBCC) ? (!branch_cond && bw != 16'd0) :
+@@ -767,0 +770,2 @@
++always @(posedge clk) if(nreset && ex_v && sub==FC_DBCC && bw !== bv[15:0])
++ $fatal(1,"FAIL: FDBcc counter is not the raw register word");
