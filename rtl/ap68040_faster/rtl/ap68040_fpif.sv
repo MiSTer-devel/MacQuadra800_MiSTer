@@ -427,34 +427,77 @@ function automatic logic [1:0] crsel_of(input logic [1:0] k);   // the FPU's cr_
 	crsel_of = (k == 2'd0) ? 2'd2 : (k == 2'd1) ? 2'd1 : 2'd0;
 endfunction
 
-// LIST's result from the instruction's words as CHK latches them
+// A nibble contributes 0,12,24,36 or48 bytes to an FMOVEM list.
+// Select the signed contribution directly, then combine two small values.
+// This avoids a serial population count, multiply by12 and wide negation
+// after a late dynamic-list operand arrives.
+function automatic logic [6:0] nibble_bytes(input logic [3:0] m, input logic neg);
+ case (m)
+  4'b0000: nibble_bytes = 7'd0;
+  4'b0001,4'b0010,4'b0100,4'b1000:
+   nibble_bytes = neg ? -7'd12 : 7'd12;
+  4'b0011,4'b0101,4'b0110,4'b1001,4'b1010,4'b1100:
+   nibble_bytes = neg ? -7'd24 : 7'd24;
+  4'b0111,4'b1011,4'b1101,4'b1110:
+   nibble_bytes = neg ? -7'd36 : 7'd36;
+  4'b1111: nibble_bytes = neg ? -7'd48 : 7'd48;
+  default: nibble_bytes = 7'd0;
+ endcase
+endfunction
+function automatic logic [31:0] list_adjust(input logic [7:0] m, input logic neg);
+ logic [6:0] lo,hi;
+ logic [7:0] total;
+ lo = nibble_bytes(m[3:0],neg);
+ hi = nibble_bytes(m[7:4],neg);
+ total = {lo[6],lo} + {hi[6],hi};
+ list_adjust = {{24{total[7]}},total};
+endfunction
+function automatic logic [6:0] list_bytes(input logic [7:0] m);
+ list_bytes = nibble_bytes(m[3:0],1'b0) + nibble_bytes(m[7:4],1'b0);
+endfunction
+
+// LIST's result from the instruction's words as CHK latches them.
 function automatic logic [31:0] lst_of(input logic [15:0] ow, input logic [15:0] xw);
-	logic [3:0] n;
-	logic [6:0] b;
-	n = 4'd0;
-	for (int i = 0; i < 8; i++) n = n + {3'd0, xw[i]};
-	b = 7'(n) * 7'd12;
-	lst_of = (ow[5:3] == 3'd4) ? -{25'd0, b} : {25'd0, b};
+ lst_of = list_adjust(xw[7:0],ow[5:3] == 3'd4);
 endfunction
-// ... and for a dynamic list (Dn): from the operand, the words latched
+// Dynamic list (Dn), with the instruction's direction already latched.
 function automatic logic [31:0] lst_dyn(input logic [15:0] ow, input logic [7:0] l);
-	logic [3:0] n;
-	logic [6:0] b;
-	n = 4'd0;
-	for (int i = 0; i < 8; i++) n = n + {3'd0, l[i]};
-	b = 7'(n) * 7'd12;
-	lst_dyn = (ow[5:3] == 3'd4) ? -{25'd0, b} : {25'd0, b};
+ lst_dyn = list_adjust(l,ow[5:3] == 3'd4);
 endfunction
-// FMOVEM list and adjustment (LIST, combinational for its result)
 logic [7:0] l_now;
 logic [6:0] l_bytes;
 always_comb begin
-	logic [3:0] n;
-	l_now = ext[11] ? av[7:0] : ext[7:0];
-	n = 4'd0;
-	for (int i = 0; i < 8; i++) n = n + {3'd0, l_now[i]};
-	l_bytes = 7'(n) * 7'd12;
+ l_now = ext[11] ? av[7:0] : ext[7:0];
+ l_bytes = list_bytes(l_now);
 end
+// synthesis translate_off
+// Exhaust every real list/direction input against the old arithmetic rule.
+initial begin : check_list_bytes
+ integer n,expected,checked;
+ checked = 0;
+ for (integer mode=0;mode<8;mode=mode+1)
+  for (integer mask=0;mask<256;mask=mask+1) begin
+   n=0;
+   for(integer bitno=0;bitno<8;bitno=bitno+1) n=n+((mask>>bitno)&1);
+   expected = (mode==4) ? -(n*12) : n*12;
+   if(lst_of(16'(mode<<3),16'(mask)) !== 32'(expected) ||
+      lst_dyn(16'(mode<<3),8'(mask)) !== 32'(expected) ||
+      list_bytes(8'(mask)) !== 7'(n*12))
+    $fatal(1,"FAIL: FPU list byte count mask=%h mode=%0d",mask,mode);
+   checked=checked+1;
+  end
+ $display("TIMING_LIST_BYTES: checked=%0d",checked);
+end
+logic [6:0] l_bytes_reference;
+always_comb begin
+ logic [3:0] n;
+ n=4'd0;
+ for(integer i=0;i<8;i=i+1)n=n+{3'd0,l_now[i]};
+ l_bytes_reference=7'(n)*7'd12;
+end
+always @(posedge clk)if(nreset && l_bytes !== l_bytes_reference)
+ $fatal(1,"FAIL: FPU current list bytes differ from original arithmetic");
+// synthesis translate_on
 
 // FSAVE frame
 logic [1:0] sv_now;
