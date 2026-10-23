@@ -647,7 +647,7 @@ ap68040_fpif #(.FPU_REVISION(FPU_REVISION), .FPU_PIPE(FPU_PIPE)) fpif (
 	.fuse(ex_u.sz == SZ_W), .eal(ex_u.sz == SZ_B),
 	.imm(ex_u.imm[7:0]), .immb(ex_u.imm_b[7:0]),
 	.av(ex_av), .bv(ex_bv), .aw(ex_a[15:0]), .bw(ex_b[15:0]),
-	.dw_a(dc2_a[15:0]), .dw_b(dc2_b[15:0]), .dw_ld(!stall_ex), .latch(ex_latch), .ea(ex_ea), .pc(ex_u.pc),
+	.dw_a(dc2_a[15:0]), .dw_b(dc2_b[15:0]), .dw_sub(dc2_u.cond), .dw_ld(!stall_ex), .latch(ex_latch), .ea(ex_ea), .pc(ex_u.pc),
 	.safe(!wb_v || wb_fpchk), .adv(adv_ex), .kill(kill_now),
 	.hold(fp_hold), .res(fp_res), .dkill(fp_dkill), .taken(fp_taken),
 	.xvec(fp_xvec), .xfmt(fp_xfmt), .xnext(fp_xnext), .xaddr(fp_xaddr),
@@ -659,9 +659,10 @@ ap68040_fpif #(.FPU_REVISION(FPU_REVISION), .FPU_PIPE(FPU_PIPE)) fpif (
 // EX holds while the unit runs, until the cycle its result is presented
 // (a divide by zero holds its first cycle too: the zero test of the
 // operand stays off the stall path, and the exception goes a cycle later)
+// fp_hold already includes the qualified ex_v supplied to the interface.
 assign ex_hold = (ex_v && ex_is_md && !md_z && !ex_fault && !md_done && !md_fin) ||
                  (ex_v && ex_slow && !ex_ph) ||
-                 (ex_v && ex_is_fp && !ex_fault && ex_u.exc == 8'd0 && fp_hold) ||
+                 fp_hold ||
                  dbf_hold;
 
 // DBcc period floor (the dbcc_floor input): a taken DBcc leaving EX loads

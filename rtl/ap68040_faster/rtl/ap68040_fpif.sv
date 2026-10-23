@@ -64,6 +64,7 @@ module ap68040_fpif
 	input  logic [15:0] bw,             // (CHK's words: registers, no mux)
 	input  logic [15:0] dw_a,           // the same words of the uop entering
 	input  logic [15:0] dw_b,           // EX (DC2's), and EX not holding
+	input  logic  [3:0] dw_sub,         // sub-operation entering EX
 	input  logic        dw_ld,          // (DC2 moving on or EX emptying: the
 	                                    // decode is of the uop EX has next)
 	input  logic [31:0] latch,
@@ -533,9 +534,34 @@ always_ff @(posedge clk)
 	end
 // synthesis translate_on
 
+// Decode before EX, beside the existing CHK word decode. These eight bits
+// replace sub-operation comparisons on the late hold/forwarding path.
+function automatic logic [7:0] hold_decode(input logic [3:0] s);
+	hold_decode = {!(s == FC_CHK || s == FC_EAL || s == FC_DISP || s == FC_GET),
+	               s == FC_END, s == FC_GET, s == FC_SV0 || s == FC_RS0,
+	               s == FC_MVR, s == FC_CRR, s == FC_DISP, s == FC_CHK};
+endfunction
+logic [7:0] hold_sub;
+always_ff @(posedge clk)
+	if (dw_ld) hold_sub <= hold_decode(dw_sub);
+
+wire chk_wait = (fuse && go) ?
+	((fresh && !f_pdone) ||
+	 (!f_unimp && !f_unsupp && !f_excreq && !fx_q && !(f_accepted || f_done || f_pdone))) :
+	((bg && !f_end) || (!chk_pend && !chk_x && fuse));
+wire disp_wait = (ocl == 3'b011) ? !done_q :
+	!(go && (f_unimp || f_unsupp || f_excreq || fx_q || f_accepted || f_done || f_pdone));
+assign hold = ex_v && (
+	(!safe && !(hold_sub[5] || (hold_sub[6] && !sx_v && !fsr_q))) ||
+	(f_pbusy && hold_sub[7]) ||
+	(hold_sub[0] && chk_wait) || (hold_sub[1] && disp_wait) ||
+	(hold_sub[2] && !crr_wait) || (hold_sub[3] && !mvr_wait) ||
+	(hold_sub[4] && bg));
+
+logic hold_g;                  // original priority expression, checked in simulation
 logic [31:0] res_g;            // the result as the hold logic forms it (checked, then unused)
 always_comb begin
-	hold    = 1'b0;
+	hold_g  = 1'b0;
 	res_g   = 32'd0;
 	dkill   = 1'b0;
 	taken   = 1'b0;
@@ -546,12 +572,12 @@ always_comb begin
 	xcommit = 1'b0;
 	st_kill = sx_kill;
 	if (ex_v) begin
-		if (!safe && !nosafe) hold = 1'b1;
+		if (!safe && !nosafe) hold_g = 1'b1;
 		// FPU state (registers, FPSR, condition codes, control registers,
 		// frames) is current only once the pipelined operations complete:
 		// only a new operation (CHK, EAL, DISP) goes ahead of them
 		else if (f_pbusy && !(sub == FC_CHK || sub == FC_EAL || sub == FC_DISP || sub == FC_GET))
-			hold = 1'b1;
+			hold_g = 1'b1;
 		else case (sub)
 			FC_CHK: begin
 				// the released operation completing this cycle without an
@@ -560,7 +586,7 @@ always_comb begin
 				// the FPU sees it now: done at once if it went into the
 				// pipeline (pdone: the registered done of this cycle may be
 				// a released operation's, which fresh masks)
-				if (fuse && go && fresh && !f_pdone) hold = 1'b1;
+				if (fuse && go && fresh && !f_pdone) hold_g = 1'b1;
 				else if (fuse && go) begin
 					// dispatched (below): DISP's outcome
 					if (f_unimp) begin
@@ -572,9 +598,9 @@ always_comb begin
 						xaddr = 32'd0; xcommit = 1'b1;
 					end
 					else if (f_excreq || fx_q) ;   // pending: the instruction completes
-					else if (!(f_accepted || f_done || f_pdone)) hold = 1'b1;
+					else if (!(f_accepted || f_done || f_pdone)) hold_g = 1'b1;
 				end
-				else if (bg && !f_end) hold = 1'b1;
+				else if (bg && !f_end) hold_g = 1'b1;
 				else if (chk_pend) begin
 					xvec = pend_vec;
 				end
@@ -582,12 +608,12 @@ always_comb begin
 					xvec = chk_ill ? VEC_ILL : VEC_FLINE;
 					if (chk_un) begin xfmt = 4'd2; xnext = 1'b1; end
 				end
-				else if (fuse) hold = 1'b1;    // dispatching this cycle
+				else if (fuse) hold_g = 1'b1;    // dispatching this cycle
 			end
 			FC_DISP: begin
 				if (ocl == 3'b011) begin
 					// a store: its outcome first; its exception comes from END
-					if (!done_q) hold = 1'b1;
+					if (!done_q) hold_g = 1'b1;
 					if (ea_dn) begin
 						case (fmt)
 							3'd4:    res_g = {bv[31:16], f_dout[95:80]};
@@ -611,7 +637,7 @@ always_comb begin
 					xaddr = eav ? eaa : 32'd0; xcommit = 1'b1;
 				end
 				else if (go && (f_excreq || fx_q)) ;   // pending: the instruction completes
-				else if (!(go && (f_accepted || f_done || f_pdone))) hold = 1'b1;
+				else if (!(go && (f_accepted || f_done || f_pdone))) hold_g = 1'b1;
 			end
 			FC_GET: res_g = (imm[1:0] == 2'd1) ? get_q[63:32] : get_q[31:0];
 			FC_END: begin
@@ -623,12 +649,12 @@ always_comb begin
 			FC_CRR: begin
 				res_g = f_crrd;
 				dkill = !cr_slots[imm[1:0]];
-				if (!crr_wait) hold = 1'b1;
+				if (!crr_wait) hold_g = 1'b1;
 			end
 			FC_LIST: res_g = (ea_pd) ? -{25'd0, l_bytes} : {25'd0, l_bytes};
 			FC_MVR: begin
 				res_g = mv_rev ? f_fmrd[31:0] : f_fmrd[95:64];
-				if (!mvr_wait) hold = 1'b1;
+				if (!mvr_wait) hold_g = 1'b1;
 			end
 			FC_COND, FC_DBCC: begin
 				logic [5:0] pred;
@@ -650,7 +676,7 @@ always_comb begin
 				else res_g = {bv[31:8], {8{c}}};      // FScc
 			end
 			FC_SV0: begin
-				if (bg) hold = 1'b1;
+				if (bg) hold_g = 1'b1;
 				else if (pend && !s_unimp) begin
 					// frameless fallback: an earlier FSAVE already took the
 					// pending exception's frame
@@ -662,7 +688,7 @@ always_comb begin
 			              (sv_kind == 2'd2) ? unimp_word(imm[6:2]) :
 			              (sv_kind == 2'd1) ? IDLE_HDR : 32'd0;
 			FC_RS0: begin
-				if (bg) hold = 1'b1;
+				if (bg) hold_g = 1'b1;
 				res_g = {25'd0, kbytes(rs_kind_of(av))};
 				// an unknown frame is a format error at the FRESTORE
 				if (!rs_ok) xvec = VEC_FMTERR;
@@ -671,6 +697,16 @@ always_comb begin
 		endcase
 	end
 end
+
+// synthesis translate_off
+integer hold_checks = 0;
+always @(posedge clk) if (nreset) begin
+ if (hold !== hold_g || (ex_v && hold_sub !== hold_decode(sub)))
+  $fatal(1, "FAIL: FPU hold predecode differs from original priority expression");
+ if (ex_v) hold_checks <= hold_checks + 1;
+end
+final $display("TIMING_FP_HOLD: checked=%0d", hold_checks);
+// synthesis translate_on
 
 // the result, by the sub-operation only: EX takes it when the uop
 // completes, so it need not wait for the hold's conditions (ex_v, safe,
