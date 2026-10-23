@@ -1,0 +1,73 @@
+--- a/rtl/ap68040_faster/rtl/ap68040.sv
++++ b/rtl/ap68040_faster/rtl/ap68040.sv
+@@ -253,0 +254,2 @@
++logic [4:0] uq_idx0, uq_idx1;
++logic uq_idx_sel;
+@@ -259,0 +262 @@
++	.in_idx0(uq_idx0), .in_idx1(uq_idx1), .in_idx_sel(uq_idx_sel),
+@@ -412 +415,2 @@
+-	.uq_n(uq_n), .uq0(uq0), .uq_pop(uo_rdy && uq_n != 2'd0)
++	.uq_n(uq_n), .uq0(uq0), .uq_pop(uo_rdy && uq_n != 2'd0),
++	.uq_idx0(uq_idx0), .uq_idx1(uq_idx1), .uq_idx_sel(uq_idx_sel)
+--- a/rtl/ap68040_faster/rtl/ap68040_useq.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_useq.sv
+@@ -42,0 +43,2 @@
++	output logic [4:0]  uq_idx0, uq_idx1,
++	output logic        uq_idx_sel,
+@@ -84,0 +87,3 @@
++assign uq_idx0 = uq_bank0.idx;
++assign uq_idx1 = uq_bank1.idx;
++assign uq_idx_sel = uq_read;
+--- a/rtl/ap68040_faster/rtl/ap68040_backend.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_backend.sv
+@@ -39,0 +40,2 @@
++	input  logic [4:0]  in_idx0, in_idx1,
++	input  logic        in_idx_sel,
+@@ -245,2 +247,2 @@
+-logic  [4:0] rra [5];
+-logic [31:0] frd [5], brd [5], rrd [5];
++logic  [4:0] rra [6];
++logic [31:0] frd [6], brd [6], rrd [6];
+@@ -402,2 +404,2 @@
+-ap68040_rf #(.NR(5)) rff (.clk(clk), .we(fwe), .wa(fwa), .wd(fwd), .ra(rra), .rd(frd));
+-ap68040_rf #(.NR(5), .NW(2)) rfb (.clk(clk), .we(bwe), .wa(bwa), .wd(bwd), .ra(rra), .rd(brd));
++ap68040_rf #(.NR(6)) rff (.clk(clk), .we(fwe), .wa(fwa), .wd(fwd), .ra(rra), .rd(frd));
++ap68040_rf #(.NR(6), .NW(2)) rfb (.clk(clk), .we(bwe), .wa(bwa), .wd(bwd), .ra(rra), .rd(brd));
+@@ -408 +410,4 @@
+-assign rra[1] = sk_vr ? sk_u.idx  : in_u.idx;
++// Read both queue banks before the late head selection. With a held
++// skid uop port1 reads its index; port5 is then unused.
++assign rra[1] = sk_vr ? sk_u.idx : in_idx0;
++assign rra[5] = in_idx1;
+@@ -424 +429,27 @@
+-always_comb for (int i = 0; i < 5; i++) rrd[i] = fv[rra[i]] ? frd[i] : brd[i];
++always_comb for (int i = 0; i < 6; i++) rrd[i] = fv[rra[i]] ? frd[i] : brd[i];
++wire [31:0] incoming_index = (!sk_vr && in_idx_sel) ? rrd[5] : rrd[1];
++
++// synthesis translate_off
++// Original five-port files, with the old selected-head address. Their
++// writes and storage run independently of the new duplicate read ports.
++logic [4:0] idx_ref_ra[5];
++logic [31:0] idx_ref_frd[5],idx_ref_brd[5];
++logic [31:0] idx_ref_value;
++integer idx_read_checks=0,idx_bank1_checks=0,idx_skid_checks=0;
++always_comb begin
++ for(integer i=0;i<5;i=i+1)idx_ref_ra[i]=rra[i];
++ idx_ref_ra[1]=sk_vr ? sk_u.idx : in_u.idx;
++ idx_ref_value=fv[idx_ref_ra[1]] ? idx_ref_frd[1] : idx_ref_brd[1];
++end
++ap68040_rf #(.NR(5)) index_front_reference(.clk(clk),.we(fwe),.wa(fwa),.wd(fwd),.ra(idx_ref_ra),.rd(idx_ref_frd));
++ap68040_rf #(.NR(5),.NW(2)) index_back_reference(.clk(clk),.we(bwe),.wa(bwa),.wd(bwd),.ra(idx_ref_ra),.rd(idx_ref_brd));
++always @(posedge clk)if(nreset && ain_v)begin
++ if((!sk_vr && (in_idx_sel ? in_idx1 : in_idx0) !== in_u.idx) || incoming_index !== idx_ref_value)
++  $fatal(1,"FAIL: preselected register-file index differs from original read");
++ idx_read_checks<=idx_read_checks+1;
++ if(!sk_vr && in_idx_sel)idx_bank1_checks<=idx_bank1_checks+1;
++ if(sk_vr)idx_skid_checks<=idx_skid_checks+1;
++end
++final $display("TIMING_INDEX_READ: checked=%0d bank1=%0d skid=%0d",idx_read_checks,idx_bank1_checks,idx_skid_checks);
++// synthesis translate_on
++
+@@ -2309 +2340 @@
+-		x = rrd[1];
++		x = incoming_index;
