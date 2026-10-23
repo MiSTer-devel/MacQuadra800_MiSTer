@@ -1,0 +1,80 @@
+--- a/rtl/ap68040_faster/rtl/fpu/ap040_fpu.v
++++ b/rtl/ap68040_faster/rtl/fpu/ap040_fpu.v
+@@ -319,0 +320 @@
++localparam F_CMP   = 5'd23;  // latch binary operand decisions before wide result selection
+@@ -321,0 +323,3 @@
++// Five narrow decisions separate wide operand reductions/comparisons from
++// F_BIN's data muxes. The operand registers remain unchanged in F_CMP.
++reg bin_ap2_q, bin_bp2_q, bin_eq_q, bin_swap_q, bin_unsup_q;
+@@ -1511,0 +1516 @@
++        bin_ap2_q <= 0; bin_bp2_q <= 0; bin_eq_q <= 0; bin_swap_q <= 0; bin_unsup_q <= 0;
+@@ -1885 +1890 @@
+-						begin fst <= F_BIN; wb_r <= (F_BIN == F_WB); acc_r <= 1'b0; end
++						begin fst <= F_CMP; wb_r <= 1'b0; acc_r <= 1'b0; end
+@@ -2100 +2105 @@
+-									begin fst <= F_BIN; wb_r <= (F_BIN == F_WB); acc_r <= 1'b0; end
++									begin fst <= F_CMP; wb_r <= 1'b0; acc_r <= 1'b0; end
+@@ -2159 +2164 @@
+-									begin fst <= F_BIN; wb_r <= (F_BIN == F_WB); acc_r <= 1'b0; end
++									begin fst <= F_CMP; wb_r <= 1'b0; acc_r <= 1'b0; end
+@@ -2205 +2210 @@
+-									begin fst <= F_BIN; wb_r <= (F_BIN == F_WB); acc_r <= 1'b0; end
++									begin fst <= F_CMP; wb_r <= 1'b0; acc_r <= 1'b0; end
+@@ -2346 +2351 @@
+-						begin fst <= F_BIN; wb_r <= (F_BIN == F_WB); acc_r <= 1'b0; end
++						begin fst <= F_CMP; wb_r <= 1'b0; acc_r <= 1'b0; end
+@@ -2353 +2358 @@
+-						begin fst <= F_BIN; wb_r <= (F_BIN == F_WB); acc_r <= 1'b0; end
++						begin fst <= F_CMP; wb_r <= 1'b0; acc_r <= 1'b0; end
+@@ -2356,0 +2362,12 @@
++			end
++
++			F_CMP: begin
++				bin_ap2_q <= (a_m[63:40] == 24'h80_0000) &&
++				             ((r_op == 7'h27) || (a_m[39:0] == 40'd0));
++				bin_bp2_q <= (b_m[63:40] == 24'h80_0000) &&
++				             ((r_op == 7'h27) || (b_m[39:0] == 40'd0));
++				bin_eq_q <= (a_m == b_m);
++				bin_swap_q <= ($signed(a_e) > $signed(b_e)) ||
++				              (a_e == b_e && a_m > b_m);
++				bin_unsup_q <= unsupported_x(b_e[14:0], b_m);
++				begin fst <= F_BIN; wb_r <= 1'b0; acc_r <= 1'b0; end
+@@ -2372 +2389 @@
+-				    unsupported_x(b_e[14:0], b_m)) begin
++				    bin_unsup_q) begin
+@@ -2419 +2436 @@
+-							if (a_m == 64'h8000_0000_0000_0000 && !sE[0]) begin
++							if (bin_ap2_q && !sE[0]) begin
+@@ -2475,2 +2492 @@
+-							aswap = ($signed(a_e) > $signed(b_e)) ||
+-							        (a_e == b_e && a_m > b_m);
++							aswap = bin_swap_q;
+@@ -2503,2 +2519,2 @@
+-						a_p2 = (a_m[63:40] == 24'h80_0000) && (chop || a_m[39:0] == 40'd0);
+-						b_p2 = (b_m[63:40] == 24'h80_0000) && (chop || b_m[39:0] == 40'd0);
++						a_p2 = bin_ap2_q;
++						b_p2 = bin_bp2_q;
+@@ -2617 +2633 @@
+-							if (am_eff == 64'h8000_0000_0000_0000 || bm_eff == am_eff) begin
++							if (bin_ap2_q || bin_eq_q) begin
+@@ -2620 +2636 @@
+-								a_m <= (am_eff == 64'h8000_0000_0000_0000) ? bm_eff :
++								a_m <= (bin_ap2_q) ? bm_eff :
+@@ -3220,0 +3237,14 @@
++// synthesis translate_off
++integer bin_compare_checks=0;
++always @(posedge clk) if(nreset && ce && fst==F_BIN) begin
++ if(bin_ap2_q !== ((a_m[63:40]==24'h80_0000) && ((r_op==7'h27)||(a_m[39:0]==40'd0))) ||
++    bin_bp2_q !== ((b_m[63:40]==24'h80_0000) && ((r_op==7'h27)||(b_m[39:0]==40'd0))) ||
++    bin_eq_q !== (a_m==b_m) ||
++    bin_swap_q !== (($signed(a_e)>$signed(b_e)) || (a_e==b_e && a_m>b_m)) ||
++    bin_unsup_q !== unsupported_x(b_e[14:0],b_m))
++  $fatal(1,"FAIL: registered FPU operand decision differs from original expression");
++ bin_compare_checks<=bin_compare_checks+1;
++end
++final $display("TIMING_FPU_COMPARE: checked=%0d",bin_compare_checks);
++// synthesis translate_on
++
+@@ -3279,0 +3310,2 @@
++
++
