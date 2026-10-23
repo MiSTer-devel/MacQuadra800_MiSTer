@@ -7,3 +7,9 @@ There are two additional single-bit pointers, no new wide bank and no extra issu
 All **185 CPU runs** and **four adapter cases** pass with the original queue-content observer enabled; all 185 cycle counts match experiment 2. An [abstract exhaustive model](perf/cpu66_20261022/timing6/fifo_model.py) checks 72 reachable paired states and 2,052 transitions over three representative payload values, including empty/full, simultaneous push/pop, flush and exception entry. [Validation](perf/cpu66_20261022/timing6/validation.json).
 
 The normal balanced recipe, 66/33/99 MHz and seed 38 are retained. No timing exception is added. An isolated fit will compare the funnel-only candidate with this queue variant. Timing and hardware qualification remain pending.
+
+## Measured fit
+
+Area **33,286 ALMs**, 30,282 registers, 489 M10Ks. CPU setup **-2.121 ns**, TNS **-583.940 ns**. SDRAM -0.311 ns, bus +0.725 ns, HDMI +0.610 ns, minimum hold +0.180 ns. [Artifact and hashes](perf/cpu66_20261022/timing6/fit/artifact.json). The fit has not been hardware qualified.
+
+The worst path is FPU FPSR exception qualification → stall control → ATC read address (9 levels). Both FIFO bank targets pass (+0.054/+0.695 ns), but CPU TNS and SDRAM regress, with 94 more ALMs than the funnel-only candidate. Do not carry the circular queue forward on these measurements; preserve it as a separate comparison.
