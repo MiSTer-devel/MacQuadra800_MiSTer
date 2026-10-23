@@ -11,3 +11,15 @@ The isolated fit is running in `/home/alans/mister/q800_cpu66_timing4_s38_202610
 ## Controlled synthesis comparison
 
 A second isolated directory, `/home/alans/mister/q800_cpu66_timing4_speed_s38_20261022`, uses exactly the same RTL and seed with only `OPTIMIZATION_TECHNIQUE` changed from `BALANCED` to `SPEED`. The main checkout recipe and the normal experiment are unchanged. [Manifest](perf/cpu66_20261022/timing4/speed/source-manifest.json) and [exact recipe patch](perf/cpu66_20261022/timing4/speed/recipe.patch) identify the comparison. Its area and timing must be measured before choosing either recipe.
+
+## Normal recipe fit result
+
+The normal fit completed at **33,098 ALMs**, 30,143 registers and 489 M10Ks: 102 ALMs fewer than the frozen minimal 33 MHz build. CPU setup is **−1.879 ns**, TNS **−521.688 ns**. SDRAM +1.171 ns, bus +1.258 ns, HDMI +0.637 ns and minimum hold +0.187 ns pass. [Artifact and hashes](perf/cpu66_20261022/timing4/fit/artifact.json).
+
+The targeted cache-tag path passes at **+0.578 ns**, redirect +0.903 ns and second FIFO +0.119 ns. First FIFO still misses by 1.314 ns and ALU forwarding by 1.067 ns. The new overall worst path is `ex_b[12]` → operand selection → shift/rotate funnel → `xs_q.res[4]`, with 12 logic levels. The FPU control rewrite helps the intended family and area, but experiment 2 still has the best CPU slack/TNS. This candidate has not been deployed. Speed-synthesis results remain pending.
+
+## Speed recipe fit result
+
+Speed synthesis completed at **33,154 ALMs**, 30,379 registers and 490 M10Ks. CPU setup is **−1.934 ns**, TNS **−218.618 ns**. SDRAM +0.325 ns, bus +1.168 ns and minimum hold +0.098 ns pass; HDMI misses by **0.043 ns**. [Artifact and hashes](perf/cpu66_20261022/timing4/speed/fit/artifact.json).
+
+Its worst path is fetch queue `qw[0][1]` → decoder attribute-ROM address, 12 logic levels. The recipe improves CPU TNS, but does not improve the worst CPU slack and introduces an HDMI miss. Retain the normal recipe for the next targeted RTL experiment. Neither fourth-experiment RBF has been hardware qualified.
