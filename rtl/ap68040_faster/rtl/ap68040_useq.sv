@@ -812,8 +812,10 @@ end
 // reads and writes the register file through the upd2 ports)
 // (a change of flow too: the companion is the instruction the front end
 // predicted after it, and goes with it when EX finds otherwise)
-function automatic logic s0_ok(input uop_t u);
-	s0_ok = u.first && u.last && (u.exc == 8'd0) && !u.ser &&
+// Quartus17 folds u.first/u.last reads inside this function to zero.
+// Pass the identical bits explicitly; the isolated compiler probe checks it.
+function automatic logic s0_ok(input uop_t u, input logic is_first, is_last);
+	s0_ok = is_first && is_last && (u.exc == 8'd0) && !u.ser &&
 	        !u.upd2_v && (u.dyn == 3'd0) && !u.exr &&
 	        (u.op != OP_FPU) && (u.op != OP_RTE) && (u.op != OP_RTEF) &&
 	        (u.op != OP_MISC) && (u.op != OP_SRLOG) && (u.op != OP_SPW) &&
@@ -912,7 +914,7 @@ wire emit = step && !n_jump;
 wire stay = n_ptr || n_mv_pre || (uw.loop && !nu.last);   // same word again
 wire done = emit && !stay && uw.last;                       // instruction ends
 // the companion issues beside the uop that ends the instruction
-wire c_pair = done && cs.v && !trace && s0_ok(nu) && s1_indep(nu, cs) && (!cs.ld || s0_ld(nu));
+wire c_pair = done && cs.v && !trace && s0_ok(nu, nu.first, nu.last) && s1_indep(nu, cs) && (!cs.ld || s0_ld(nu));
 s1_t ns;                          // the slot beside the uop written
 always_comb begin
 	ns = cs;
@@ -1191,7 +1193,7 @@ always_ff @(posedge clk)
 //               trace)
 // with the instruction's operation word [15:0].
 wire pu_split = done && cs.v && !c_pair;
-wire pu_dep   = pu_split && !trace && s0_ok(nu) && (!cs.ld || s0_ld(nu)) && !s1_indep(nu, cs);
+wire pu_dep   = pu_split && !trace && s0_ok(nu, nu.first, nu.last) && (!cs.ld || s0_ld(nu)) && !s1_indep(nu, cs);
 always_ff @(posedge clk)
 	dbg_pu <= {pu_split && !pu_dep, pu_dep, c_pair, done && cs.v, src.opw};
 

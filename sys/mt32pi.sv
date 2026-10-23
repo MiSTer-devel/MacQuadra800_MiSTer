@@ -146,7 +146,7 @@ end
 //
 
 reg        sda_out;
-reg  [7:0] lcd_data[1024];
+(* ramstyle="M10K, no_rw_check" *) reg  [7:0] lcd_data[1024];
 reg        lcd_sz;
 
 reg        reset_r  = 0;

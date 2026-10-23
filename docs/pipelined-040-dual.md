@@ -41,3 +41,64 @@ Removing only the Quadra load-capture fix makes adapter test 11 fail again;
 the retained fix passes. The t_ld1 event report also confirms actual paired
 retirements with the chosen hardware parameters. No new FPGA timing or
 hardware boot result is claimed yet.
+
+## What changes in the CPU
+
+The companion slot handles independent one-word integer operations (move,
+add/subtract, compare, bitwise operations, clear/negate, extend and swap),
+plus supported address-register moves and quick arithmetic. Pairing checks
+register dependencies; both slots move through the backend together and
+the younger slot commits only when the older instruction commits without
+a redirect. Trace mode issues instructions individually. Complex
+microcoded and floating-point operations still run alone. This is a
+limited second integer slot, rather than a second complete memory/FPU
+pipeline. Its sixth RF read port and third backend write port increase
+the replicated MLAB bank count from 25 to 36.
+
+BTIC caches two words at a predicted branch target, allowing fetch to
+supply them while the instruction-cache lookup catches up. Its valid
+state and target tags must survive neither invalidation nor discarded
+refetches; the newer D1 hold fix addresses a stale-BTB livelock. The cache
+set count grows from 64 to 128, yielding 8 KB per I/D cache. The byte
+enable and tag templates remain explicit for Quartus17 inference. Final
+M10K use, area and timing must be measured after fitting.
+
+The upstream README's published out-of-context numbers describe the
+earlier scalar core, and the dual-issue design notes report Xilinx LUTs
+and slices. Neither establishes the quoted approximately26k ALM result
+for a complete Quadra build. The comparison here keeps our peripherals,
+VRAM, bus adapter and default feature selection, and reports whole-core
+ALMs as well as actual Mac benchmark results.
+
+## Initial synthesis rejection
+
+Both first analysis/synthesis runs stopped at the RF inference guard:
+30 MLAB banks were present instead of the required 36. The backend's
+third write bank disappeared and Quartus reports uq0s.v, uq1s.v, ex_s.v
+and wb_s.v tied low. This would silently remove actual paired issue on
+hardware despite passing RTL simulations. No fit or hardware test used
+these netlists.
+
+Separately, synthesis reported 102,891/102,895 total registers and an
+estimated78,207 ALMs: the two framework OSD buffers (32,768 data bits
+each) and MT32 LCD buffer (8,192 data bits) mapped into registers. CPU
+cache slices, tag RAMs, predecoder ROM and BTIC word RAMs did infer as
+block RAM. The compiler probe and mapping investigation precede any
+replacement fit.
+
+The isolated [compiler reproduction](perf/dual_20261023/compiler-probe)
+shows s0_ok's registered output stuck at zero when it reads first/last
+through its structure argument, while a direct first/last expression
+remains dynamic. Passing those same two bits as explicit scalar arguments
+retains a dynamic predicate. The integration applies this representation
+change to the pairing function and its diagnostic caller. Separately,
+explicit M10K attributes on the two OSD buffers and MT32 LCD buffer replace
+automatic resource selection. The next A&S must verify those memories,
+36 RF MLAB banks, and nonconstant companion-valid state before fitting.
+No VRAM storage or guest-visible pipeline behavior is changed.
+
+All225 CPU cases pass again after the predicate representation change,
+with identical cycle counts in every case. Both1x and2x adapter variants
+also retain identical cycles and beat counts under normal and fast
+acknowledgements. The exact R2 inputs and mapping checks are pinned before
+restarting full synthesis.

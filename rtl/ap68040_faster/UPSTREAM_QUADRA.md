@@ -27,6 +27,10 @@ Local integration patches are limited to:
 - Quartus 17 byte-enabled RAM slices and read-only-port-A D-cache tag
   template. The upstream Xilinx-oriented templates are not used for those
   memories. A fit must verify four tag M10Ks, data slices, and 36 RF MLABs.
+- Quartus17 pairing predicate workaround: pass first/last as explicit
+  function arguments, since reading those structure members inside s0_ok
+  synthesizes to constant zero. The compiler reproduction and full-core
+  RF/companion-valid guards document this.
 - Upstream main fixes 190ea48 (IPEND claim against the committing SR mask)
   and 6d146df (discarded DC2 job kill mark survives a snoop freeze).
   The faster branch diverged before these landed; its two-cycle table-walk

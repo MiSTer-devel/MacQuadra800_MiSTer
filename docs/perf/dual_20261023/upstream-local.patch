@@ -244,3 +244,18 @@
 +	always_ff @(posedge clk)
 +		if (!WRITE_A && we_a) $fatal(1, "FAIL: write to read-only tag RAM port A");
 +	// synthesis translate_on
+--- a/rtl/ap68040_useq.sv
++++ b/rtl/ap68040_useq.sv
+@@ -815,2 +815,4 @@
+-function automatic logic s0_ok(input uop_t u);
+-	s0_ok = u.first && u.last && (u.exc == 8'd0) && !u.ser &&
++// Quartus17 folds u.first/u.last reads inside this function to zero.
++// Pass the identical bits explicitly; the isolated compiler probe checks it.
++function automatic logic s0_ok(input uop_t u, input logic is_first, is_last);
++	s0_ok = is_first && is_last && (u.exc == 8'd0) && !u.ser &&
+@@ -915 +917 @@
+-wire c_pair = done && cs.v && !trace && s0_ok(nu) && s1_indep(nu, cs) && (!cs.ld || s0_ld(nu));
++wire c_pair = done && cs.v && !trace && s0_ok(nu, nu.first, nu.last) && s1_indep(nu, cs) && (!cs.ld || s0_ld(nu));
+@@ -1194 +1196 @@
+-wire pu_dep   = pu_split && !trace && s0_ok(nu) && (!cs.ld || s0_ld(nu)) && !s1_indep(nu, cs);
++wire pu_dep   = pu_split && !trace && s0_ok(nu, nu.first, nu.last) && (!cs.ld || s0_ld(nu)) && !s1_indep(nu, cs);
