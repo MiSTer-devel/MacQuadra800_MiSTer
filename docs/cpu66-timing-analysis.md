@@ -19,7 +19,7 @@ Measured progress at the unchanged **66/33/99 MHz** and seed 38:
 
 The smallest fit is 102 ALMs below the frozen minimal 33 MHz core. None closes 66 MHz timing. Experiment 8 fixes the cache tag/way paths without an extra cycle; its worst path is now a late write-back store hold through the serial stall chain into the FIFO immediate field. Experiment 9 regressed timing and will be removed. [Experiment 7](cpu66-timing-experiment7.md), an added cache lookup cycle, was rejected before fitting because split-store tests found a livelock; the tests were retained.
 
-[Controlled A/UX comparison](perf/cpu66_20261022/aux-original66/README.md): the frozen minimal 33 MHz build boots and cleanly halts the same disposable clone that stalls with the frozen original 66 MHz build. Thus the failure predates these timing optimizations. A/UX at 66 MHz remains unqualified; root cause is unknown. The board is back at MENU and its temporary debug configuration was removed.
+[Controlled A/UX comparison](perf/cpu66_20261022/aux-original66/README.md): the frozen minimal 33 MHz build boots and cleanly halts the same disposable clone that stalls with the frozen original 66 MHz build. Thus the failure predates these timing optimizations. A/UX at 66 MHz remains unqualified. Follow-up symbol lookup and an exact-byte CPU/adapter/VIA regression reproduce a `SetUpTimeK` 16-bit calibration overflow; the existing four-clock DBcc minimum resolves that reproduction. [Evidence and proposed fix](perf/cpu66_20261022/aux-timek/README.md). Full hardware validation is pending. The board is back at MENU and its temporary debug configuration was removed.
 
 The detailed path analysis below describes the **original** fitted checkpoint; each experiment links its own measured reports.
 
