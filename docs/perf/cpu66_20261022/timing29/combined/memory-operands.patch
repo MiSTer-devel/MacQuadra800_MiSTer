@@ -1,0 +1,39 @@
+--- a/rtl/ap68040_faster/rtl/ap68040_backend.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_backend.sv
+@@ -642 +642,2 @@
+-wire [31:0] ex_av0 = (ex_u.a_src == OS_MEM) ? ex_ld : ex_a;
++// Memory selection occurs as DC2 enters EX, using the existing operand registers.
++wire [31:0] ex_av0 = ex_a;
+@@ -644 +645 @@
+-wire [31:0] ex_bv  = (ex_u.b_src == OS_MEM) ? ex_ld : ex_b;
++wire [31:0] ex_bv  = ex_b;
+@@ -1853,2 +1854,4 @@
+-			ex_a     <= (exw_v && dc2_u.a_src == OS_REG && dc2_u.a_reg == exw_reg) ? exw_val : dc2_a;
+-			ex_b     <= (exw_v && dc2_u.b_src == OS_REG && dc2_u.b_reg == exw_reg) ? exw_val : dc2_b;
++			ex_a     <= (dc2_u.a_src == OS_MEM) ? dm_ldata :
++                         (exw_v && dc2_u.a_src == OS_REG && dc2_u.a_reg == exw_reg) ? exw_val : dc2_a;
++			ex_b     <= (dc2_u.b_src == OS_MEM) ? dm_ldata :
++                         (exw_v && dc2_u.b_src == OS_REG && dc2_u.b_reg == exw_reg) ? exw_val : dc2_b;
+@@ -2494,0 +2498,22 @@
++// synthesis translate_off
++logic [31:0] raw_ex_a_reference, raw_ex_b_reference;
++integer ex_operand_checks=0;
++always @(posedge clk) begin
++ if(nreset && ex_v) begin
++  if(ex_av0 !== ((ex_u.a_src==OS_MEM)?ex_ld:raw_ex_a_reference) ||
++     ex_bv !== ((ex_u.b_src==OS_MEM)?ex_ld:raw_ex_b_reference))
++   $fatal(1,"FAIL: early memory operand selection differs from original EX values");
++  if(ex_shift && ex_a[5:0] !== raw_ex_a_reference[5:0])
++   $fatal(1,"FAIL: shift count uses a memory operand");
++  if(ex_is_fp && ex_u.cond==4'd0 &&
++     (ex_a[15:0] !== raw_ex_a_reference[15:0] || ex_b[15:0] !== raw_ex_b_reference[15:0]))
++   $fatal(1,"FAIL: FPU CHK raw instruction words changed");
++  ex_operand_checks<=ex_operand_checks+1;
++ end
++ if(nreset && adv_dc2) begin
++  raw_ex_a_reference <= (exw_v && dc2_u.a_src==OS_REG && dc2_u.a_reg==exw_reg)?exw_val:dc2_a;
++  raw_ex_b_reference <= (exw_v && dc2_u.b_src==OS_REG && dc2_u.b_reg==exw_reg)?exw_val:dc2_b;
++ end
++end
++final $display("TIMING_EX_OPERANDS: checked=%0d",ex_operand_checks);
++// synthesis translate_on
