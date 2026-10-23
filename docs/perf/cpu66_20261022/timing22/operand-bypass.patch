@@ -1,0 +1,7 @@
+--- a/rtl/ap68040_faster/rtl/ap68040_backend.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_backend.sv
+@@ -504 +504,3 @@
+-		OS_REG:  v = (exw_v && exw_reg == r) ? exw_val : rv;
++		// Captured operands receive the later exw_fw broadcast. Keep this
++		// earlier full bypass only for the optional AG early-result ALU.
++		OS_REG:  v = (EARLY_RES && exw_v && exw_reg == r) ? exw_val : rv;
