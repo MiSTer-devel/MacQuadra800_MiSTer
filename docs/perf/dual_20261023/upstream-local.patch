@@ -1,64 +1,29 @@
 --- a/rtl/ap68040.sv
 +++ b/rtl/ap68040.sv
-@@ -32,12 +32,17 @@
- 	// three on (AP_S1C) so the regression still covers the loads.
- 	parameter logic [2:0] S1_CLASSES   = 3'b011,
- 	parameter logic [3:0] S1_LDMASK    = 4'b1111, // ... the loads: {TST, ALU, MOVEA.L, MOVE} (a debug switch)
+@@ -35 +35,5 @@
 -	parameter bit         S1_LDTK      = 1       // ... a load companion at a BTB-taken target (a debug switch)
 +	parameter bit         S1_LDTK      = 1,      // ... a load companion at a BTB-taken target (a debug switch)
 +	// platform cacheability (ap68040_dmu): 0 = as upstream
 +	parameter bit          PA_IO_SERIAL = 0,
 +	parameter logic [31:0] PA_C0_MASK = 32'h0, PA_C0_MATCH = 32'h0,
 +	parameter logic [31:0] PA_C1_MASK = 32'h0, PA_C1_MATCH = 32'h0
- )(
- 
- 	input  logic        clk,
- 	input  logic        bclk_en,
- 	input  logic        rsti_n,
+@@ -40,0 +45 @@
 +	input  logic [3:0]  dbcc_floor, // host delay-loop calibration (0/1: off)
- 
- 	output logic [31:0] a_o,
- 	output logic        a_oe,
-@@ -297,13 +302,15 @@
- 	.mt_wr(mt_wr), .mt_done(mt_done), .mt_mmusr(mt_mmusr), .mt_fault(mt_fault),
- 	.mt_fssw(mt_fssw), .mt_faddr(mt_faddr), .dm_st_faddr(dm_st_faddr),
- 	.urp(urp), .srp(srp),
+@@ -300 +305 @@
 -	.ipl(ipl_v), .iack_lvl(iack_lvl), .rsto_req(rsto_req), .rsto_busy(rsto_busy),
 +	.ipl(ipl_v), .dbcc_floor(dbcc_floor), .iack_lvl(iack_lvl), .rsto_req(rsto_req), .rsto_busy(rsto_busy),
- 	.kill_now(kill_now), .lk_abandon(lk_abandon), .adv_ag(adv_ag),
- 	.dtt0(dtt0), .dtt1(dtt1), .itt0(itt0), .itt1(itt1), .tc(tc),
- 	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_retire2(dbg_retire2), .halted(dbg_halted), .fetch_stop(be_fstop)
- );
- 
+@@ -306 +311,3 @@
 -ap68040_dmu #(.DC1_ATC(DC1_ATC)) dmu (
 +ap68040_dmu #(.DC1_ATC(DC1_ATC), .PA_IO_SERIAL(PA_IO_SERIAL),
 +	.PA_C0_MASK(PA_C0_MASK), .PA_C0_MATCH(PA_C0_MATCH),
 +	.PA_C1_MASK(PA_C1_MASK), .PA_C1_MATCH(PA_C1_MATCH)) dmu (
- 	.clk(clk), .nreset(nreset),
- 	.adv_ag(adv_ag), .dm_req(dm_req), .dm_va(dm_va), .dm_mem(dm_mem),
- 	.dm_msz(dm_msz), .dm_fc(dm_fc), .dm_lock(dm_lock), .dm_locke(dm_locke),
 --- a/rtl/ap68040_backend.sv
 +++ b/rtl/ap68040_backend.sv
-@@ -130,6 +130,7 @@
- 
- 	// interrupts (synchronized level, 0-7)
- 	input  logic  [2:0] ipl,
+@@ -132,0 +133 @@
 +	input  logic  [3:0] dbcc_floor,
- 	output logic  [2:0] iack_lvl,
- 	output logic        rsto_req,
- 	input  logic        rsto_busy,
-@@ -290,6 +291,7 @@
- // stall / advance (bubbles collapse: a stage moves into an empty one)
- //--------------------------------------------------------------------------
- logic wb_hold, ex_hold, dc2_hold, ag_hold;
+@@ -292,0 +294 @@
 +logic dbf_hold;
- logic stall_wb, stall_ex, stall_dc2, stall_dc1, stall_ag;
- 
- // EX holds for a multicycle unit; DC2 for memory; WB for stores/serial ops
-@@ -742,7 +744,34 @@
- // operand stays off the stall path, and the exception goes a cycle later)
- assign ex_hold = (ex_v && ex_is_md && !md_z && !ex_fault && !md_done && !md_fin) ||
-                  (ex_v && ex_slow && !ex_ph) ||
+@@ -745 +747,28 @@
 -                 (ex_v && ex_is_fp && !ex_fault && ex_u.exc == 8'd0 && fp_hold);
 +                 (ex_v && ex_is_fp && !ex_fault && ex_u.exc == 8'd0 && fp_hold) || dbf_hold;
 +
@@ -88,53 +53,23 @@
 +		dbf_nz  <= (dbf_cnt != 4'd1);
 +	end
 +end
- 
- // multiply/divide result and flags
- logic [31:0] md_res;
-@@ -1455,6 +1484,8 @@
- wire wb_is_exc   = wb_v && !wb_ok;
- wire wb_commit   = adv_wb && !wb_is_exc;
- wire wb_bound    = wb_commit && wb_u.last;
+@@ -1457,0 +1487,2 @@
 +// Claim against the SR mask that commits on this clock (upstream 190ea48).
 +wire [2:0] claim_mask = (wb_commit && wb_sr_we) ? wb_sr_new[10:8] : sr_r[10:8];
- // the second slot commits with its uop, unless that one redirects (a store
- // into the code ahead: the second slot is fetched again)
- wire wb1_go      = wb_s.v && !wb_redir;
-@@ -1782,7 +1813,7 @@
- 		ipl_q <= ipl;
- 		if (ipl_q == 3'd0 || ipl_q == 3'd7 || (ipend_r && ipl_q < ipend_lvl))
- 			ipend_r <= 1'b0;
+@@ -1785 +1816 @@
 -		else if (ipl_q > sr_r[10:8] && (!ipend_r || ipl_q > ipend_lvl)) begin
 +		else if (ipl_q > claim_mask && (!ipend_r || ipl_q > ipend_lvl)) begin
- 			ipend_r   <= 1'b1;
- 			ipend_lvl <= ipl_q;
- 		end
-@@ -2426,7 +2457,8 @@
- 			// youngest's: AG keeps waiting for it)
- 			if (stale_b && ag_u.base_v) agb_q <= stale_b1 ? exq1_val : exq_val;
- 			stale_b  <= ag_u.base_v && ((exw_ag && exw_reg == ag_u.base && !cap_b) ||
+@@ -2429 +2460,2 @@
 -			                            (exw1_v && exw1_reg == ag_u.base));
 +			                            (exw1_v && exw1_reg == ag_u.base)) &&
 +			            !(dc2_capd && dc2_u.d_reg == ag_u.base);
- 			stale_b1 <= exw1_v && exw1_reg == ag_u.base;
- 			if (dc2_capd && ag_u.base_v && dc2_u.d_reg == ag_u.base) begin
- 				agb_q <= dc2_capv;
-@@ -2442,7 +2474,8 @@
- 		else begin
- 			if (stale_x) agx_q <= ixf(stale_x1 ? exq1_val : exq_val, ag_u);
- 			stale_x  <= ag_u.idx_v && ((exw_ag && exw_reg == ag_u.idx && !cap_x) ||
+@@ -2445 +2477,2 @@
 -			                           (exw1_v && exw1_reg == ag_u.idx));
 +			                           (exw1_v && exw1_reg == ag_u.idx)) &&
 +			            !(dc2_capd && dc2_u.d_reg == ag_u.idx);
- 			stale_x1 <= exw1_v && exw1_reg == ag_u.idx;
- 			if (dc2_capd && dc2_u.d_reg == ag_u.idx) begin
- 				agx_q <= ixf(dc2_capv, ag_u);
 --- a/rtl/ap68040_dmu.sv
 +++ b/rtl/ap68040_dmu.sv
-@@ -56,7 +56,16 @@
- #(
- 	// DC1's own ATC read port and tag compare beside xlate (65 MHz timing;
- 	// 0: DC1's hit and way are xlate's, the port is not built)
+@@ -59 +59,10 @@
 -	parameter bit DC1_ATC = 0
 +	parameter bit DC1_ATC = 0,
 +	// Platform cacheability (MacQuadra800 local change): with PA_IO_SERIAL
@@ -146,77 +81,35 @@
 +	parameter bit          PA_IO_SERIAL = 0,
 +	parameter logic [31:0] PA_C0_MASK = 32'h0, PA_C0_MATCH = 32'h0,
 +	parameter logic [31:0] PA_C1_MASK = 32'h0, PA_C1_MATCH = 32'h0
- )
- (
- 	input  logic        clk,
-@@ -442,7 +451,7 @@
- generate
- 	for (gw = 0; gw < 4; gw++) begin : g_way
- 		(* keep *) wire [CSB-1:0] la_set_n = la_ag ? dm_va[CSH:4] : la_alt;
+@@ -445 +454 @@
 -		ap68040_tdp #(.AW(CSB), .DW(CTW)) tag (
 +		ap68040_tdp #(.AW(CSB), .DW(CTW), .WRITE_A(0)) tag (
- 			.clk(clk),
- 			.addr_a(la_set_n), .we_a(1'b0), .wd_a('0), .q_a(tq_a[gw]),
- 			.qa_raw(tq_r[gw]), .qa_bv(), .qa_bd(),
-@@ -584,6 +593,9 @@
- 		else x.ok = 1'b1;
- 	end
- 	else x.walk = 1'b1;
+@@ -586,0 +596,3 @@
 +	if (PA_IO_SERIAL && x.ok && !x.flt &&
 +	    ((x.pa & PA_C0_MASK) != PA_C0_MATCH) && ((x.pa & PA_C1_MASK) != PA_C1_MATCH))
 +		x.cm = 2'b11;
- 	tg = x.pa[31:CSH+1];
- 	if (x.ok && !x.flt) begin
- 		if (valid[0] && t0 == tg) begin x.hit = 1'b1; x.way = 2'd0; end
-@@ -652,6 +664,7 @@
- wire sim_es_m  = (e_st == E_M_START);
- wire sim_es_tw = (e_st == E_TW_START);
- wire sim_es_i  = (e_st == E_IDLE);
+@@ -654,0 +667 @@
 +logic sim_kchk = 1'b0; // discarded slow-job completion (upstream 6d146df)
- logic sim_xchk = 1'b0;        // (the bench fails the run on it)
- always_ff @(posedge clk) begin
- 	xres_t xo;
-@@ -1244,8 +1257,11 @@
- 				e_st <= E_M_START;
- 			else if (wb_slow)
- 				e_st <= E_W_START;
+@@ -1247 +1260,3 @@
 -			else if (((dc2_slow && !dm_s1) || (e_job && m2.r.v && !e_dc2_done)) && !kill_now)
 +			else if (((dc2_slow && !dm_s1) || (e_job && m2.r.v && !e_dc2_done)) && !kill_now) begin
 +				// Clear at scheduling; a snoop may freeze E_S_START through a kill.
 +				e_kill <= 1'b0;
- 				e_st <= E_S_START;
+@@ -1248,0 +1264 @@
 +			end
- 			else if (iw_req && !iw_done) begin
- 				e_ret <= E_I_DONE;
- 				e_st  <= E_TW_START;
-@@ -1256,7 +1272,7 @@
- 		// DC2 slow path
- 		//==============================================================
- 		E_S_START: begin
+@@ -1259 +1275 @@
 -			e_kill <= 1'b0;
 +			// e_kill was cleared when this live job was scheduled.
- 			e_job  <= 1'b1;
- 			e_part <= 1'b0;
- 			e_va   <= m2.r.a;
-@@ -1569,6 +1585,12 @@
- 		E_S_DONE: begin
- 			e_job      <= 1'b0;
- 			e_dc2_done <= !e_kill;
+@@ -1571,0 +1588,6 @@
 +			// synthesis translate_off
 +			if (!e_kill && !m2.r.v) begin
 +				$display("FAIL: DMU: a discarded job completed without its kill mark");
 +				sim_kchk <= 1'b1;
 +			end
 +			// synthesis translate_on
- 			e_ldata    <= e_acc;
- 			steal      <= 1'b0;
- 			e_st       <= E_IDLE;
 --- a/rtl/ap68040_ram.sv
 +++ b/rtl/ap68040_ram.sv
-@@ -27,24 +27,27 @@
- );
- 	// Intel's byte-enabled simple dual port template (Quartus 17 infers
- 	// byte enables for at most four bytes per memory, so a wider word is
+@@ -30,3 +30,11 @@
 -	// built from 32-bit slices).  The read data is registered: a read of
 -	// the word written in the same cycle returns the old data (the users
 -	// track that case).
@@ -231,12 +124,7 @@
 +	// data cache, 20 percent used each), and no memory at all (flip-flops
 +	// and a multiplexer) when the slices of one module assigned
 +	// part-selects of a shared read vector.
- 	localparam int SL = (NB > 4) ? 4 : NB;      // bytes per slice
- 	localparam int NS = (NB + SL - 1) / SL;     // slices
- 	logic [NB*8-1:0] qr;
- 	genvar gs;
- 	generate
- 		for (gs = 0; gs < NS; gs++) begin : g_sl
+@@ -39,9 +47,4 @@
 -			// every write to this array, and its read, in ONE process: Vivado
 -			// drops an array written from several processes into flip-flops.
 -			(* ramstyle = "M10K, no_rw_check" *) logic [SL*8-1:0] mem [0:(1<<AW)-1];
@@ -250,13 +138,7 @@
 +				.clk(clk), .we(we), .waddr(waddr),
 +				.wbe(wbe[gs*SL +: SL]), .wdata(wdata[gs*SL*8 +: SL*8]),
 +				.raddr(raddr), .q(qr[gs*SL*8 +: SL*8]));
- 		end
- 	endgenerate
- 	generate
-@@ -57,9 +60,68 @@
- 	endgenerate
- endmodule
- 
+@@ -59,0 +63,58 @@
 +// one slice of ap68040_sdp_be: SL bytes (1..4), byte enables, one M10K
 +module ap68040_sdp_be_slice #(
 +	parameter int AW = 6,
@@ -315,23 +197,14 @@
 +	endgenerate
 +endmodule
 +
- module ap68040_tdp #(
- 	parameter int AW = 6,
+@@ -62 +123,2 @@
 -	parameter int DW = 22
 +	parameter int DW = 22,
 +	parameter bit WRITE_A = 1
- )(
- 	input  logic          clk,
- 	input  logic [AW-1:0] addr_a,
-@@ -80,26 +142,41 @@
- 	// registered addresses and one multiplexer (Quartus's inferred bypass
- 	// put three logic levels in front of the users' compares; a compare of
- 	// the incoming address would put it behind the address's own logic).
+@@ -83 +145 @@
 -	(* ramstyle = "M10K, no_rw_check" *) (* ram_style = "block" *) logic [DW-1:0] mem [0:(1<<AW)-1];
 +	(* ramstyle = "M10K, no_rw_check" *) logic [DW-1:0] mem [0:(1<<AW)-1];
- 	logic [DW-1:0] qa_r, qb_r, wa_d, wb_d;
- 	logic [AW-1:0] ra, rb, wa_q, wb_q;
- 	logic          wa_v, wb_v;
+@@ -87,10 +149,21 @@
 -	// one write statement per always block: Vivado infers a true dual port
 -	// block RAM only in that form.
 -	always_ff @(posedge clk) begin
@@ -363,17 +236,11 @@
 +			end
 +		end
 +	endgenerate
- 	always_ff @(posedge clk) begin
- 		ra   <= addr_a;
- 		rb   <= addr_b;
+@@ -100 +173 @@
 -		wa_v <= we_a; wa_q <= addr_a; wa_d <= wd_a;
 +		wa_v <= WRITE_A && we_a; wa_q <= addr_a; wa_d <= wd_a;
- 		wb_v <= we_b; wb_q <= addr_b; wb_d <= wd_b;
- 	end
+@@ -102,0 +176,4 @@
 +	// synthesis translate_off
 +	always_ff @(posedge clk)
 +		if (!WRITE_A && we_a) $fatal(1, "FAIL: write to read-only tag RAM port A");
 +	// synthesis translate_on
- 	// (port B's write wins a same-word collision, as in the old order)
- 	assign q_a    = (wb_v && wb_q == ra) ? wb_d : (wa_v && wa_q == ra) ? wa_d : qa_r;
- 	assign qa_raw = qa_r;
