@@ -22,6 +22,13 @@ foreach {label pattern} {
   set regs [get_registers $pattern]
   set count [get_collection_size $regs]
  }
+ if {$count == 0 && ($label eq "fifo_first" || $label eq "fifo_second")} {
+  # Circular storage keeps the same capacity but names physical banks.
+  set bank [expr {$label eq "fifo_first" ? 0 : 1}]
+  set pattern "*|useq|uq_bank${bank}.disp*"
+  set regs [get_registers $pattern]
+  set count [get_collection_size $regs]
+ }
  puts "CPU66_TARGET $label registers=$count pattern=$pattern"
  if {$count == 0} {error "No registers found for $label"}
  report_timing -setup -from_clock $cpu -to $regs -npaths 3 -detail full_path -file scratch/target_${label}_${tag}.txt

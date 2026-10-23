@@ -76,8 +76,13 @@ assign src_first = first;
 uword_t      uw;
 assign uw = uw_q;
 
-// uop FIFO
-uop_t        uq1;
+// Two-entry circular FIFO: a pop changes only the read pointer, keeping
+// the late backend stall off both wide storage banks' write enables.
+uop_t        uq1, uq_bank0, uq_bank1;
+logic        uq_read, uq_write;
+wire         uq_take = uq_pop && uq_n != 2'd0;
+assign uq0 = uq_read ? uq_bank1 : uq_bank0;
+assign uq1 = uq_read ? uq_bank0 : uq_bank1;
 wire         room_out = (uq_n != 2'd2);
 
 //--------------------------------------------------------------------------
@@ -868,28 +873,26 @@ always_ff @(posedge clk) begin
 		mv_t11   <= 1'b0;
 		mv_fix   <= 2'd0;
 		uq_n     <= 2'd0;
-		uq0      <= '0;
-		uq1      <= '0;
+		uq_bank0 <= '0;
+		uq_bank1 <= '0;
+		uq_read  <= 1'b0;
+		uq_write <= 1'b0;
 	end
 	else begin
 		upc  <= na;
 		uw_v <= nv;
 
-		// uop FIFO: both outcomes formed without the pop (the back end's
-		// stall, a late signal), which selects between them last
-		if (uq_pop && uq_n != 2'd0) begin
-			uq0  <= (emit && uq_n == 2'd1) ? nu : uq1;
-			uq_n <= emit ? uq_n : uq_n - 2'd1;
+		if (emit) begin
+			if (uq_write) uq_bank1 <= nu;
+			else uq_bank0 <= nu;
+			uq_write <= !uq_write;
 		end
-		else begin
-			uq0  <= (emit && uq_n == 2'd0) ? nu : uq0;
-			uq_n <= emit ? uq_n + 2'd1 : uq_n;
-		end
-		// room_out prevents an emit at occupancy two. An emit at zero,
-		// or while popping the only entry, leaves slot 1 invalid, so its
-		// value is free to change. Keep the late backend pop/stall off
-		// this wide register's write enable.
-		if (emit) uq1 <= nu;
+		if (uq_take) uq_read <= !uq_read;
+		case ({emit, uq_take})
+			2'b10: uq_n <= uq_n + 2'd1;
+			2'b01: uq_n <= uq_n - 2'd1;
+			default: ;
+		endcase
 
 		if (emit) begin
 			first <= 1'b0;
@@ -936,6 +939,8 @@ always_ff @(posedge clk) begin
 			mv_t11 <= 1'b0;
 			mv_fix <= 2'd0;
 			uq_n  <= 2'd0;
+			uq_read <= 1'b0;
+			uq_write <= 1'b0;
 			if (!exc_go) exc_mode <= 1'b0;
 		end
 		if (exc_go) begin
@@ -943,6 +948,8 @@ always_ff @(posedge clk) begin
 			first    <= 1'b1;
 			ssp      <= exc_ssp;
 			uq_n     <= 2'd0;
+			uq_read <= 1'b0;
+			uq_write <= 1'b0;
 		end
 	end
 end
