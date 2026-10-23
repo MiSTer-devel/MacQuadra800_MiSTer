@@ -7,3 +7,7 @@ Queue capacity, registers, append and consume rates, predecode ring, redirects a
 All **185 CPU cases pass with exact experiment16 cycle counts**; all four machine bus adapter configurations pass. No register, cycle or timing exception is added. [Validation](perf/cpu66_20261022/timing17/validation.json).
 
 Fits compare balanced and speed synthesis using pinned copies of the same RTL at66/33/99MHz, seed38, stamp261022. The main recipe remains balanced. Actual fitted timing and area will determine whether this change is retained. No DDR/VRAM changes are included.
+
+Both fits completed, with all related-clock and hold checks positive but CPU setup still failing. Balanced: **33,246 ALMs**, CPU **−1.926 ns / TNS −292.342 ns**, SDRAM +0.210 ns, bus +0.755 ns, HDMI +0.311 ns, minimum hold +0.133 ns. Speed: **33,412 ALMs**, CPU **−2.058 ns / TNS −378.134 ns**, SDRAM +0.584 ns, bus +0.955 ns, HDMI +0.309 ns, minimum hold +0.155 ns. [Balanced reports/hashes](perf/cpu66_20261022/timing17/fit/artifact.json), [speed reports/hashes](perf/cpu66_20261022/timing17/fit-speed/artifact.json). Neither was deployed.
+
+Balanced's worst path now runs from maintenance tag RAM through the line-match condition, valid/dirty write-set mux and `lsw` read to a pipeline record. Speed's worst path runs from WB qualification through FPU safe/hold, EX advance, front-file write enable and operand selection into DC1. These are the actual remaining limits; the queue change alone has not closed timing.
