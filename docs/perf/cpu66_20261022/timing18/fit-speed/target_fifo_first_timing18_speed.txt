@@ -1,0 +1,387 @@
+----------------
+; Command Info ;
+----------------
+Report Timing: Found 3 setup paths (3 violated).  Worst case slack is -0.246
+
+Tcl Command:
+    report_timing -setup -file scratch/target_fifo_first_timing18_speed.txt -to [get_registers {*|useq|uq_bank0.disp*}] -from_clock [get_clocks {emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] -npaths 3 -detail full_path
+
+Options:
+    -to [get_registers {*|useq|uq_bank0.disp*}]
+    -from_clock [get_clocks {emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}]
+    -setup
+    -npaths 3
+    -detail full_path
+    -file {scratch/target_fifo_first_timing18_speed.txt}
+
+Delay Model:
+    Slow 1100mV 100C Model
+
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Summary of Paths                                                                                                                                                                                                                                                                                                                                                                                                                                                         ;
++--------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------+-------------------------------------------------------------------------+-------------------------------------------------------------------------+--------------+------------+------------+
+; Slack  ; From Node                                                                                                                                                            ; To Node                                                                                     ; Launch Clock                                                            ; Latch Clock                                                             ; Relationship ; Clock Skew ; Data Delay ;
++--------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------+-------------------------------------------------------------------------+-------------------------------------------------------------------------+--------------+------------+------------+
+; -0.246 ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|exc_mode                                                                                   ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[5]  ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk ; 15.151       ; -0.515     ; 14.732     ;
+; -0.123 ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|exc_mode                                                                                   ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[14] ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk ; 15.151       ; -0.503     ; 14.621     ;
+; -0.105 ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|altsyncram:urom_rtl_0|altsyncram_fpf1:auto_generated|ram_block1a70~PORT_A_WRITE_ENABLE_REG ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[30] ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk ; 15.151       ; -1.482     ; 13.624     ;
++--------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------+-------------------------------------------------------------------------+-------------------------------------------------------------------------+--------------+------------+------------+
+
+Path #1: Setup slack is -0.246 (VIOLATED)
+===============================================================================
++-----------------------------------------------------------------------------------------------------------------+
+; Path Summary                                                                                                    ;
++--------------------+--------------------------------------------------------------------------------------------+
+; Property           ; Value                                                                                      ;
++--------------------+--------------------------------------------------------------------------------------------+
+; From Node          ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|exc_mode         ;
+; To Node            ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[5] ;
+; Launch Clock       ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                    ;
+; Latch Clock        ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                    ;
+; Data Arrival Time  ; 23.364                                                                                     ;
+; Data Required Time ; 23.118                                                                                     ;
+; Slack              ; -0.246 (VIOLATED)                                                                          ;
++--------------------+--------------------------------------------------------------------------------------------+
+
++--------------------------------------------------------------------------------------+
+; Statistics                                                                           ;
++------------------------+--------+-------+-------------+------------+--------+--------+
+; Property               ; Value  ; Count ; Total Delay ; % of Total ; Min    ; Max    ;
++------------------------+--------+-------+-------------+------------+--------+--------+
+; Setup Relationship     ; 15.151 ;       ;             ;            ;        ;        ;
+; Clock Skew             ; -0.515 ;       ;             ;            ;        ;        ;
+; Data Delay             ; 14.732 ;       ;             ;            ;        ;        ;
+; Number of Logic Levels ;        ; 9     ;             ;            ;        ;        ;
+; Physical Delays        ;        ;       ;             ;            ;        ;        ;
+;  Arrival Path          ;        ;       ;             ;            ;        ;        ;
+;   Clock                ;        ;       ;             ;            ;        ;        ;
+;    IC                  ;        ; 6     ; 4.701       ; 54         ; 0.000  ; 2.371  ;
+;    Cell                ;        ; 6     ; 3.931       ; 46         ; 0.210  ; 1.746  ;
+;   Data                 ;        ;       ;             ;            ;        ;        ;
+;    IC                  ;        ; 10    ; 10.287      ; 70         ; 0.228  ; 2.015  ;
+;    Cell                ;        ; 11    ; 4.445       ; 30         ; 0.000  ; 0.588  ;
+;    uTco                ;        ; 1     ; 0.000       ; 0          ; 0.000  ; 0.000  ;
+;  Required Path         ;        ;       ;             ;            ;        ;        ;
+;   Clock                ;        ;       ;             ;            ;        ;        ;
+;    IC                  ;        ; 6     ; 4.029       ; 55         ; 0.000  ; 1.935  ;
+;    Cell                ;        ; 5     ; 3.313       ; 45         ; 0.292  ; 1.468  ;
+;    PLL Compensation    ;        ; 1     ; -0.126      ; 0          ; -0.126 ; -0.126 ;
++------------------------+--------+-------+-------------+------------+--------+--------+
+Note: Negative delays are omitted from totals when calculating percentages
+
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Data Arrival Path                                                                                                                                                 ;
++----------+---------+----+------+--------+----------------------------+--------------------------------------------------------------------------------------------+
+; Total    ; Incr    ; RF ; Type ; Fanout ; Location                   ; Element                                                                                    ;
++----------+---------+----+------+--------+----------------------------+--------------------------------------------------------------------------------------------+
+; 0.000    ; 0.000   ;    ;      ;        ;                            ; launch edge time                                                                           ;
+; 8.632    ; 8.632   ;    ;      ;        ;                            ; clock path                                                                                 ;
+;   0.000  ;   0.000 ;    ;      ;        ;                            ; source latency                                                                             ;
+;   0.000  ;   0.000 ;    ;      ; 1      ; PIN_Y13                    ; FPGA_CLK2_50                                                                               ;
+;   0.000  ;   0.000 ; RR ; IC   ; 1      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|i                                                                       ;
+;   0.761  ;   0.761 ; RR ; CELL ; 3      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|o                                                                       ;
+;   2.470  ;   1.709 ; RR ; IC   ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkin[2]                   ;
+;   2.803  ;   0.333 ; RR ; CELL ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkout                     ;
+;   2.803  ;   0.000 ; RR ; IC   ; 10     ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|refclkin                      ;
+;   3.013  ;   0.210 ; RR ; CELL ; 3      ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]                      ;
+;   3.013  ;   0.000 ; RR ; IC   ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]                 ;
+;   4.759  ;   1.746 ; RR ; CELL ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                    ;
+;   5.380  ;   0.621 ; RR ; IC   ; 1      ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|inclk                                 ;
+;   5.698  ;   0.318 ; RR ; CELL ; 14928  ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|outclk                                ;
+;   8.069  ;   2.371 ; RR ; IC   ; 1      ; FF_X36_Y4_N16              ; emu|machine|cpu|cpu|useq|exc_mode|clk                                                      ;
+;   8.632  ;   0.563 ; RR ; CELL ; 1      ; FF_X36_Y4_N16              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|exc_mode         ;
+; 23.364   ; 14.732  ;    ;      ;        ;                            ; data path                                                                                  ;
+;   8.632  ;   0.000 ;    ; uTco ; 1      ; FF_X36_Y4_N16              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|exc_mode         ;
+;   8.632  ;   0.000 ; FF ; CELL ; 547    ; FF_X36_Y4_N16              ; emu|machine|cpu|cpu|useq|exc_mode|q                                                        ;
+;   10.647 ;   2.015 ; FF ; IC   ; 1      ; MLABCELL_X28_Y2_N48        ; emu|machine|cpu|cpu|useq|src.ea0.r[1]~2|dataf                                              ;
+;   10.738 ;   0.091 ; FR ; CELL ; 17     ; MLABCELL_X28_Y2_N48        ; emu|machine|cpu|cpu|useq|src.ea0.r[1]~2|combout                                            ;
+;   12.196 ;   1.458 ; RR ; IC   ; 1      ; LABCELL_X48_Y1_N51         ; emu|machine|cpu|cpu|useq|areg~1|dataa                                                      ;
+;   12.760 ;   0.564 ; RF ; CELL ; 11     ; LABCELL_X48_Y1_N51         ; emu|machine|cpu|cpu|useq|areg~1|combout                                                    ;
+;   13.866 ;   1.106 ; FF ; IC   ; 1      ; LABCELL_X43_Y2_N30         ; emu|machine|cpu|cpu|useq|fx_in~0|datac                                                     ;
+;   14.374 ;   0.508 ; FF ; CELL ; 2      ; LABCELL_X43_Y2_N30         ; emu|machine|cpu|cpu|useq|fx_in~0|combout                                                   ;
+;   14.911 ;   0.537 ; FF ; IC   ; 1      ; LABCELL_X42_Y2_N6          ; emu|machine|cpu|cpu|useq|last~2|datad                                                      ;
+;   15.337 ;   0.426 ; FR ; CELL ; 4      ; LABCELL_X42_Y2_N6          ; emu|machine|cpu|cpu|useq|last~2|combout                                                    ;
+;   16.140 ;   0.803 ; RR ; IC   ; 1      ; LABCELL_X46_Y2_N30         ; emu|machine|cpu|cpu|useq|nu.disp[19]~4|dataa                                               ;
+;   16.728 ;   0.588 ; RF ; CELL ; 12     ; LABCELL_X46_Y2_N30         ; emu|machine|cpu|cpu|useq|nu.disp[19]~4|combout                                             ;
+;   17.629 ;   0.901 ; FF ; IC   ; 1      ; LABCELL_X46_Y5_N15         ; emu|machine|cpu|cpu|useq|nu.disp[19]~12|dataf                                              ;
+;   17.726 ;   0.097 ; FR ; CELL ; 6      ; LABCELL_X46_Y5_N15         ; emu|machine|cpu|cpu|useq|nu.disp[19]~12|combout                                            ;
+;   17.954 ;   0.228 ; RR ; IC   ; 1      ; LABCELL_X46_Y5_N33         ; emu|machine|cpu|cpu|useq|nu.disp[6]~14|datab                                               ;
+;   18.514 ;   0.560 ; RF ; CELL ; 10     ; LABCELL_X46_Y5_N33         ; emu|machine|cpu|cpu|useq|nu.disp[6]~14|combout                                             ;
+;   19.408 ;   0.894 ; FF ; IC   ; 1      ; LABCELL_X46_Y7_N48         ; emu|machine|cpu|cpu|useq|nu.disp[5]~119|datac                                              ;
+;   19.916 ;   0.508 ; FF ; CELL ; 1      ; LABCELL_X46_Y7_N48         ; emu|machine|cpu|cpu|useq|nu.disp[5]~119|combout                                            ;
+;   21.024 ;   1.108 ; FF ; IC   ; 1      ; LABCELL_X43_Y7_N6          ; emu|machine|cpu|cpu|useq|nu.disp[5]~216|dataa                                              ;
+;   21.587 ;   0.563 ; FF ; CELL ; 2      ; LABCELL_X43_Y7_N6          ; emu|machine|cpu|cpu|useq|nu.disp[5]~216|combout                                            ;
+;   22.824 ;   1.237 ; FF ; IC   ; 1      ; FF_X45_Y9_N8               ; emu|machine|cpu|cpu|useq|uq_bank0.disp[5]|asdata                                           ;
+;   23.364 ;   0.540 ; FF ; CELL ; 1      ; FF_X45_Y9_N8               ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[5] ;
++----------+---------+----+------+--------+----------------------------+--------------------------------------------------------------------------------------------+
+
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Data Required Path                                                                                                                                                 ;
++----------+----------+----+------+--------+----------------------------+--------------------------------------------------------------------------------------------+
+; Total    ; Incr     ; RF ; Type ; Fanout ; Location                   ; Element                                                                                    ;
++----------+----------+----+------+--------+----------------------------+--------------------------------------------------------------------------------------------+
+; 15.151   ; 15.151   ;    ;      ;        ;                            ; latch edge time                                                                            ;
+; 23.268   ; 8.117    ;    ;      ;        ;                            ; clock path                                                                                 ;
+;   15.151 ;   0.000  ;    ;      ;        ;                            ; source latency                                                                             ;
+;   15.151 ;   0.000  ;    ;      ; 1      ; PIN_Y13                    ; FPGA_CLK2_50                                                                               ;
+;   15.151 ;   0.000  ; RR ; IC   ; 1      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|i                                                                       ;
+;   15.912 ;   0.761  ; RR ; CELL ; 3      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|o                                                                       ;
+;   17.436 ;   1.524  ; RR ; IC   ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkin[2]                   ;
+;   17.744 ;   0.308  ; RR ; CELL ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkout                     ;
+;   17.744 ;   0.000  ; RR ; IC   ; 10     ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|refclkin                      ;
+;   17.618 ;   -0.126 ; RR ; COMP ; 3      ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]                      ;
+;   17.618 ;   0.000  ; RR ; IC   ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]                 ;
+;   19.086 ;   1.468  ; RR ; CELL ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                    ;
+;   19.656 ;   0.570  ; RR ; IC   ; 1      ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|inclk                                 ;
+;   19.948 ;   0.292  ; RR ; CELL ; 14928  ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|outclk                                ;
+;   21.883 ;   1.935  ; RR ; IC   ; 1      ; FF_X45_Y9_N8               ; emu|machine|cpu|cpu|useq|uq_bank0.disp[5]|clk                                              ;
+;   22.367 ;   0.484  ; RR ; CELL ; 1      ; FF_X45_Y9_N8               ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[5] ;
+;   23.268 ;   0.901  ;    ;      ;        ;                            ; clock pessimism removed                                                                    ;
+; 23.118   ; -0.150   ;    ;      ;        ;                            ; clock uncertainty                                                                          ;
+; 23.118   ; 0.000    ;    ; uTsu ; 1      ; FF_X45_Y9_N8               ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[5] ;
++----------+----------+----+------+--------+----------------------------+--------------------------------------------------------------------------------------------+
+
+----------------------------
+; Extra Fitter Information ;
+----------------------------
+HTML report is unavailable in plain text report export.
+
+
+Path #2: Setup slack is -0.123 (VIOLATED)
+===============================================================================
++------------------------------------------------------------------------------------------------------------------+
+; Path Summary                                                                                                     ;
++--------------------+---------------------------------------------------------------------------------------------+
+; Property           ; Value                                                                                       ;
++--------------------+---------------------------------------------------------------------------------------------+
+; From Node          ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|exc_mode          ;
+; To Node            ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[14] ;
+; Launch Clock       ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                     ;
+; Latch Clock        ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                     ;
+; Data Arrival Time  ; 23.253                                                                                      ;
+; Data Required Time ; 23.130                                                                                      ;
+; Slack              ; -0.123 (VIOLATED)                                                                           ;
++--------------------+---------------------------------------------------------------------------------------------+
+
++--------------------------------------------------------------------------------------+
+; Statistics                                                                           ;
++------------------------+--------+-------+-------------+------------+--------+--------+
+; Property               ; Value  ; Count ; Total Delay ; % of Total ; Min    ; Max    ;
++------------------------+--------+-------+-------------+------------+--------+--------+
+; Setup Relationship     ; 15.151 ;       ;             ;            ;        ;        ;
+; Clock Skew             ; -0.503 ;       ;             ;            ;        ;        ;
+; Data Delay             ; 14.621 ;       ;             ;            ;        ;        ;
+; Number of Logic Levels ;        ; 9     ;             ;            ;        ;        ;
+; Physical Delays        ;        ;       ;             ;            ;        ;        ;
+;  Arrival Path          ;        ;       ;             ;            ;        ;        ;
+;   Clock                ;        ;       ;             ;            ;        ;        ;
+;    IC                  ;        ; 6     ; 4.701       ; 54         ; 0.000  ; 2.371  ;
+;    Cell                ;        ; 6     ; 3.931       ; 46         ; 0.210  ; 1.746  ;
+;   Data                 ;        ;       ;             ;            ;        ;        ;
+;    IC                  ;        ; 10    ; 10.123      ; 69         ; 0.228  ; 2.015  ;
+;    Cell                ;        ; 11    ; 4.498       ; 31         ; 0.000  ; 0.593  ;
+;    uTco                ;        ; 1     ; 0.000       ; 0          ; 0.000  ; 0.000  ;
+;  Required Path         ;        ;       ;             ;            ;        ;        ;
+;   Clock                ;        ;       ;             ;            ;        ;        ;
+;    IC                  ;        ; 6     ; 4.028       ; 55         ; 0.000  ; 1.934  ;
+;    Cell                ;        ; 5     ; 3.326       ; 45         ; 0.292  ; 1.468  ;
+;    PLL Compensation    ;        ; 1     ; -0.126      ; 0          ; -0.126 ; -0.126 ;
++------------------------+--------+-------+-------------+------------+--------+--------+
+Note: Negative delays are omitted from totals when calculating percentages
+
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Data Arrival Path                                                                                                                                                  ;
++----------+---------+----+------+--------+----------------------------+---------------------------------------------------------------------------------------------+
+; Total    ; Incr    ; RF ; Type ; Fanout ; Location                   ; Element                                                                                     ;
++----------+---------+----+------+--------+----------------------------+---------------------------------------------------------------------------------------------+
+; 0.000    ; 0.000   ;    ;      ;        ;                            ; launch edge time                                                                            ;
+; 8.632    ; 8.632   ;    ;      ;        ;                            ; clock path                                                                                  ;
+;   0.000  ;   0.000 ;    ;      ;        ;                            ; source latency                                                                              ;
+;   0.000  ;   0.000 ;    ;      ; 1      ; PIN_Y13                    ; FPGA_CLK2_50                                                                                ;
+;   0.000  ;   0.000 ; RR ; IC   ; 1      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|i                                                                        ;
+;   0.761  ;   0.761 ; RR ; CELL ; 3      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|o                                                                        ;
+;   2.470  ;   1.709 ; RR ; IC   ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkin[2]                    ;
+;   2.803  ;   0.333 ; RR ; CELL ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkout                      ;
+;   2.803  ;   0.000 ; RR ; IC   ; 10     ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|refclkin                       ;
+;   3.013  ;   0.210 ; RR ; CELL ; 3      ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]                       ;
+;   3.013  ;   0.000 ; RR ; IC   ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]                  ;
+;   4.759  ;   1.746 ; RR ; CELL ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                     ;
+;   5.380  ;   0.621 ; RR ; IC   ; 1      ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|inclk                                  ;
+;   5.698  ;   0.318 ; RR ; CELL ; 14928  ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|outclk                                 ;
+;   8.069  ;   2.371 ; RR ; IC   ; 1      ; FF_X36_Y4_N16              ; emu|machine|cpu|cpu|useq|exc_mode|clk                                                       ;
+;   8.632  ;   0.563 ; RR ; CELL ; 1      ; FF_X36_Y4_N16              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|exc_mode          ;
+; 23.253   ; 14.621  ;    ;      ;        ;                            ; data path                                                                                   ;
+;   8.632  ;   0.000 ;    ; uTco ; 1      ; FF_X36_Y4_N16              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|exc_mode          ;
+;   8.632  ;   0.000 ; FF ; CELL ; 547    ; FF_X36_Y4_N16              ; emu|machine|cpu|cpu|useq|exc_mode|q                                                         ;
+;   10.647 ;   2.015 ; FF ; IC   ; 1      ; MLABCELL_X28_Y2_N48        ; emu|machine|cpu|cpu|useq|src.ea0.r[1]~2|dataf                                               ;
+;   10.738 ;   0.091 ; FR ; CELL ; 17     ; MLABCELL_X28_Y2_N48        ; emu|machine|cpu|cpu|useq|src.ea0.r[1]~2|combout                                             ;
+;   12.196 ;   1.458 ; RR ; IC   ; 1      ; LABCELL_X48_Y1_N51         ; emu|machine|cpu|cpu|useq|areg~1|dataa                                                       ;
+;   12.760 ;   0.564 ; RF ; CELL ; 11     ; LABCELL_X48_Y1_N51         ; emu|machine|cpu|cpu|useq|areg~1|combout                                                     ;
+;   13.866 ;   1.106 ; FF ; IC   ; 1      ; LABCELL_X43_Y2_N30         ; emu|machine|cpu|cpu|useq|fx_in~0|datac                                                      ;
+;   14.374 ;   0.508 ; FF ; CELL ; 2      ; LABCELL_X43_Y2_N30         ; emu|machine|cpu|cpu|useq|fx_in~0|combout                                                    ;
+;   14.911 ;   0.537 ; FF ; IC   ; 1      ; LABCELL_X42_Y2_N6          ; emu|machine|cpu|cpu|useq|last~2|datad                                                       ;
+;   15.337 ;   0.426 ; FR ; CELL ; 4      ; LABCELL_X42_Y2_N6          ; emu|machine|cpu|cpu|useq|last~2|combout                                                     ;
+;   16.140 ;   0.803 ; RR ; IC   ; 1      ; LABCELL_X46_Y2_N30         ; emu|machine|cpu|cpu|useq|nu.disp[19]~4|dataa                                                ;
+;   16.728 ;   0.588 ; RF ; CELL ; 12     ; LABCELL_X46_Y2_N30         ; emu|machine|cpu|cpu|useq|nu.disp[19]~4|combout                                              ;
+;   17.629 ;   0.901 ; FF ; IC   ; 1      ; LABCELL_X46_Y5_N15         ; emu|machine|cpu|cpu|useq|nu.disp[19]~12|dataf                                               ;
+;   17.726 ;   0.097 ; FR ; CELL ; 6      ; LABCELL_X46_Y5_N15         ; emu|machine|cpu|cpu|useq|nu.disp[19]~12|combout                                             ;
+;   17.954 ;   0.228 ; RR ; IC   ; 1      ; LABCELL_X46_Y5_N33         ; emu|machine|cpu|cpu|useq|nu.disp[6]~14|datab                                                ;
+;   18.514 ;   0.560 ; RF ; CELL ; 10     ; LABCELL_X46_Y5_N33         ; emu|machine|cpu|cpu|useq|nu.disp[6]~14|combout                                              ;
+;   19.368 ;   0.854 ; FF ; IC   ; 1      ; LABCELL_X46_Y7_N30         ; emu|machine|cpu|cpu|useq|nu.disp[14]~35|dataa                                               ;
+;   19.931 ;   0.563 ; FF ; CELL ; 1      ; LABCELL_X46_Y7_N30         ; emu|machine|cpu|cpu|useq|nu.disp[14]~35|combout                                             ;
+;   20.915 ;   0.984 ; FF ; IC   ; 1      ; LABCELL_X43_Y7_N18         ; emu|machine|cpu|cpu|useq|nu.disp[14]~296|datad                                              ;
+;   21.423 ;   0.508 ; FF ; CELL ; 2      ; LABCELL_X43_Y7_N18         ; emu|machine|cpu|cpu|useq|nu.disp[14]~296|combout                                            ;
+;   22.660 ;   1.237 ; FF ; IC   ; 1      ; FF_X46_Y8_N56              ; emu|machine|cpu|cpu|useq|uq_bank0.disp[14]|asdata                                           ;
+;   23.253 ;   0.593 ; FF ; CELL ; 1      ; FF_X46_Y8_N56              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[14] ;
++----------+---------+----+------+--------+----------------------------+---------------------------------------------------------------------------------------------+
+
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Data Required Path                                                                                                                                                  ;
++----------+----------+----+------+--------+----------------------------+---------------------------------------------------------------------------------------------+
+; Total    ; Incr     ; RF ; Type ; Fanout ; Location                   ; Element                                                                                     ;
++----------+----------+----+------+--------+----------------------------+---------------------------------------------------------------------------------------------+
+; 15.151   ; 15.151   ;    ;      ;        ;                            ; latch edge time                                                                             ;
+; 23.280   ; 8.129    ;    ;      ;        ;                            ; clock path                                                                                  ;
+;   15.151 ;   0.000  ;    ;      ;        ;                            ; source latency                                                                              ;
+;   15.151 ;   0.000  ;    ;      ; 1      ; PIN_Y13                    ; FPGA_CLK2_50                                                                                ;
+;   15.151 ;   0.000  ; RR ; IC   ; 1      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|i                                                                        ;
+;   15.912 ;   0.761  ; RR ; CELL ; 3      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|o                                                                        ;
+;   17.436 ;   1.524  ; RR ; IC   ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkin[2]                    ;
+;   17.744 ;   0.308  ; RR ; CELL ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkout                      ;
+;   17.744 ;   0.000  ; RR ; IC   ; 10     ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|refclkin                       ;
+;   17.618 ;   -0.126 ; RR ; COMP ; 3      ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]                       ;
+;   17.618 ;   0.000  ; RR ; IC   ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]                  ;
+;   19.086 ;   1.468  ; RR ; CELL ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                     ;
+;   19.656 ;   0.570  ; RR ; IC   ; 1      ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|inclk                                  ;
+;   19.948 ;   0.292  ; RR ; CELL ; 14928  ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|outclk                                 ;
+;   21.882 ;   1.934  ; RR ; IC   ; 1      ; FF_X46_Y8_N56              ; emu|machine|cpu|cpu|useq|uq_bank0.disp[14]|clk                                              ;
+;   22.379 ;   0.497  ; RR ; CELL ; 1      ; FF_X46_Y8_N56              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[14] ;
+;   23.280 ;   0.901  ;    ;      ;        ;                            ; clock pessimism removed                                                                     ;
+; 23.130   ; -0.150   ;    ;      ;        ;                            ; clock uncertainty                                                                           ;
+; 23.130   ; 0.000    ;    ; uTsu ; 1      ; FF_X46_Y8_N56              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[14] ;
++----------+----------+----+------+--------+----------------------------+---------------------------------------------------------------------------------------------+
+
+----------------------------
+; Extra Fitter Information ;
+----------------------------
+HTML report is unavailable in plain text report export.
+
+
+Path #3: Setup slack is -0.105 (VIOLATED)
+===============================================================================
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Path Summary                                                                                                                                                                              ;
++--------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Property           ; Value                                                                                                                                                                ;
++--------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; From Node          ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|altsyncram:urom_rtl_0|altsyncram_fpf1:auto_generated|ram_block1a70~PORT_A_WRITE_ENABLE_REG ;
+; To Node            ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[30]                                                                          ;
+; Launch Clock       ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                                                                                              ;
+; Latch Clock        ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                                                                                              ;
+; Data Arrival Time  ; 23.245                                                                                                                                                               ;
+; Data Required Time ; 23.140                                                                                                                                                               ;
+; Slack              ; -0.105 (VIOLATED)                                                                                                                                                    ;
++--------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
++--------------------------------------------------------------------------------------+
+; Statistics                                                                           ;
++------------------------+--------+-------+-------------+------------+--------+--------+
+; Property               ; Value  ; Count ; Total Delay ; % of Total ; Min    ; Max    ;
++------------------------+--------+-------+-------------+------------+--------+--------+
+; Setup Relationship     ; 15.151 ;       ;             ;            ;        ;        ;
+; Clock Skew             ; -1.482 ;       ;             ;            ;        ;        ;
+; Data Delay             ; 13.624 ;       ;             ;            ;        ;        ;
+; Number of Logic Levels ;        ; 8     ;             ;            ;        ;        ;
+; Physical Delays        ;        ;       ;             ;            ;        ;        ;
+;  Arrival Path          ;        ;       ;             ;            ;        ;        ;
+;   Clock                ;        ;       ;             ;            ;        ;        ;
+;    IC                  ;        ; 6     ; 4.703       ; 49         ; 0.000  ; 2.373  ;
+;    Cell                ;        ; 6     ; 4.918       ; 51         ; 0.210  ; 1.746  ;
+;   Data                 ;        ;       ;             ;            ;        ;        ;
+;    IC                  ;        ; 9     ; 9.291       ; 68         ; 0.227  ; 1.806  ;
+;    Cell                ;        ; 10    ; 4.333       ; 32         ; 0.081  ; 1.051  ;
+;    uTco                ;        ; 1     ; 0.000       ; 0          ; 0.000  ; 0.000  ;
+;  Required Path         ;        ;       ;             ;            ;        ;        ;
+;   Clock                ;        ;       ;             ;            ;        ;        ;
+;    IC                  ;        ; 6     ; 4.029       ; 55         ; 0.000  ; 1.935  ;
+;    Cell                ;        ; 5     ; 3.335       ; 45         ; 0.292  ; 1.468  ;
+;    PLL Compensation    ;        ; 1     ; -0.126      ; 0          ; -0.126 ; -0.126 ;
++------------------------+--------+-------+-------------+------------+--------+--------+
+Note: Negative delays are omitted from totals when calculating percentages
+
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Data Arrival Path                                                                                                                                                                                                                           ;
++----------+---------+----+------+--------+----------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Total    ; Incr    ; RF ; Type ; Fanout ; Location                   ; Element                                                                                                                                                              ;
++----------+---------+----+------+--------+----------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; 0.000    ; 0.000   ;    ;      ;        ;                            ; launch edge time                                                                                                                                                     ;
+; 9.621    ; 9.621   ;    ;      ;        ;                            ; clock path                                                                                                                                                           ;
+;   0.000  ;   0.000 ;    ;      ;        ;                            ; source latency                                                                                                                                                       ;
+;   0.000  ;   0.000 ;    ;      ; 1      ; PIN_Y13                    ; FPGA_CLK2_50                                                                                                                                                         ;
+;   0.000  ;   0.000 ; RR ; IC   ; 1      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|i                                                                                                                                                 ;
+;   0.761  ;   0.761 ; RR ; CELL ; 3      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|o                                                                                                                                                 ;
+;   2.470  ;   1.709 ; RR ; IC   ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkin[2]                                                                                             ;
+;   2.803  ;   0.333 ; RR ; CELL ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkout                                                                                               ;
+;   2.803  ;   0.000 ; RR ; IC   ; 10     ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|refclkin                                                                                                ;
+;   3.013  ;   0.210 ; RR ; CELL ; 3      ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]                                                                                                ;
+;   3.013  ;   0.000 ; RR ; IC   ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]                                                                                           ;
+;   4.759  ;   1.746 ; RR ; CELL ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                                                                                              ;
+;   5.380  ;   0.621 ; RR ; IC   ; 1      ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|inclk                                                                                                           ;
+;   5.698  ;   0.318 ; RR ; CELL ; 14928  ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|outclk                                                                                                          ;
+;   8.071  ;   2.373 ; RR ; IC   ; 12     ; M10K_X38_Y3_N0             ; emu|machine|cpu|cpu|useq|urom_rtl_0|auto_generated|ram_block1a70|clk0                                                                                                ;
+;   9.621  ;   1.550 ; RR ; CELL ; 10     ; M10K_X38_Y3_N0             ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|altsyncram:urom_rtl_0|altsyncram_fpf1:auto_generated|ram_block1a70~PORT_A_WRITE_ENABLE_REG ;
+; 23.245   ; 13.624  ;    ;      ;        ;                            ; data path                                                                                                                                                            ;
+;   9.621  ;   0.000 ;    ; uTco ; 10     ; M10K_X38_Y3_N0             ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|altsyncram:urom_rtl_0|altsyncram_fpf1:auto_generated|ram_block1a70~PORT_A_WRITE_ENABLE_REG ;
+;   10.672 ;   1.051 ; RF ; CELL ; 50     ; M10K_X38_Y3_N0             ; emu|machine|cpu|cpu|useq|urom_rtl_0|auto_generated|ram_block1a70|portadataout[7]                                                                                     ;
+;   11.926 ;   1.254 ; FF ; IC   ; 1      ; LABCELL_X35_Y5_N48         ; emu|machine|cpu|cpu|useq|e~0|dataa                                                                                                                                   ;
+;   12.489 ;   0.563 ; FF ; CELL ; 45     ; LABCELL_X35_Y5_N48         ; emu|machine|cpu|cpu|useq|e~0|combout                                                                                                                                 ;
+;   13.342 ;   0.853 ; FF ; IC   ; 1      ; LABCELL_X36_Y4_N6          ; emu|machine|cpu|cpu|useq|oa.mem~1|dataa                                                                                                                              ;
+;   13.910 ;   0.568 ; FR ; CELL ; 8      ; LABCELL_X36_Y4_N6          ; emu|machine|cpu|cpu|useq|oa.mem~1|combout                                                                                                                            ;
+;   14.562 ;   0.652 ; RR ; IC   ; 1      ; LABCELL_X33_Y4_N12         ; emu|machine|cpu|cpu|useq|me_ea1~7|datad                                                                                                                              ;
+;   15.056 ;   0.494 ; RF ; CELL ; 67     ; LABCELL_X33_Y4_N12         ; emu|machine|cpu|cpu|useq|me_ea1~7|combout                                                                                                                            ;
+;   16.468 ;   1.412 ; FF ; IC   ; 1      ; LABCELL_X40_Y4_N24         ; emu|machine|cpu|cpu|useq|nu~2|dataf                                                                                                                                  ;
+;   16.555 ;   0.087 ; FF ; CELL ; 9      ; LABCELL_X40_Y4_N24         ; emu|machine|cpu|cpu|useq|nu~2|combout                                                                                                                                ;
+;   16.918 ;   0.363 ; FF ; IC   ; 1      ; MLABCELL_X39_Y4_N48        ; emu|machine|cpu|cpu|useq|nu~3|dataf                                                                                                                                  ;
+;   16.999 ;   0.081 ; FF ; CELL ; 5      ; MLABCELL_X39_Y4_N48        ; emu|machine|cpu|cpu|useq|nu~3|combout                                                                                                                                ;
+;   18.167 ;   1.168 ; FF ; IC   ; 1      ; LABCELL_X45_Y5_N57         ; emu|machine|cpu|cpu|useq|nu.disp[19]~6|dataf                                                                                                                         ;
+;   18.252 ;   0.085 ; FF ; CELL ; 19     ; LABCELL_X45_Y5_N57         ; emu|machine|cpu|cpu|useq|nu.disp[19]~6|combout                                                                                                                       ;
+;   20.058 ;   1.806 ; FF ; IC   ; 1      ; LABCELL_X30_Y5_N15         ; emu|machine|cpu|cpu|useq|nu.disp[30]~70|datae                                                                                                                        ;
+;   20.358 ;   0.300 ; FF ; CELL ; 1      ; LABCELL_X30_Y5_N15         ; emu|machine|cpu|cpu|useq|nu.disp[30]~70|combout                                                                                                                      ;
+;   21.914 ;   1.556 ; FF ; IC   ; 1      ; LABCELL_X45_Y7_N36         ; emu|machine|cpu|cpu|useq|nu.disp[30]~73|datac                                                                                                                        ;
+;   22.424 ;   0.510 ; FF ; CELL ; 2      ; LABCELL_X45_Y7_N36         ; emu|machine|cpu|cpu|useq|nu.disp[30]~73|combout                                                                                                                      ;
+;   22.651 ;   0.227 ; FF ; IC   ; 1      ; FF_X45_Y7_N22              ; emu|machine|cpu|cpu|useq|uq_bank0.disp[30]|asdata                                                                                                                    ;
+;   23.245 ;   0.594 ; FF ; CELL ; 1      ; FF_X45_Y7_N22              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[30]                                                                          ;
++----------+---------+----+------+--------+----------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+; Data Required Path                                                                                                                                                  ;
++----------+----------+----+------+--------+----------------------------+---------------------------------------------------------------------------------------------+
+; Total    ; Incr     ; RF ; Type ; Fanout ; Location                   ; Element                                                                                     ;
++----------+----------+----+------+--------+----------------------------+---------------------------------------------------------------------------------------------+
+; 15.151   ; 15.151   ;    ;      ;        ;                            ; latch edge time                                                                             ;
+; 23.290   ; 8.139    ;    ;      ;        ;                            ; clock path                                                                                  ;
+;   15.151 ;   0.000  ;    ;      ;        ;                            ; source latency                                                                              ;
+;   15.151 ;   0.000  ;    ;      ; 1      ; PIN_Y13                    ; FPGA_CLK2_50                                                                                ;
+;   15.151 ;   0.000  ; RR ; IC   ; 1      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|i                                                                        ;
+;   15.912 ;   0.761  ; RR ; CELL ; 3      ; IOIBUF_X56_Y0_N1           ; FPGA_CLK2_50~input|o                                                                        ;
+;   17.436 ;   1.524  ; RR ; IC   ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkin[2]                    ;
+;   17.744 ;   0.308  ; RR ; CELL ; 1      ; PLLREFCLKSELECT_X0_Y21_N0  ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT|clkout                      ;
+;   17.744 ;   0.000  ; RR ; IC   ; 10     ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|refclkin                       ;
+;   17.618 ;   -0.126 ; RR ; COMP ; 3      ; FRACTIONALPLL_X0_Y15_N0    ; emu|pll|pll_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]                       ;
+;   17.618 ;   0.000  ; RR ; IC   ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]                  ;
+;   19.086 ;   1.468  ; RR ; CELL ; 1      ; PLLOUTPUTCOUNTER_X0_Y20_N1 ; emu|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk                     ;
+;   19.656 ;   0.570  ; RR ; IC   ; 1      ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|inclk                                  ;
+;   19.948 ;   0.292  ; RR ; CELL ; 14928  ; CLKCTRL_G1                 ; emu|pll|pll_inst|altera_pll_i|outclk_wire[2]~CLKENA0|outclk                                 ;
+;   21.883 ;   1.935  ; RR ; IC   ; 1      ; FF_X45_Y7_N22              ; emu|machine|cpu|cpu|useq|uq_bank0.disp[30]|clk                                              ;
+;   22.389 ;   0.506  ; RR ; CELL ; 1      ; FF_X45_Y7_N22              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[30] ;
+;   23.290 ;   0.901  ;    ;      ;        ;                            ; clock pessimism removed                                                                     ;
+; 23.140   ; -0.150   ;    ;      ;        ;                            ; clock uncertainty                                                                           ;
+; 23.140   ; 0.000    ;    ; uTsu ; 1      ; FF_X45_Y7_N22              ; emu:emu|quadra800:machine|quadra_cpu040:cpu|ap68040:cpu|ap68040_useq:useq|uq_bank0.disp[30] ;
++----------+----------+----+------+--------+----------------------------+---------------------------------------------------------------------------------------------+
+
+----------------------------
+; Extra Fitter Information ;
+----------------------------
+HTML report is unavailable in plain text report export.
+
+
