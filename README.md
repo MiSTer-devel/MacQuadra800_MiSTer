@@ -1,5 +1,13 @@
 # MacQuadra800_MiSTer — Macintosh Quadra 800 (MC68040)
 
+**`pipelined-040-min` checkpoint, 2026-10-22:** the minimal pipelined AP68040
+port with the boot fix is complete. The exact tested bitstream is
+[`releases/MacQuadra800_20261022.rbf`](releases/MacQuadra800_20261022.rbf)
+(33,200 ALMs). Mac OS 8.1 and A/UX boot and shutdown pass at 32 MB.
+The [checkpoint notes](docs/pipelined-040-min-release.md) record the HDMI
+timing miss, Ethernet limitation, pending CD-audio gate, and test evidence.
+The description and status below preserve the earlier sequential-core history.
+
 A MiSTer FPGA core (DE10-Nano) for the Apple **Macintosh Quadra 800**
 (codename *Wombat*): an authentic 33 MHz 68040 bus, the AP68040 CPU
 (Adam Polkosnik's core with Alan Steremberg's performance work, vendored in `rtl/ap68040/`), 128 MB of SDRAM main memory,
