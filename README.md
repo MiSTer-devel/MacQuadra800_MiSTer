@@ -1,7 +1,9 @@
 # MacQuadra800_MiSTer — Macintosh Quadra 800 (MC68040)
 
 **`pipelined-040-66mhz` development:** a fixed 66 MHz CPU / 33 MHz bus /
-99 MHz SDRAM experiment from the minimal checkpoint. See the
+99 MHz SDRAM experiment from the minimal checkpoint. Mac OS 8.1 boots and
+Speedometer Mix reaches 3.162 in the first trial; the fit misses CPU and SDRAM
+timing and remains experimental. See the
 [experiment status and validation](docs/cpu66-experiment.md).
 
 **`pipelined-040-min` checkpoint, 2026-10-22:** the minimal pipelined AP68040

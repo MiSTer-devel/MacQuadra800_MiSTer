@@ -62,8 +62,9 @@ bash scripts/build_only.sh --check    # Analysis & Synthesis only (~13 min), no 
   or variant is a **scratch project**: a copy of the project in
   `scratch/<name>` with the changed files and `SEED` edited, launched with
   `systemd-run --user ... bash scripts/build_only.sh`. Separate scratch
-  databases isolate inputs, but **only one Quartus flow may run globally**.
-  Keep the normal wait gate and verify host processes before launching.
+  databases isolate inputs. The user explicitly allows parallel Quartus
+  flows in separate directories (2026-10-22). Pin each copy's source and
+  manifest, and keep its `db/` and output directories separate.
 - **Historical Windows instructions only:** run from Git bash, not WSL.
   On the former Windows host `bash.exe` on PATH resolves to
   WSL's `C:\Windows\System32\bash.exe`; the build needs
@@ -78,14 +79,14 @@ bash scripts/build_only.sh --check    # Analysis & Synthesis only (~13 min), no 
   `scripts/sim_tree_wsl.sh` recipe was for WSL. After each fit, before
   the next build overwrites the db:
   `quartus_sta -t scripts/cpu/timequest_cross_domain.tcl <tag>`.
-- **Never run two builds of this project at once** — they share `db/` and
-  corrupt each other. **And never two Quartus flows on this box at all,
-  worktrees included** (user, 2026-09-16): a seed walk runs one seed after
-  another; check host `ps`/`pgrep` for every `quartus_*` process first. Other cores are built on this box by other sessions
-  (sgiindy, MacLC…): `build_only.sh`'s wait-gate blocks on *any* `quartus_*`,
-  so launch with `--no-wait` only after checking that no Quartus flow is
-  running, and never kill a `quartus_*` process without matching its command
-  line and working directory to this project. Prefer the normal wait gate.
+- **Never run two builds in the same directory** — they share `db/` and
+  corrupt each other. Parallel flows in isolated, pinned scratch copies are
+  allowed (user, 2026-10-22, superseding the older global one-flow rule).
+  Check host process working directories before launching. The default
+  `build_only.sh` wait gate still blocks on any Quartus process; use
+  `--no-wait` for an isolated copy after verifying that no flow is using
+  that copy's database or outputs. Do not pause or kill another project's
+  flow to make room for this one.
 - Timing met (positive worst slack in `output_files/*.sta.summary`) is the
   **release** bar, not a precondition for trying a build. The design sits at
   ~92 % ALMs with tenths of a nanosecond of slack and the fits are a seed
