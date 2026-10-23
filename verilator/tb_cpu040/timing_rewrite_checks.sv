@@ -175,3 +175,39 @@ bind ap68040_fetch cpu66_fetch_queue_check timing_fetch_queue_check(
  .append_count(f3_n),.words(qw),.append_words(f3_w),
  .fault(qf),.demand(qd),.atc(qa),.branch(qb),
  .append_fault(f3_f),.append_demand(f3_d),.append_atc(f3_a),.append_branch(f3_b));
+
+// The removed full EX bypass can only differ when the later assignment
+// overrides it. Compare complete consumed operand values, not unused wires.
+module cpu66_ag_operand_check(
+ input logic clk,nreset,advance,full_forward,short_forward,
+ input logic a_reg,b_reg,a_match,b_match,a_update,b_update,
+ input logic [31:0] raw_a,raw_b,imm_a,imm_b,update_value,ex_value,new_a,new_b,
+ input logic a_immediate,b_immediate
+);
+ logic [31:0] old_a,old_b,cap_a,cap_b,ref_a,ref_b;
+ integer checked=0;
+ always_comb begin
+  old_a=a_update?update_value:(a_reg?((full_forward&&a_match)?ex_value:raw_a):a_immediate?imm_a:32'd0);
+  old_b=b_update?update_value:(b_reg?((full_forward&&b_match)?ex_value:raw_b):b_immediate?imm_b:32'd0);
+  cap_a=(short_forward&&a_reg&&a_match)?ex_value:new_a;
+  cap_b=(short_forward&&b_reg&&b_match)?ex_value:new_b;
+  ref_a=(short_forward&&a_reg&&a_match)?ex_value:old_a;
+  ref_b=(short_forward&&b_reg&&b_match)?ex_value:old_b;
+ end
+ always @(posedge clk)if(nreset)begin
+  if(full_forward&&!short_forward)$fatal(1,"FAIL: full EX write without short forward");
+  if(advance)begin
+   if({cap_a,cap_b}!=={ref_a,ref_b})$fatal(1,"FAIL: removed AG bypass changed captured operand");
+   checked<=checked+1;
+  end
+ end
+ final $display("TIMING_AG_OPERAND: checked=%0d",checked);
+endmodule
+bind ap68040_backend cpu66_ag_operand_check timing_ag_operand_check(
+ .clk(clk),.nreset(nreset),.advance(adv_ag),.full_forward(exw_v),.short_forward(exw_fw),
+ .a_reg(ag_u.a_src==OS_REG),.b_reg(ag_u.b_src==OS_REG),
+ .a_match(ag_u.a_reg==exw_reg),.b_match(ag_u.b_reg==exw_reg),
+ .a_update(ag_u.a_upd),.b_update(ag_u.b_upd),
+ .raw_a(rrd[3]),.raw_b(rrd[4]),.imm_a(ag_u.imm),.imm_b(ag_immb),
+ .update_value(ag_updv),.ex_value(exw_val),.new_a(ag_a),.new_b(ag_b),
+ .a_immediate(ag_u.a_src==OS_IMM),.b_immediate(ag_u.b_src==OS_IMM));

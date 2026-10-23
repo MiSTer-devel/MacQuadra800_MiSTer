@@ -427,8 +427,39 @@ logic [31:0] agb_q, agx_q;     // the base, and the index sign-extended and scal
 wire  [31:0] ag_base = agb_q;
 wire  [31:0] ag_ix   = agx_q;
 function automatic logic [31:0] ixf(input logic [31:0] v, input uop_t u);
-	ixf = u.idx_v ? ((u.idx_l ? v : {{16{v[15]}}, v[15:0]}) << u.scale) : 32'd0;
+	logic [31:0] word_index, long_index;
+	long_index = v << u.scale;
+	// Keep word sign replication out of the variable long-word shifter.
+	// For every scale its high bits are simply the original sign bit.
+	case (u.scale)
+	 2'd0: word_index = {{16{v[15]}},v[15:0]};
+	 2'd1: word_index = {{15{v[15]}},v[15:0],1'b0};
+	 2'd2: word_index = {{14{v[15]}},v[15:0],2'b0};
+	 2'd3: word_index = {{13{v[15]}},v[15:0],3'b0};
+	endcase
+	ixf = u.idx_v ? (u.idx_l ? long_index : word_index) : 32'd0;
 endfunction
+
+// synthesis translate_off
+// Every data bit is copied or replicated for fixed metadata. Check each
+// basis vector, zero and all-ones under all16 metadata combinations.
+initial begin : check_index_scaling
+ uop_t u;
+ logic [31:0] v,expected;
+ integer checked;
+ checked=0;
+ for(integer pattern=0;pattern<34;pattern=pattern+1)
+  for(integer meta=0;meta<16;meta=meta+1)begin
+   v=(pattern==0)?32'd0:(pattern==33)?32'hffffffff:(32'd1<<(pattern-1));
+   u='0;u.idx_v=1'(meta>>3);u.idx_l=1'(meta>>2);u.scale=2'(meta);
+   expected=u.idx_v?((u.idx_l?v:{{16{v[15]}},v[15:0]})<<u.scale):32'd0;
+   if(ixf(v,u)!==expected)$fatal(1,"FAIL: index scaling value=%h meta=%h",v,meta);
+   checked=checked+1;
+  end
+ $display("TIMING_INDEX_SCALE: checked=%0d",checked);
+end
+// synthesis translate_on
+
 wire [31:0] ag_ea   = ag_base + ag_ix + ag_u.disp;
 wire [31:0] ag_pinc = ag_base + {{24{ag_u.upd_amt[7]}}, ag_u.upd_amt};
 wire [31:0] ag_updv = ag_u.pinc ? ag_pinc : ag_ea;
@@ -470,7 +501,7 @@ function automatic logic [31:0] opnd(input logic [1:0] src, input logic [4:0] r,
                                      input logic [31:0] imm, input logic sxw);
 	logic [31:0] v;
 	case (src)
-		OS_REG:  v = (exw_v && exw_reg == r) ? exw_val : rv;
+		OS_REG:  v = (EARLY_RES && exw_v && exw_reg == r) ? exw_val : rv;
 		OS_IMM:  v = imm;
 		default: v = 32'd0;
 	endcase
@@ -1327,9 +1358,18 @@ wire        ex_bdb  = (ex_u.op == OP_BCC) || (ex_u.op == OP_DBCC);
 wire        ex_ubr  = (ex_u.br == BR_IMM) || (ex_u.br == BR_EA) ||
                       (ex_u.br == BR_A) || (ex_u.br == BR_B) || (ex_u.op == OP_RTE);
 wire [31:0] ex_otgt = (!ex_bdb && ex_ubr) ? ex_target : ex_u.target;
-wire        ex_odd  = ex_br && (ex_bdb ? ex_u.target[0] :
+// FP control transfers are conditional FBcc/FDBcc; their target and
+// decision come directly from the FPU branch data. This keeps a frame
+// header's format exception out of the unrelated odd-target address mux.
+wire ex_odd = ex_br && (ex_is_fp ? (fp_taken && ex_u.target[0]) :
+                       ex_bdb ? ex_u.target[0] :
+                       ex_ubr ? ex_target[0] :
+                       ((ex_u.op == OP_FPU) && fp_taken && ex_u.target[0]));
+// synthesis translate_off
+wire        ex_odd_reference = ex_br && (ex_bdb ? ex_u.target[0] :
                                 ex_ubr ? ex_target[0] :
                                 ((ex_u.op == OP_FPU) && fp_taken && ex_u.target[0]));
+// synthesis translate_on
 logic [31:0] ex_odd_pc;
 always_comb begin
 	ex_odd_pc = ex_u.pc;
@@ -1935,7 +1975,9 @@ always_ff @(posedge clk) begin
 				wb_exc_addr <= {ex_otgt[31:1], 1'b0};
 				wb_exc_ssw  <= 16'd0;
 			end
-			else if (ex_is_fp && ex_xvec != 8'd0) begin
+			else if (ex_is_fp) begin
+				// The FPU address is PC when it has no special frame address.
+				// Selecting it need not wait for the exception-vector decision.
 				// FPU exceptions bring their frame format, PC and address
 				wb_exc      <= ex_xvec;
 				wb_exc_addr <= fp_xaddr;
@@ -2388,5 +2430,53 @@ always_ff @(posedge clk) begin
 		stale_b <= 1'b0; stale_x <= 1'b0;
 	end
 end
+
+
+// synthesis translate_off
+logic [31:0] wb_addr_reference;
+logic wb_addr_reference_valid=0;
+integer wb_addr_checks=0,fp_odd_checks=0,fp_restore_advances=0;
+always @(posedge clk)begin
+ if(nreset && wb_addr_reference_valid)begin
+  if(wb_exc_addr !== wb_addr_reference)
+   $fatal(1,"FAIL: WB exception address %h expected %h",wb_exc_addr,wb_addr_reference);
+  wb_addr_checks<=wb_addr_checks+1;
+ end
+ if(nreset && ex_v)begin
+  if(ex_odd !== ex_odd_reference)
+   $fatal(1,"FAIL: simplified FP odd-target check differs");
+  if(ex_is_fp)begin
+   if(ex_u.br!=BR_NONE && ex_u.br!=BR_COND)
+    $fatal(1,"FAIL: FPU uop uses an unconditional integer branch");
+   fp_odd_checks<=fp_odd_checks+1;
+   if(adv_ex && ex_u.cond==4'd13)fp_restore_advances<=fp_restore_advances+1;
+  end
+ end
+ if(!nreset)wb_addr_reference_valid<=0;
+ else begin
+  if(adv_ex)begin
+   wb_addr_reference_valid<=1;
+   if(ex_u.exc==EXC_SNR)wb_addr_reference<=ex_u.pc;
+   else if(ex_u.exc!=8'd0)begin
+    if(ex_u.exc==EXC_IFS || ex_u.exc==EXC_IFSA || ex_u.exc==EXC_IFB || ex_u.exc==EXC_IFA)
+     wb_addr_reference<=ex_u.target;
+    else wb_addr_reference<=ex_u.pc;
+   end
+   else if(ex_fault)wb_addr_reference<=ex_faddr;
+   else if(ex_xvec==8'd0 && ex_odd_reference)wb_addr_reference<={ex_otgt[31:1],1'b0};
+   else if(ex_is_fp && ex_xvec!=8'd0)wb_addr_reference<=fp_xaddr;
+   else wb_addr_reference<=ex_u.pc;
+  end
+  // The later WB faults override EX's candidate in the original order.
+  if(wb_v && wb_st && dm_st_rdy && dm_st_fault && wb_exc==8'd0)begin
+   wb_addr_reference<=dm_st_faddr;wb_addr_reference_valid<=1;
+  end
+  if(wb_v && wb_mt && mt_done && mt_fault && wb_exc==8'd0)begin
+   wb_addr_reference<=mt_faddr;wb_addr_reference_valid<=1;
+  end
+ end
+end
+final $display("TIMING_EXCEPTION_ADDRESS: checked=%0d fp_odd=%0d restore=%0d",wb_addr_checks,fp_odd_checks,fp_restore_advances);
+// synthesis translate_on
 
 endmodule

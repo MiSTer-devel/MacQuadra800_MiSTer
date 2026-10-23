@@ -531,9 +531,16 @@ set_global_assignment -name ALM_REGISTER_PACKING_EFFORT MEDIUM
 #   timing27/fit-s38 s38: 33510 ALMs CPU -1.814/-350.927; RAM -0.122, HDMI 0.548, hold +0.193.
 # Experiment7 was rejected before fitting (split-store livelock);19 was validated and combined into20.
 # 20 normal/duplication-ON RBFs are bit-identical: duplication was a no-op.
-# 21..27 are preserved scratch candidates; main RTL remains20. 25/26/27 are not retained.
-# 24-small is the best useful fit so far: Mac boot/Mix/fullPR/clean halt pass; AUX qualification failed once, control pending.
+# 21..29 comparisons are preserved. Only the24-small combination is applied to main; no extra RF port or FPU cycle.
+# 24-small is the best useful fit: Mac and matchedAUX pass; one earlierAUXstartupfailed, cause unknown.
 # 12 is the prior Mac/AUX-tested checkpoint. No CPU66 release or timing closure is claimed.
+# 2026-10-23 later CPU66 fits (same recipe/seed38):
+#   28: 33,445 ALMs CPU -1.758/-314.670; RAM 0.334, HDMI 0.621, hold +0.137; not retained.
+#   29-small: 33,698 ALMs CPU -1.816/-212.891; RAM 0.541, HDMI 0.411, hold +0.203; not retained.
+#   29-combined: 33,921 ALMs CPU -1.929/-495.152; RAM 0.494, HDMI 0.170, hold +0.158; not retained.
+# Main RTL now matches the exact hardware-tested24-small CPU files; later experiments stay in scratch.
+# Mac OS8.1 Mix3.159/fullPR2.420/clean halt and matchedAUX32MB Off shell/clock/clean halt pass.
+# The earlierAUXclone2startupfailure remains unexplained. CD audio pending. CPUsetupstill-1.539ns.
 set_global_assignment -name SEED 38
 # 2026-09-24: NEVER grew the full BRF fit by398 ALMs; retain the better ALWAYS setting.
 set_global_assignment -name FITTER_AGGRESSIVE_ROUTABILITY_OPTIMIZATION ALWAYS
