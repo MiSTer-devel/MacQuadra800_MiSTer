@@ -9,3 +9,7 @@ This is24-small plus the preserved backend/interface patch. No register, stage, 
 All185 CPU cases and four adapters pass with exact24-small cycles. Five signaling-true odd-target BSUN runs retain BSUN priority. A second extended exception test checks taken FBT and FDBF odd targets (format2 address and PC, suppressed FDBcc counter write), plus untaken FBF/FDBT odd targets. All five bus configurations pass on both24-small and27 with exact cycle counts. [Validation and sources](perf/cpu66_20261022/timing27/validation.json).
 
 The fit retains five RF ports,66/33/99MHz, balanced seed38, duplication OFF and stamp261023. Source will be byte-verified and all tag/RF RAM inference guarded before fitting. No fitted benefit, timing closure or hardware qualification is claimed before measurement. No VRAM change is included.
+
+## Completed fit: not retained
+
+33,510ALMs, CPU setup -1.814ns/TNS -350.927ns, SDRAM -0.122ns (fails), bus +0.774ns, HDMI +0.548ns and minimum hold +0.193ns. Worst CPU path now runs fromEX load data into fe_flush (-1.814ns), followed by the slow ALU result (-1.794ns), FIFO head/index input (-1.569ns) and WB exception address (-1.493ns). The targeted address path moves out of the worst slot but global timing and area regress relative to24-small. No hardware trial or main-source application.
