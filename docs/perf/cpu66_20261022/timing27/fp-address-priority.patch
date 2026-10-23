@@ -1,0 +1,28 @@
+--- a/rtl/ap68040_faster/rtl/ap68040_backend.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_backend.sv
+@@ -235,0 +236 @@
++logic fp_branch_bsun;
+@@ -701 +702 @@
+-	.hold(fp_hold), .res(fp_res), .dkill(fp_dkill), .taken(fp_taken),
++	.hold(fp_hold), .res(fp_res), .dkill(fp_dkill), .taken(fp_taken), .branch_bsun_req(fp_branch_bsun),
+@@ -1990,0 +1992,6 @@
++            // FP control transfers only raise BSUN before their odd-target
++            // check. Select the address from that direct predicate; vector
++            // classification and all exception side effects stay above.
++            if (ex_u.exc == 8'd0 && !ex_fault && ex_is_fp)
++                wb_exc_addr <= (ex_odd && !fp_branch_bsun) ?
++                               {ex_u.target[31:1], 1'b0} : fp_xaddr;
+@@ -2444,0 +2452,6 @@
++ if(nreset && adv_ex && ex_is_fp && ex_odd && ex_u.exc==8'd0 && !ex_fault)begin
++  if((ex_xvec==8'd0) !== !fp_branch_bsun)
++   $fatal(1,"FAIL: FP odd-target exception priority differs");
++  if(ex_otgt !== ex_u.target)
++   $fatal(1,"FAIL: FP branch uses a nondecoded target");
++ end
+--- a/rtl/ap68040_faster/rtl/ap68040_fpif.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_fpif.sv
+@@ -80,0 +81 @@
++	output logic        branch_bsun_req,    // direct branch exception predicate
+@@ -760,0 +762,2 @@
++wire [5:0] branch_pred = branch_bcc ? opw_q[5:0] : ext_q[5:0];
++assign branch_bsun_req = branch_pred[4] && f_cc[0] && f_bsun_en;
