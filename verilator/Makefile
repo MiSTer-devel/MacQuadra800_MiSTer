@@ -344,6 +344,11 @@ tb_sysmem_vbuf_gate:
 FAST040 = ../rtl/ap68040_faster/rtl
 FAST040_SRC = $(addprefix $(FAST040)/,$(shell grep -o '"[^"]*v"' $(FAST040)/ap68040.qip | tr -d '"'))
 FAST040_CHECKS = tb_cpu040/timing_rewrite_checks.sv
+tb_cpu66_tag_ram:
+	$V --binary --timing -j 8 -Wno-fatal -Wno-lint -Wno-style -I$(FAST040) --top-module tb_tag_ram --Mdir ./obj_dir_tb_tag_ram -o tb_tag_ram $(FAST040)/ap68040_pkg.sv $(FAST040)/gen/ap68040_upkg.sv $(FAST040)/ap68040_ram.sv tb_cpu040/tb_tag_ram.sv
+	./obj_dir_tb_tag_ram/tb_tag_ram > obj_dir_tb_tag_ram/run.log
+	grep '^PASS:' obj_dir_tb_tag_ram/run.log
+
 tb_quadra_cpu040: tb_cpu040/prog.s tb_cpu040/tb_quadra_cpu040.sv ../rtl/quadra_cpu040.sv
 	vasmm68k_mot -m68040 -Fbin -quiet -o tb_cpu040/prog.bin tb_cpu040/prog.s
 	xxd -p -c4 tb_cpu040/prog.bin > tb_cpu040/prog.hex

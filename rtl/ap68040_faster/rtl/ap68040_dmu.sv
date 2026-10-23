@@ -440,7 +440,7 @@ genvar gw;
 generate
 	for (gw = 0; gw < 4; gw++) begin : g_way
 		(* keep *) wire [5:0] la_set_n = la_ag ? dm_va[9:4] : la_alt;
-		ap68040_tdp #(.AW(6), .DW(22)) tag (
+		ap68040_tdp #(.AW(6), .DW(22), .WRITE_A(0)) tag (
 			.clk(clk),
 			.addr_a(la_set_n), .we_a(1'b0), .wd_a(22'd0), .q_a(tq_a[gw]),
 			.qa_raw(tq_r[gw]), .qa_bv(), .qa_bd(),
