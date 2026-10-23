@@ -284,12 +284,14 @@ module ap68040_pdrom
 	output pdw_t        q0,
 	output pdw_t        q1
 );
-	(* romstyle = "M10K" *) logic [31:0] pd_rom [0:8191];
+	(* romstyle = "M10K" *) (* rom_style = "block" *) logic [31:0] pd_rom [0:8191];
 	initial begin
 `include "gen/ap68040_pd_rom.svh"
 	end
-	always_ff @(posedge clk) begin
-		q0 <= pdw_t'(pd_rom[a0]);
-		q1 <= pdw_t'(pd_rom[a1]);
-	end
+	logic [31:0] r0, r1;
+	// one read per process: Vivado maps a two-read ROM to block RAM only then
+	always_ff @(posedge clk) r0 <= pd_rom[a0];
+	always_ff @(posedge clk) r1 <= pd_rom[a1];
+	assign q0 = pdw_t'(r0);
+	assign q1 = pdw_t'(r1);
 endmodule

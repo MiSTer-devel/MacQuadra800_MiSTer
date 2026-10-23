@@ -64,7 +64,6 @@ module ap68040_fpif
 	input  logic [15:0] bw,             // (CHK's words: registers, no mux)
 	input  logic [15:0] dw_a,           // the same words of the uop entering
 	input  logic [15:0] dw_b,           // EX (DC2's), and EX not holding
-	input  logic  [3:0] dw_sub,         // sub-operation entering EX
 	input  logic        dw_ld,          // (DC2 moving on or EX emptying: the
 	                                    // decode is of the uop EX has next)
 	input  logic [31:0] latch,
@@ -427,77 +426,34 @@ function automatic logic [1:0] crsel_of(input logic [1:0] k);   // the FPU's cr_
 	crsel_of = (k == 2'd0) ? 2'd2 : (k == 2'd1) ? 2'd1 : 2'd0;
 endfunction
 
-// A nibble contributes 0,12,24,36 or48 bytes to an FMOVEM list.
-// Select the signed contribution directly, then combine two small values.
-// This avoids a serial population count, multiply by12 and wide negation
-// after a late dynamic-list operand arrives.
-function automatic logic [6:0] nibble_bytes(input logic [3:0] m, input logic neg);
- case (m)
-  4'b0000: nibble_bytes = 7'd0;
-  4'b0001,4'b0010,4'b0100,4'b1000:
-   nibble_bytes = neg ? -7'd12 : 7'd12;
-  4'b0011,4'b0101,4'b0110,4'b1001,4'b1010,4'b1100:
-   nibble_bytes = neg ? -7'd24 : 7'd24;
-  4'b0111,4'b1011,4'b1101,4'b1110:
-   nibble_bytes = neg ? -7'd36 : 7'd36;
-  4'b1111: nibble_bytes = neg ? -7'd48 : 7'd48;
-  default: nibble_bytes = 7'd0;
- endcase
-endfunction
-function automatic logic [31:0] list_adjust(input logic [7:0] m, input logic neg);
- logic [6:0] lo,hi;
- logic [7:0] total;
- lo = nibble_bytes(m[3:0],neg);
- hi = nibble_bytes(m[7:4],neg);
- total = {lo[6],lo} + {hi[6],hi};
- list_adjust = {{24{total[7]}},total};
-endfunction
-function automatic logic [6:0] list_bytes(input logic [7:0] m);
- list_bytes = nibble_bytes(m[3:0],1'b0) + nibble_bytes(m[7:4],1'b0);
-endfunction
-
-// LIST's result from the instruction's words as CHK latches them.
+// LIST's result from the instruction's words as CHK latches them
 function automatic logic [31:0] lst_of(input logic [15:0] ow, input logic [15:0] xw);
- lst_of = list_adjust(xw[7:0],ow[5:3] == 3'd4);
+	logic [3:0] n;
+	logic [6:0] b;
+	n = 4'd0;
+	for (int i = 0; i < 8; i++) n = n + {3'd0, xw[i]};
+	b = 7'(n) * 7'd12;
+	lst_of = (ow[5:3] == 3'd4) ? -{25'd0, b} : {25'd0, b};
 endfunction
-// Dynamic list (Dn), with the instruction's direction already latched.
+// ... and for a dynamic list (Dn): from the operand, the words latched
 function automatic logic [31:0] lst_dyn(input logic [15:0] ow, input logic [7:0] l);
- lst_dyn = list_adjust(l,ow[5:3] == 3'd4);
+	logic [3:0] n;
+	logic [6:0] b;
+	n = 4'd0;
+	for (int i = 0; i < 8; i++) n = n + {3'd0, l[i]};
+	b = 7'(n) * 7'd12;
+	lst_dyn = (ow[5:3] == 3'd4) ? -{25'd0, b} : {25'd0, b};
 endfunction
+// FMOVEM list and adjustment (LIST, combinational for its result)
 logic [7:0] l_now;
 logic [6:0] l_bytes;
 always_comb begin
- l_now = ext[11] ? av[7:0] : ext[7:0];
- l_bytes = list_bytes(l_now);
+	logic [3:0] n;
+	l_now = ext[11] ? av[7:0] : ext[7:0];
+	n = 4'd0;
+	for (int i = 0; i < 8; i++) n = n + {3'd0, l_now[i]};
+	l_bytes = 7'(n) * 7'd12;
 end
-// synthesis translate_off
-// Exhaust every real list/direction input against the old arithmetic rule.
-initial begin : check_list_bytes
- integer n,expected,checked;
- checked = 0;
- for (integer mode=0;mode<8;mode=mode+1)
-  for (integer mask=0;mask<256;mask=mask+1) begin
-   n=0;
-   for(integer bitno=0;bitno<8;bitno=bitno+1) n=n+((mask>>bitno)&1);
-   expected = (mode==4) ? -(n*12) : n*12;
-   if(lst_of(16'(mode<<3),16'(mask)) !== 32'(expected) ||
-      lst_dyn(16'(mode<<3),8'(mask)) !== 32'(expected) ||
-      list_bytes(8'(mask)) !== 7'(n*12))
-    $fatal(1,"FAIL: FPU list byte count mask=%h mode=%0d",mask,mode);
-   checked=checked+1;
-  end
- $display("TIMING_LIST_BYTES: checked=%0d",checked);
-end
-logic [6:0] l_bytes_reference;
-always_comb begin
- logic [3:0] n;
- n=4'd0;
- for(integer i=0;i<8;i=i+1)n=n+{3'd0,l_now[i]};
- l_bytes_reference=7'(n)*7'd12;
-end
-always @(posedge clk)if(nreset && l_bytes !== l_bytes_reference)
- $fatal(1,"FAIL: FPU current list bytes differ from original arithmetic");
-// synthesis translate_on
 
 // FSAVE frame
 logic [1:0] sv_now;
@@ -577,38 +533,12 @@ always_ff @(posedge clk)
 	end
 // synthesis translate_on
 
-// Decode before EX, beside the existing CHK word decode. These eight bits
-// replace sub-operation comparisons on the late hold/forwarding path.
-function automatic logic [7:0] hold_decode(input logic [3:0] s);
-	hold_decode = {!(s == FC_CHK || s == FC_EAL || s == FC_DISP || s == FC_GET),
-	               s == FC_END, s == FC_GET, s == FC_SV0 || s == FC_RS0,
-	               s == FC_MVR, s == FC_CRR, s == FC_DISP, s == FC_CHK};
-endfunction
-logic [7:0] hold_sub;
-always_ff @(posedge clk)
-	if (dw_ld) hold_sub <= hold_decode(dw_sub);
-
-wire chk_wait = (fuse && go) ?
-	((fresh && !f_pdone) ||
-	 (!f_unimp && !f_unsupp && !f_excreq && !fx_q && !(f_accepted || f_done || f_pdone))) :
-	((bg && !f_end) || (!chk_pend && !chk_x && fuse));
-wire disp_wait = (ocl == 3'b011) ? !done_q :
-	!(go && (f_unimp || f_unsupp || f_excreq || fx_q || f_accepted || f_done || f_pdone));
-assign hold = ex_v && (
-	(!safe && !(hold_sub[5] || (hold_sub[6] && !sx_v && !fsr_q))) ||
-	(f_pbusy && hold_sub[7]) ||
-	(hold_sub[0] && chk_wait) || (hold_sub[1] && disp_wait) ||
-	(hold_sub[2] && !crr_wait) || (hold_sub[3] && !mvr_wait) ||
-	(hold_sub[4] && bg));
-
-logic taken_g;                 // old gated branch decision, checked when consumed
-logic hold_g;                  // original priority expression, checked in simulation
 logic [31:0] res_g;            // the result as the hold logic forms it (checked, then unused)
 always_comb begin
-	hold_g  = 1'b0;
+	hold    = 1'b0;
 	res_g   = 32'd0;
 	dkill   = 1'b0;
-	taken_g = 1'b0;
+	taken   = 1'b0;
 	xvec    = 8'd0;
 	xfmt    = 4'd0;
 	xnext   = 1'b0;
@@ -616,12 +546,12 @@ always_comb begin
 	xcommit = 1'b0;
 	st_kill = sx_kill;
 	if (ex_v) begin
-		if (!safe && !nosafe) hold_g = 1'b1;
+		if (!safe && !nosafe) hold = 1'b1;
 		// FPU state (registers, FPSR, condition codes, control registers,
 		// frames) is current only once the pipelined operations complete:
 		// only a new operation (CHK, EAL, DISP) goes ahead of them
 		else if (f_pbusy && !(sub == FC_CHK || sub == FC_EAL || sub == FC_DISP || sub == FC_GET))
-			hold_g = 1'b1;
+			hold = 1'b1;
 		else case (sub)
 			FC_CHK: begin
 				// the released operation completing this cycle without an
@@ -630,7 +560,7 @@ always_comb begin
 				// the FPU sees it now: done at once if it went into the
 				// pipeline (pdone: the registered done of this cycle may be
 				// a released operation's, which fresh masks)
-				if (fuse && go && fresh && !f_pdone) hold_g = 1'b1;
+				if (fuse && go && fresh && !f_pdone) hold = 1'b1;
 				else if (fuse && go) begin
 					// dispatched (below): DISP's outcome
 					if (f_unimp) begin
@@ -642,9 +572,9 @@ always_comb begin
 						xaddr = 32'd0; xcommit = 1'b1;
 					end
 					else if (f_excreq || fx_q) ;   // pending: the instruction completes
-					else if (!(f_accepted || f_done || f_pdone)) hold_g = 1'b1;
+					else if (!(f_accepted || f_done || f_pdone)) hold = 1'b1;
 				end
-				else if (bg && !f_end) hold_g = 1'b1;
+				else if (bg && !f_end) hold = 1'b1;
 				else if (chk_pend) begin
 					xvec = pend_vec;
 				end
@@ -652,12 +582,12 @@ always_comb begin
 					xvec = chk_ill ? VEC_ILL : VEC_FLINE;
 					if (chk_un) begin xfmt = 4'd2; xnext = 1'b1; end
 				end
-				else if (fuse) hold_g = 1'b1;    // dispatching this cycle
+				else if (fuse) hold = 1'b1;    // dispatching this cycle
 			end
 			FC_DISP: begin
 				if (ocl == 3'b011) begin
 					// a store: its outcome first; its exception comes from END
-					if (!done_q) hold_g = 1'b1;
+					if (!done_q) hold = 1'b1;
 					if (ea_dn) begin
 						case (fmt)
 							3'd4:    res_g = {bv[31:16], f_dout[95:80]};
@@ -681,7 +611,7 @@ always_comb begin
 					xaddr = eav ? eaa : 32'd0; xcommit = 1'b1;
 				end
 				else if (go && (f_excreq || fx_q)) ;   // pending: the instruction completes
-				else if (!(go && (f_accepted || f_done || f_pdone))) hold_g = 1'b1;
+				else if (!(go && (f_accepted || f_done || f_pdone))) hold = 1'b1;
 			end
 			FC_GET: res_g = (imm[1:0] == 2'd1) ? get_q[63:32] : get_q[31:0];
 			FC_END: begin
@@ -693,12 +623,12 @@ always_comb begin
 			FC_CRR: begin
 				res_g = f_crrd;
 				dkill = !cr_slots[imm[1:0]];
-				if (!crr_wait) hold_g = 1'b1;
+				if (!crr_wait) hold = 1'b1;
 			end
 			FC_LIST: res_g = (ea_pd) ? -{25'd0, l_bytes} : {25'd0, l_bytes};
 			FC_MVR: begin
 				res_g = mv_rev ? f_fmrd[31:0] : f_fmrd[95:64];
-				if (!mvr_wait) hold_g = 1'b1;
+				if (!mvr_wait) hold = 1'b1;
 			end
 			FC_COND, FC_DBCC: begin
 				logic [5:0] pred;
@@ -711,16 +641,16 @@ always_comb begin
 				else if (sub == FC_DBCC) begin
 					res_g = {bv[31:16], bv[15:0] - 16'd1};
 					dkill = c;
-					taken_g = !c && (bv[15:0] != 16'd0);
+					taken = !c && (bv[15:0] != 16'd0);
 				end
-				else if (is_bcc) taken_g = c;
+				else if (is_bcc) taken = c;
 				else if (is_ftrap) begin
 					if (c) begin xvec = VEC_TRAPCC; xfmt = 4'd2; xnext = 1'b1; end
 				end
 				else res_g = {bv[31:8], {8{c}}};      // FScc
 			end
 			FC_SV0: begin
-				if (bg) hold_g = 1'b1;
+				if (bg) hold = 1'b1;
 				else if (pend && !s_unimp) begin
 					// frameless fallback: an earlier FSAVE already took the
 					// pending exception's frame
@@ -732,7 +662,7 @@ always_comb begin
 			              (sv_kind == 2'd2) ? unimp_word(imm[6:2]) :
 			              (sv_kind == 2'd1) ? IDLE_HDR : 32'd0;
 			FC_RS0: begin
-				if (bg) hold_g = 1'b1;
+				if (bg) hold = 1'b1;
 				res_g = {25'd0, kbytes(rs_kind_of(av))};
 				// an unknown frame is a format error at the FRESTORE
 				if (!rs_ok) xvec = VEC_FMTERR;
@@ -742,53 +672,19 @@ always_comb begin
 	end
 end
 
-// synthesis translate_off
-integer hold_checks = 0;
-always @(posedge clk) if (nreset) begin
- if (hold !== hold_g || (ex_v && hold_sub !== hold_decode(sub)))
-  $fatal(1, "FAIL: FPU hold predecode differs from original priority expression");
- if (ex_v) hold_checks <= hold_checks + 1;
-end
-final $display("TIMING_FP_HOLD: checked=%0d", hold_checks);
-// synthesis translate_on
-
-// Branch data, like result data, is consumed only as EX advances.
-// Hold and exception qualification remain in the backend. In particular,
-// BSUN suppresses early redirect through ex_xvec, rather than serially
-// suppressing taken and then traversing the branch decision again.
-wire branch_bcc = (opw_q[15:7] == 9'b1111_0010_1);
-wire branch_cond = fp_cond(branch_bcc ? opw_q[5:0] : ext_q[5:0], f_cc);
-assign taken = (sub == FC_DBCC) ? (!branch_cond && bv[15:0] != 16'd0) :
-               (sub == FC_COND && branch_bcc && branch_cond);
-// synthesis translate_off
-integer branch_checks=0,branch_ops=0,branch_true=0,branch_bsun=0;
-always @(posedge clk)if(nreset && ex_v && adv && xvec == 8'd0)begin
- if(taken !== taken_g)
-  $fatal(1,"FAIL: consumed FPU branch differs from original gated decision");
- branch_checks<=branch_checks+1;
- if(sub==FC_COND || sub==FC_DBCC)branch_ops<=branch_ops+1;
- if(taken)branch_true<=branch_true+1;
-end
-always @(posedge clk)if(nreset && ex_v && adv && xvec==VEC_BSUN && taken)branch_bsun<=branch_bsun+1;
-final $display("TIMING_FP_BRANCH: checked=%0d branch_ops=%0d taken=%0d bsun_suppressed=%0d",branch_checks,branch_ops,branch_true,branch_bsun);
-// synthesis translate_on
-
 // the result, by the sub-operation only: EX takes it when the uop
 // completes, so it need not wait for the hold's conditions (ex_v, safe,
 // the pipeline): those stay off the result's path to the register file
-// Every result-producing sub-operation differs from FC_CHK. Its opword
-// and extension therefore come from the latched words; using them directly
-// removes the current sub -> CHK word mux -> format decode from the result.
 always_comb begin
 	res = 32'd0;
 	case (sub)
-		FC_DISP: if (ext_q[15:13] == 3'b011) begin
-			if (opw_q[5:3] == 3'd0) case (ext_q[12:10])
+		FC_DISP: if (ocl == 3'b011) begin
+			if (ea_dn) case (fmt)
 				3'd4:    res = {bv[31:16], f_dout[95:80]};
 				3'd6:    res = {bv[31:8], f_dout[95:88]};
 				default: res = f_dout[95:64];
 			endcase
-			else case (ext_q[12:10])
+			else case (fmt)
 				3'd4:    res = {16'd0, f_dout[95:80]};
 				3'd6:    res = {24'd0, f_dout[95:88]};
 				default: res = f_dout[95:64];
@@ -799,8 +695,8 @@ always_comb begin
 		FC_LIST: res = ext_q[11] ? lst_dyn(opw_q, av[7:0]) : lst_q;
 		FC_MVR:  res = mv_rev ? f_fmrd[31:0] : f_fmrd[95:64];
 		FC_DBCC: res = {bv[31:16], bv[15:0] - 16'd1};
-		FC_COND: res = {bv[31:8], {8{fp_cond((opw_q[15:7] == 9'b1111_0010_1) ? opw_q[5:0] : ext_q[5:0], f_cc)}}};   // FScc
-		FC_SV0:  res = (opw_q[5:3] == 3'd4) ? -{25'd0, kbytes(sv_now)} : {25'd0, kbytes(sv_now)};
+		FC_COND: res = {bv[31:8], {8{fp_cond(is_bcc ? opw[5:0] : ext[5:0], f_cc)}}};   // FScc
+		FC_SV0:  res = ea_pd ? -{25'd0, kbytes(sv_now)} : {25'd0, kbytes(sv_now)};
 		FC_SVW:  res = (sv_kind == 2'd3) ? busy_word(imm[6:2]) :
 		               (sv_kind == 2'd2) ? unimp_word(imm[6:2]) :
 		               (sv_kind == 2'd1) ? IDLE_HDR : 32'd0;
@@ -808,40 +704,6 @@ always_comb begin
 		default: ;
 	endcase
 end
-// synthesis translate_off
-logic [31:0] res_reference;
-always_comb begin
-	res_reference = 32'd0;
-	case (sub)
-		FC_DISP: if (ocl == 3'b011) begin
-			if (ea_dn) case (fmt)
-				3'd4:    res_reference = {bv[31:16], f_dout[95:80]};
-				3'd6:    res_reference = {bv[31:8], f_dout[95:88]};
-				default: res_reference = f_dout[95:64];
-			endcase
-			else case (fmt)
-				3'd4:    res_reference = {16'd0, f_dout[95:80]};
-				3'd6:    res_reference = {24'd0, f_dout[95:88]};
-				default: res_reference = f_dout[95:64];
-			endcase
-		end
-		FC_GET:  res_reference = (imm[1:0] == 2'd1) ? get_q[63:32] : get_q[31:0];
-		FC_CRR:  res_reference = f_crrd;
-		FC_LIST: res_reference = ext_q[11] ? lst_dyn(opw_q, av[7:0]) : lst_q;
-		FC_MVR:  res_reference = mv_rev ? f_fmrd[31:0] : f_fmrd[95:64];
-		FC_DBCC: res_reference = {bv[31:16], bv[15:0] - 16'd1};
-		FC_COND: res_reference = {bv[31:8], {8{fp_cond(is_bcc ? opw[5:0] : ext[5:0], f_cc)}}};   // FScc
-		FC_SV0:  res_reference = ea_pd ? -{25'd0, kbytes(sv_now)} : {25'd0, kbytes(sv_now)};
-		FC_SVW:  res_reference = (sv_kind == 2'd3) ? busy_word(imm[6:2]) :
-		               (sv_kind == 2'd2) ? unimp_word(imm[6:2]) :
-		               (sv_kind == 2'd1) ? IDLE_HDR : 32'd0;
-		FC_RS0:  res_reference = {25'd0, kbytes(rs_kind_of(av))};
-		default: ;
-	endcase
-end
-always @(posedge clk)if(nreset && res !== res_reference)
- $fatal(1,"FAIL: latched-word FPU result differs from original CHK-selected words");
-// synthesis translate_on
 // synthesis translate_off
 always_ff @(posedge clk)
 	if (nreset && ex_v && res_g != res && res_g != 32'd0) begin

@@ -1,3 +1,10 @@
+# Current Quadra import
+
+This directory now uses upstream `faster` eed15a0 (Ranzbak dual issue plus
+Minimig fixes). See [UPSTREAM_QUADRA.md](UPSTREAM_QUADRA.md) for the exact
+source and local patches. The following notes describe the previous
+scalar NeXT import retained in this repository's history.
+
 # AP68040 in this repository
 
 This directory is the AP68040 `faster` core, vendored from

@@ -121,6 +121,7 @@ wire cpu_bclk_en = 1'b1;
 ap68040 #(
 	.FPU_REVISION(8'h41),
 	.FPU_PIPE(0), .LOOP_PRED(0), .EARLY_RES(0), .DC1_ATC(0), .SKID(0), .DIV_STEPS(2),
+	.DUAL(1), .BTIC(1), .S1_CLASSES(3'b011),
 	// only RAM ($0-$3FFFFFFF) and the ROM window ($4xxxxxxx) are cacheable:
 	// everything else is a device, never read speculatively
 	.PA_IO_SERIAL(1),

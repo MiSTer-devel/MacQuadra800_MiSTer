@@ -134,14 +134,11 @@ always_comb begin
 	// (its subtraction in the pre-cycle too, off the funnel's path)
 	nxl   = (sh_nx == 6'd0) ? 7'd0 : ({1'b0, nbits} + 7'd1 - {1'b0, sh_nx});
 	sh_nx = nx_q;
-	// ASR extends at the operand size; rotates construct that period;
-	// left shifts only consume bits below the size. These inputs can use
-	// b directly. LSR still needs bm to zero bits above the operand size.
 	// the right funnel's input and count.  A rotate's input repeats its
 	// period P from bit 0 ({P, P}): shifted right by k (< the period), its
 	// low bits are P rotated right by k
 	if (shk[2]) begin               // ASR
-		rv = {{34{b_msb}}, b, 1'b0};
+		rv = {{34{b_msb}}, bm, 1'b0};
 		case (sz)
 			SZ_B:    rv[65:9]  = {57{b_msb}};
 			SZ_W:    rv[65:17] = {49{b_msb}};
@@ -151,9 +148,9 @@ always_comb begin
 	end
 	else if (shk[4] || shk[5]) begin    // ROL, ROR
 		case (sz)
-			SZ_B:    rv = {50'd0, b[7:0], b[7:0]};
-			SZ_W:    rv = {34'd0, b[15:0], b[15:0]};
-			default: rv = {2'd0, b, bm};
+			SZ_B:    rv = {50'd0, bm[7:0], bm[7:0]};
+			SZ_W:    rv = {34'd0, bm[15:0], bm[15:0]};
+			default: rv = {2'd0, bm, bm};
 		endcase
 		// ROL by k: the doubled operand shifted right by size - 1 - k
 		// (the count's complement within the size: no subtraction) and
@@ -162,9 +159,9 @@ always_comb begin
 	end
 	else if (shk[6] || shk[7]) begin    // ROXL, ROXR
 		case (sz)
-			SZ_B:    rv = {48'd0, f_x, b[7:0], f_x, b[7:0]};
-			SZ_W:    rv = {32'd0, f_x, b[15:0], f_x, b[15:0]};
-			default: rv = {f_x, b, f_x, bm};
+			SZ_B:    rv = {48'd0, f_x, bm[7:0], f_x, bm[7:0]};
+			SZ_W:    rv = {32'd0, f_x, bm[15:0], f_x, bm[15:0]};
+			default: rv = {f_x, bm, f_x, bm};
 		endcase
 		ra = shk[7] ? {1'b0, sh_nx} : nxl_q;
 	end
@@ -173,17 +170,14 @@ always_comb begin
 		// zeros, shifted right by 31 - n (the count inverted, no
 		// subtraction), is the operand shifted left by n; n >= 32
 		// shifts everything out (C of a long shifted by 32: below)
-		rv = {3'd0, b, 31'd0};
+		rv = {3'd0, bm, 31'd0};
 		ra = sh_n[5] ? 7'd127 : {2'd0, ~sh_n[4:0]};
 	end
 	else begin                          // LSR
 		rv = {33'd0, bm, 1'b0};
 		ra = {1'b0, sh_n};
 	end
-	// A single arithmetic funnel suffices. Logical shifts have a zero
-	// sign bit. ROX can put X there, but its result/carry never select
-	// above bit 65, so arithmetic fill cannot affect an observed bit.
-	ro = 66'($signed(rv) >>> ra);
+	ro = shk[2] ? 66'($signed(rv) >>> ra) : (rv >> ra);
 	lo = ro;                      // (ASL, LSL: the operand shifted left by n)
 	// ASL: V when the bits shifted out and the new sign bit are not all
 	// equal, i.e. the top count+1 bits of the operand (at the size) differ

@@ -679,11 +679,7 @@ wire [66:0] norm_shifted =
 // one right shifter with sticky for F_SHR and the pipeline's P2 alignment
 // (P2 holds an operation only while the state machine is idle)
 wire        shr_fsm = (fst == F_SHR);
-// With PIPE=0 only F_SHR consumes this result: keep the state decode off
-// the input of the barrel shifter and sticky reduction. PIPE=1 retains
-// the shared shifter's original FSM/pipeline arbitration.
-wire        shr_pipe = PIPE && !shr_fsm;
-wire [66:0] shr_out = shr_sticky(shr_pipe ? {p2_sm, 3'd0} : sh_v, shr_pipe ? p2_sh : sh_cnt);
+wire [66:0] shr_out = shr_sticky(shr_fsm ? sh_v : {p2_sm, 3'd0}, shr_fsm ? sh_cnt : p2_sh);
 // one incrementer for the roundings of the shifted value (sh_v[66:3]):
 // the integer store's at bit 0, a denormal single's or double's store
 // (F_PACKS) and the underflow rounding (F_UNFL) at the precision's last
