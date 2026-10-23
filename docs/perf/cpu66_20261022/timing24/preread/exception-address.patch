@@ -1,0 +1,86 @@
+--- a/rtl/ap68040_faster/rtl/ap68040_backend.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_backend.sv
+@@ -1391,9 +1391,18 @@
+ wire        ex_ubr  = (ex_u.br == BR_IMM) || (ex_u.br == BR_EA) ||
+                       (ex_u.br == BR_A) || (ex_u.br == BR_B) || (ex_u.op == OP_RTE);
+ wire [31:0] ex_otgt = (!ex_bdb && ex_ubr) ? ex_target : ex_u.target;
+-wire        ex_odd  = ex_br && (ex_bdb ? ex_u.target[0] :
++// FP control transfers are conditional FBcc/FDBcc; their target and
++// decision come directly from the FPU branch data. This keeps a frame
++// header's format exception out of the unrelated odd-target address mux.
++wire ex_odd = ex_br && (ex_is_fp ? (fp_taken && ex_u.target[0]) :
++                       ex_bdb ? ex_u.target[0] :
++                       ex_ubr ? ex_target[0] :
++                       ((ex_u.op == OP_FPU) && fp_taken && ex_u.target[0]));
++// synthesis translate_off
++wire        ex_odd_reference = ex_br && (ex_bdb ? ex_u.target[0] :
+                                 ex_ubr ? ex_target[0] :
+                                 ((ex_u.op == OP_FPU) && fp_taken && ex_u.target[0]));
++// synthesis translate_on
+ logic [31:0] ex_odd_pc;
+ always_comb begin
+ 	ex_odd_pc = ex_u.pc;
+@@ -1999,7 +2008,9 @@
+ 				wb_exc_addr <= {ex_otgt[31:1], 1'b0};
+ 				wb_exc_ssw  <= 16'd0;
+ 			end
+-			else if (ex_is_fp && ex_xvec != 8'd0) begin
++			else if (ex_is_fp) begin
++				// The FPU address is PC when it has no special frame address.
++				// Selecting it need not wait for the exception-vector decision.
+ 				// FPU exceptions bring their frame format, PC and address
+ 				wb_exc      <= ex_xvec;
+ 				wb_exc_addr <= fp_xaddr;
+@@ -2453,4 +2464,52 @@
+ 	end
+ end
+ 
++
++// synthesis translate_off
++logic [31:0] wb_addr_reference;
++logic wb_addr_reference_valid=0;
++integer wb_addr_checks=0,fp_odd_checks=0,fp_restore_advances=0;
++always @(posedge clk)begin
++ if(nreset && wb_addr_reference_valid)begin
++  if(wb_exc_addr !== wb_addr_reference)
++   $fatal(1,"FAIL: WB exception address %h expected %h",wb_exc_addr,wb_addr_reference);
++  wb_addr_checks<=wb_addr_checks+1;
++ end
++ if(nreset && ex_v)begin
++  if(ex_odd !== ex_odd_reference)
++   $fatal(1,"FAIL: simplified FP odd-target check differs");
++  if(ex_is_fp)begin
++   if(ex_u.br!=BR_NONE && ex_u.br!=BR_COND)
++    $fatal(1,"FAIL: FPU uop uses an unconditional integer branch");
++   fp_odd_checks<=fp_odd_checks+1;
++   if(adv_ex && ex_u.cond==4'd13)fp_restore_advances<=fp_restore_advances+1;
++  end
++ end
++ if(!nreset)wb_addr_reference_valid<=0;
++ else begin
++  if(adv_ex)begin
++   wb_addr_reference_valid<=1;
++   if(ex_u.exc==EXC_SNR)wb_addr_reference<=ex_u.pc;
++   else if(ex_u.exc!=8'd0)begin
++    if(ex_u.exc==EXC_IFS || ex_u.exc==EXC_IFSA || ex_u.exc==EXC_IFB || ex_u.exc==EXC_IFA)
++     wb_addr_reference<=ex_u.target;
++    else wb_addr_reference<=ex_u.pc;
++   end
++   else if(ex_fault)wb_addr_reference<=ex_faddr;
++   else if(ex_xvec==8'd0 && ex_odd_reference)wb_addr_reference<={ex_otgt[31:1],1'b0};
++   else if(ex_is_fp && ex_xvec!=8'd0)wb_addr_reference<=fp_xaddr;
++   else wb_addr_reference<=ex_u.pc;
++  end
++  // The later WB faults override EX's candidate in the original order.
++  if(wb_v && wb_st && dm_st_rdy && dm_st_fault && wb_exc==8'd0)begin
++   wb_addr_reference<=dm_st_faddr;wb_addr_reference_valid<=1;
++  end
++  if(wb_v && wb_mt && mt_done && mt_fault && wb_exc==8'd0)begin
++   wb_addr_reference<=mt_faddr;wb_addr_reference_valid<=1;
++  end
++ end
++end
++final $display("TIMING_EXCEPTION_ADDRESS: checked=%0d fp_odd=%0d restore=%0d",wb_addr_checks,fp_odd_checks,fp_restore_advances);
++// synthesis translate_on
++
+ endmodule
