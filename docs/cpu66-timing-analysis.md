@@ -1,8 +1,19 @@
 # Closing timing at 66 MHz
 
-The first 66 MHz build boots Mac OS 8.1, completes Speedometer Mix/PR and shuts down, with 34,213 ALMs. The exact source, RBF and evidence are preserved on `pipelined-040-66mhz` at `3077255`. Analysis and subsequent optimization use `pipelined-040-66mhz-timing`; no CPU RTL has been changed for this analysis.
+The first 66 MHz build boots Mac OS 8.1, completes Speedometer Mix/PR and shuts down, with 34,213 ALMs. The exact source, RBF and evidence are preserved on `pipelined-040-66mhz` at `3077255`. Subsequent optimization uses `pipelined-040-66mhz-timing`; the original checkpoint remains frozen.
 
-The first two candidates are now being measured in [timing experiment 1](cpu66-timing-experiment1.md), with functional regression results recorded there.
+Measured progress at the unchanged **66/33/99 MHz** and seed 38:
+
+| Candidate | ALMs | CPU setup | CPU TNS | Mac OS 8.1 |
+|---|---:|---:|---:|---|
+| Original CPU66 | 34,213 | −2.391 ns | −1175.353 ns | Boot, Mix/PR, shutdown pass |
+| [FIFO + redirect](cpu66-timing-experiment1.md) | 34,146 | −1.681 ns | −361.024 ns | Boot, Mix/PR, shutdown pass |
+| [Tag RAM specialization](cpu66-timing-experiment2.md) | **33,351** | **−1.604 ns** | **−229.615 ns** | Boot, Mix/PR, shutdown pass |
+| [EX classes + FPU shifter](cpu66-timing-experiment3.md) | 33,657 | −2.082 ns | −567.544 ns | Not deployed |
+
+The tag RAM candidate remains best. It is only 151 ALMs above the frozen minimal 33 MHz core. The third candidate regressed globally despite improving some endpoints; its worst path is now FPU sub-operation decode → hold → EX advance → operand forwarding. A [fourth experiment](cpu66-timing-experiment4.md) predecodes eight FPU hold selectors and compares normal versus speed synthesis in separate pinned directories. Both sequential and pipelined FPU CPU suites pass; fits are pending. No new pipeline stage or timing exception has been introduced.
+
+A/UX on the tag RAM candidate has remained at a gray startup screen with no I/O progress; it is **not qualified at 66 MHz**. The test uses a verified clone. This observation alone does not identify a CPU timing or PRAM/boot-selection cause.
 
 **66 MHz looks plausible, but this fit needs several changes.** The worst CPU setup slack is −2.391 ns, with a reported Fmax of 57.01 MHz. Under this fit's clock skew and uncertainty, the worst data path needs to shrink from 16.856 ns to about 14.465 ns (14.2%). The worst paths are control and routing problems, with a separate ALU/forwarding path close behind. Fixing just the highest-ranked endpoint will not close timing.
 
