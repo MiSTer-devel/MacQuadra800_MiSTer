@@ -12,7 +12,7 @@ A focused simulation runs the **exact extracted guest bytes**, through `quadra_c
 | 66/33 MHz | 0 (existing) | Counter wraps to zero; still at `0x55d14` after 1,000,000 bus clocks |
 | 66/33 MHz | 4 CPU clocks | Returns; calibration values 16415 / 781 |
 
-The four-clock minimum is already implemented and covered by `t_dbccfloor` in the CPU. It applies only to DBcc following a taken DBcc; it does not throttle other instruction classes. Applying that existing input to the 2× integration is the proposed compatibility fix. Full A/UX hardware boot/shutdown and the resulting fit remain required; this isolated reproduction does not qualify the whole guest or prove that every hardware problem is resolved.
+The four-clock minimum is already implemented and covered by `t_dbccfloor` in the CPU. It applies only to DBcc following a taken DBcc; it does not throttle other instruction classes. Applying that existing input to the 2× integration is the proposed compatibility fix. A further [185 CPU cases and four adapter tests](floor4-regression/validation.json) pass with the proposed setting (the 1× adapter remains at floor zero). Full A/UX hardware boot/shutdown and the resulting fit remain required; this isolated reproduction does not qualify the whole guest or prove that every hardware problem is resolved.
 
 Reproduce from an unmounted raw copy of the user's image:
 
