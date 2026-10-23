@@ -879,14 +879,17 @@ always_ff @(posedge clk) begin
 		// stall, a late signal), which selects between them last
 		if (uq_pop && uq_n != 2'd0) begin
 			uq0  <= (emit && uq_n == 2'd1) ? nu : uq1;
-			uq1  <= (emit && uq_n == 2'd2) ? nu : uq1;
 			uq_n <= emit ? uq_n : uq_n - 2'd1;
 		end
 		else begin
 			uq0  <= (emit && uq_n == 2'd0) ? nu : uq0;
-			uq1  <= (emit && uq_n == 2'd1) ? nu : uq1;
 			uq_n <= emit ? uq_n + 2'd1 : uq_n;
 		end
+		// room_out prevents an emit at occupancy two. An emit at zero,
+		// or while popping the only entry, leaves slot 1 invalid, so its
+		// value is free to change. Keep the late backend pop/stall off
+		// this wide register's write enable.
+		if (emit) uq1 <= nu;
 
 		if (emit) begin
 			first <= 1'b0;
