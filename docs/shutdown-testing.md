@@ -45,6 +45,6 @@ Validation of the helper: existing batch tokens retain their wire format; intera
 
 `pipelined-040-min` keeps the AP68040 integration and correctness fixes. `pipelined-040` carries performance experiments, with speed, area, and timing measured for each. Test-tool corrections and their evidence belong on both branches and add no FPGA logic. The higher-area options build is a measured variant; its enabled parameters are not the defaults of the minimal branch.
 
-A/UX 3.1 boot and shutdown remain unqualified on these bitstreams. The regression needs the installed guest image and the 32 MB setting.
+A/UX 3.1 now also passes boot to multiuser Finder, responsive CommandShell, and `shutdown -h now` on both existing bitstreams at 32 MB. The supplied 1 GB image was copied to both MiSTers; the [A/UX test report](aux-testing.md) records its identity, screenshots, and shutdown observations (+157 s minimal, +134 s options; screenshot bounds).
 
-The available Mac OS disks and the search for the missing A/UX image are recorded in the [disk-image inventory](mac-test-images.md).
+The available Mac OS and A/UX disks are recorded in the [disk-image inventory](mac-test-images.md).
