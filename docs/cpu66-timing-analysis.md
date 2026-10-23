@@ -2,6 +2,8 @@
 
 The first 66 MHz build boots Mac OS 8.1, completes Speedometer Mix/PR and shuts down, with 34,213 ALMs. The exact source, RBF and evidence are preserved on `pipelined-040-66mhz` at `3077255`. Analysis and subsequent optimization use `pipelined-040-66mhz-timing`; no CPU RTL has been changed for this analysis.
 
+The first two candidates are now being measured in [timing experiment 1](cpu66-timing-experiment1.md), with functional regression results recorded there.
+
 **66 MHz looks plausible, but this fit needs several changes.** The worst CPU setup slack is −2.391 ns, with a reported Fmax of 57.01 MHz. Under this fit's clock skew and uncertainty, the worst data path needs to shrink from 16.856 ns to about 14.465 ns (14.2%). The worst paths are control and routing problems, with a separate ALU/forwarding path close behind. Fixing just the highest-ranked endpoint will not close timing.
 
 ## What the fitted paths show
