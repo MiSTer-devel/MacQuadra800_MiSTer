@@ -16,6 +16,8 @@ Measured progress at the unchanged **66/33/99 MHz** and seed 38:
 | [Circular queue](cpu66-timing-experiment6.md) | 33,286 | −2.121 ns | −583.940 ns | Not deployed |
 | [Registered cache selector](cpu66-timing-experiment8.md) | 33,323 | −1.648 ns | −397.008 ns | Not deployed |
 | [Operand source flags](cpu66-timing-experiment9.md) | 33,202 | −2.281 ns | −630.852 ns | Not deployed |
+| [Parallel stalls](cpu66-timing-experiment10.md) | 33,151 | −1.987 ns | −370.294 ns | Not deployed |
+| [Parallel stalls + circular queue](cpu66-timing-experiment11.md) | 33,280 | −1.898 ns | **−184.885 ns** | Not deployed |
 
 The smallest fit is 102 ALMs below the frozen minimal 33 MHz core. None closes 66 MHz timing. Experiment 8 fixes the cache tag/way paths without an extra cycle; its worst path is now a late write-back store hold through the serial stall chain into the FIFO immediate field. Experiment 9 regressed timing and will be removed. [Experiment 7](cpu66-timing-experiment7.md), an added cache lookup cycle, was rejected before fitting because split-store tests found a livelock; the tests were retained.
 
@@ -63,3 +65,5 @@ Start with the FIFO and redirect capture changes separately, then together if ea
 Keep 34,213 ALMs as the reference for this experiment, and 33,200 as the frozen minimal reference. Favor changes with no added wide state first. There is no measured promise that these two small changes alone reach 66 MHz: the cache and ALU families would still fail if their paths were unchanged. Do not add false-path or multicycle exceptions to hide a real single-cycle CPU path.
 
 A 55 MHz CPU with the bus still at 33 MHz is not a drop-in fallback for the current 2:1 bus-enable circuit. Changing the ratio requires another clock/enable and related-clock analysis; scaling the bus as well changes peripheral timing. Keep that as a separate clock-mode experiment if structural timing work cannot retain the area advantage.
+
+Experiments 10/11 are complete. The circular queue plus parallel stalls has the lowest CPU TNS measured so far, with only 80 ALMs above the frozen minimal core, but its worst slack still fails. [Experiment 12](cpu66-timing-experiment12.md) applies the independently committed A/UX compatibility fix; [experiment 13](cpu66-timing-experiment13.md) removes a provably overwritten AG bypass exposed by experiment 11's worst path. Both retain 66/33/99 and the existing pipeline stages.

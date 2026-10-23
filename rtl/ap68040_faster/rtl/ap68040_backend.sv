@@ -465,21 +465,22 @@ logic        exw_v;           // EX writes the front file this cycle
 logic  [4:0] exw_reg;
 logic [31:0] exw_val;
 
-function automatic logic [31:0] opnd(input logic [1:0] src, input logic [4:0] r,
-                                     input logic [31:0] rv,
-                                     input logic [31:0] imm, input logic sxw);
-	logic [31:0] v;
-	case (src)
-		OS_REG:  v = (exw_v && exw_reg == r) ? exw_val : rv;
-		OS_IMM:  v = imm;
-		default: v = 32'd0;
-	endcase
-	opnd = v;
+// EX forwarding into captured operands is assigned last at AG -> DC1.
+// Its short exw_fw condition includes every exw_v case, so a bypass here
+// would always be overwritten and would pull late exception/write controls
+// through a second operand mux for no observable value.
+function automatic logic [31:0] opnd(input logic [1:0] src,
+                                     input logic [31:0] rv, imm);
+ case (src)
+  OS_REG:  opnd = rv;
+  OS_IMM:  opnd = imm;
+  default: opnd = 32'd0;
+ endcase
 endfunction
 
-wire [31:0] ag_a = ag_u.a_upd ? ag_updv : opnd(ag_u.a_src, ag_u.a_reg, rrd[3], ag_u.imm, ag_u.a_sxw);
+wire [31:0] ag_a = ag_u.a_upd ? ag_updv : opnd(ag_u.a_src, rrd[3], ag_u.imm);
 wire [31:0] ag_immb = {{15{ag_u.imm_b[16]}}, ag_u.imm_b};   // the B immediate extended
-wire [31:0] ag_b = ag_u.b_upd ? ag_updv : opnd(ag_u.b_src, ag_u.b_reg, rrd[4], ag_immb, 1'b0);
+wire [31:0] ag_b = ag_u.b_upd ? ag_updv : opnd(ag_u.b_src, rrd[4], ag_immb);
 
 // AG's early result: MOVE, ADD, SUB, AND, OR, EOR and LSL/ASL by an
 // immediate count, from register or immediate operands whose values are
