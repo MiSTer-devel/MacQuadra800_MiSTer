@@ -124,3 +124,17 @@ memory bits restored to RAM. This is a compiler mapping comparison;
 CPU behavior, clocks and video architecture are unchanged. A matching
 66 MHz R3 build is pinned separately. Main's recipe is frozen while the
 isolated flows run.
+
+## First timing-passing33 MHz result
+
+R3 seed38 fits successfully at34,643ALMs (82.66%),29,927registers,
+497/553M10Ks and38DSPs. All setup and hold checks pass: CPU/bus+1.374ns,
+SDRAM+0.099ns,HDMI+0.407ns andminimumhold+0.167ns. All8 additional path
+reports are preserved under33mhz/r3/fit-s38. The exact experimental RBF
+is preserved under test-builds/pipelined-040-dual-20261023/33mhz before
+hardware qualification; MD5467a90ca4793e68cf39981a7fea9f8ea.
+
+The whole-core area exceeds the minimal33MHz checkpoint by1,443ALMs
+(4.35% relative). The quoted26kALM context was not established by this
+measurement. Mac boot/Speedometer and the matching66MHz result remain
+pending at this checkpoint.
