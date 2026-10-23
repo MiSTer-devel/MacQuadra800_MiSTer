@@ -16,6 +16,12 @@ foreach {label pattern} {
 } {
  set regs [get_registers $pattern]
  set count [get_collection_size $regs]
+ if {$count == 0 && $label eq "cache_tag"} {
+  # Dedicated M10Ks pack the old qa_r output into address registers.
+  set pattern {*|dmu|*tag|*address_reg*}
+  set regs [get_registers $pattern]
+  set count [get_collection_size $regs]
+ }
  puts "CPU66_TARGET $label registers=$count pattern=$pattern"
  if {$count == 0} {error "No registers found for $label"}
  report_timing -setup -from_clock $cpu -to $regs -npaths 3 -detail full_path -file scratch/target_${label}_${tag}.txt
