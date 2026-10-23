@@ -119,9 +119,8 @@ describes this budget-driven RAM-to-logic fallback; the actual fit still
 must verify physical RAM availability.
 
 The 33 MHz R3 synthesis has29,315 registers and3,722,339 block-memory bits,
-compared with49,811 registers and3,701,859 bits in R2. The20,480-bit
-coefficient-memory difference accounts for the20,496-register reduction
-(including16 auxiliary registers). This is a compiler mapping comparison;
+compared with49,811 registers and3,701,859 bits in R2. The20,496-register reduction closely matches the20,480 coefficient
+memory bits restored to RAM. This is a compiler mapping comparison;
 CPU behavior, clocks and video architecture are unchanged. A matching
 66 MHz R3 build is pinned separately. Main's recipe is frozen while the
 isolated flows run.
