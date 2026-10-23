@@ -1,0 +1,5 @@
+# CPU66 timing experiment 19: mask a power-of-two queue pointer
+
+The predecode ring wraps a pointer with a compare and subtract. QN is8, so its correct wrap is the low three bits. The generic expression preserves an unreachable fourth pointer bit through a feedback register, widening the RAM index and placing extra arithmetic before the late head read. For power-of-two sizes this prototype uses `x & (QN-1)`; the original generic expression remains for other sizes. For every real ring operation the old and new values agree. The original helper assumes inputs below2*QN; the masked form also wraps larger unused inputs correctly.
+
+This candidate is experiment18 plus [pointer-wrap.patch](perf/cpu66_20261022/timing19/pointer-wrap.patch). It stays in scratch while the preceding fits run. All185 CPU cases and four adapters pass with exact experiment18 cycles; the original fetch-queue and predecode-head observers remain enabled. No new register, cycle or timing exception is added. [Validation](perf/cpu66_20261022/timing19/validation.json). No fit or hardware result is claimed yet.

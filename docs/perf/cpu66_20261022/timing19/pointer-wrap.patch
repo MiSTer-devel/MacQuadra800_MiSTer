@@ -1,0 +1,8 @@
+--- a/rtl/ap68040_faster/rtl/ap68040_fetch.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_fetch.sv
+@@ -181 +181,4 @@
+-	qwrap = (x >= 5'(QN)) ? 4'(x - 5'(QN)) : x[3:0];
++	// A power-of-two queue wraps by masking. Besides the compare/subtract,
++	// this removes unreachable high pointer bits from the RAM read index.
++	if ((QN & (QN - 1)) == 0) qwrap = 4'(x & 5'(QN - 1));
++	else qwrap = (x >= 5'(QN)) ? 4'(x - 5'(QN)) : x[3:0];
