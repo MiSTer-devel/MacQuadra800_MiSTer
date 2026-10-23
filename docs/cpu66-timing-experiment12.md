@@ -6,4 +6,4 @@ This fits experiment 11 with the independently committed integration fix `f8aa78
 
 66/33/99 MHz, seed 38 and balanced synthesis remain fixed. Fit complete: **33,335 ALMs**, CPU setup **-1.667 ns**, CPU TNS **-196.113 ns**. SDRAM +0.366 ns, bus +0.830 ns, HDMI +0.329 ns and minimum hold +0.130 ns pass. [Reports and RBF hashes](perf/cpu66_20261022/timing12/fit/artifact.json). CPU timing still fails.
 
-The remaining worst path is EX condition bit 2 → FPU extension decode/result selection → forwarding → `dc1_a[26]`, 11 logic levels. The exact bitstream is undergoing A/UX hardware testing on the same clone and PRAM; no boot/shutdown PASS is claimed yet.
+The remaining worst path is EX condition bit 2 → FPU extension decode/result selection → forwarding → `dc1_a[26]`, 11 logic levels. The exact bitstream passes A/UX Unix Finder, responsive root-shell commands and clean shutdown on clone2 with Ethernet On, then again with Ethernet Off and unchanged PRAM. One earlier clone4 run stalled after partial UI and its cause remains unknown. [Hardware evidence and limits](perf/cpu66_20261022/timing12/aux/README.md). MacOS8.1 testing is in progress.

@@ -1,0 +1,11 @@
+# A/UX hardware check of the four-clock DBcc setting
+
+RBF MD5 `08612014fe6dfc822f33a031d3328a2b`, source `f8aa787`, 66/33/99 MHz, seed38, 32 MB RAM. The original disk images were preserved; all tests used disposable copies of the user's 1GB A/UX image.
+
+1. The first Ethernet Off run on the previously used `AUX_3_1_1GB_timing4.hda` clone stalled after a menu bar/watch appeared, with no Main I/O progress for over five minutes. [Evidence](first-off-clone4/aux-timing12-stall.json). Its specific cause is unknown; it is retained as a failed attempt.
+2. A diagnostic run enabled Ethernet so the existing retirement sampler could operate and used the other `AUX_3_1_1GB_cpu66.hda` clone, preserving the failed clone. Its `/unix` hash matched the extracted kernel. It passed **Unix Finder, root uname/date/df and clean shutdown**. The trace passes the original `SetUpTimeK` stop, runs kernel/SCSI code, and reaches normal `idle1%` (`stop #$2000` at0x548dc). [Result](debug-on/aux-timing12-debug-result.json), [180 samples](debug-on/aux-timing12-debug-pc-samples.json).
+3. After visually verified safe halt, the core was released to MENU and the create-only debug `MacQuadra800.CFG` was checked and deleted. The **same RBF, same clone and same PRAM** were booted with default Ethernet Off. It passed **Unix Finder, responsive root uname/date/df, advancing date and clean shutdown**. [Result](ethernet-off/aux-timing12-off-result.json). The final safe-halt capture bounds shutdown at176 seconds after Return; this is an observation bound, not an exact duration.
+
+The debug CFG was removed and no button remained held. The first numeric mouse-button payload was ignored by the remote; it was corrected to the required named `left_down`/`left_up` messages before opening the shell. No guest reset was used during either successful boot; both completed `shutdown -h now` before any core change.
+
+These successful runs support the [exact-byte calibration regression](../../aux-timek/README.md), but they do not establish repeated-boot reliability or explain the earlier failed clone4 run. CPU setup is still −1.667ns, so this remains an experimental bitstream rather than a timing-qualified release. MacOS8.1 qualification is separate.
