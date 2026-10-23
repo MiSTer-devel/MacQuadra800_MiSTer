@@ -589,9 +589,11 @@ end
 // EX
 //--------------------------------------------------------------------------
 // operand values entering EX: A or B may be the load data
-wire [31:0] ex_av0 = (ex_u.a_src == OS_MEM) ? ex_ld : ex_a;
+// Operand-source classification travels with ex_u, off the EX data path.
+logic ex_a_mem, ex_b_mem;
+wire [31:0] ex_av0 = ex_a_mem ? ex_ld : ex_a;
 wire [31:0] ex_av  = ex_u.a_sxw ? {{16{ex_av0[15]}}, ex_av0[15:0]} : ex_av0;
-wire [31:0] ex_bv  = (ex_u.b_src == OS_MEM) ? ex_ld : ex_b;
+wire [31:0] ex_bv  = ex_b_mem ? ex_ld : ex_b;
 
 logic [31:0] alu_res;
 logic  [4:0] alu_flags;
@@ -1782,6 +1784,8 @@ always_ff @(posedge clk) begin
 		//------------------------------------------------------------------
 		if (adv_dc2) begin
 			ex_u     <= dc2_u;
+			ex_a_mem <= (dc2_u.a_src == OS_MEM);
+			ex_b_mem <= (dc2_u.b_src == OS_MEM);
 			ex_is_md <= (dc2_u.op == OP_MUL) || (dc2_u.op == OP_DIV);
 			ex_slow  <= is_slow(dc2_u.op);
 			ex_npc   <= dc2_u.pc + {27'd0, dc2_u.ilen, 1'b0};

@@ -90,11 +90,13 @@ bind ap68040_backend cpu66_redirect_check timing_redirect_check (
 
 module cpu66_class_check (
  input logic clk, nreset, active,
- input logic is_md, is_fp, slow, expected_md, expected_fp, expected_slow
+ input logic is_md, is_fp, slow, expected_md, expected_fp, expected_slow,
+ input logic a_mem, b_mem, expected_a_mem, expected_b_mem
 );
  integer checked = 0;
  always @(posedge clk) if (nreset && active) begin
-  if ({is_md, is_fp, slow} !== {expected_md, expected_fp, expected_slow})
+  if ({is_md, is_fp, slow, a_mem, b_mem} !==
+      {expected_md, expected_fp, expected_slow, expected_a_mem, expected_b_mem})
    $fatal(1, "FAIL: registered EX classification differs from its opcode");
   checked <= checked + 1;
  end
@@ -105,5 +107,7 @@ bind ap68040_backend cpu66_class_check timing_class_check (
  .clk(clk), .nreset(nreset), .active(ex_v),
  .is_md(ex_is_md), .is_fp(ex_is_fp), .slow(ex_slow),
  .expected_md((ex_u.op == OP_MUL) || (ex_u.op == OP_DIV)),
- .expected_fp(ex_u.op == OP_FPU), .expected_slow(is_slow(ex_u.op))
+ .expected_fp(ex_u.op == OP_FPU), .expected_slow(is_slow(ex_u.op)),
+ .a_mem(ex_a_mem), .b_mem(ex_b_mem),
+ .expected_a_mem(ex_u.a_src == OS_MEM), .expected_b_mem(ex_u.b_src == OS_MEM)
 );
