@@ -6,4 +6,6 @@ This candidate uses `ext_q` and `opw_q` directly in the result block's DISP form
 
 A simulation-only copy of the entire original result expression is compared unconditionally on every active clock, including zero results and inactive EX cases. All **185 CPU cases and four adapters pass** with exactly matching cycle counts to the floor-four baseline. [Validation](perf/cpu66_20261022/timing14/validation.json).
 
-66/33/99 MHz, seed 38 and balanced synthesis remain fixed. Fitted results are pending. The existing four-clock DBcc integration setting remains enabled only for the 2× CPU.
+66/33/99 MHz, seed 38 and balanced synthesis remain fixed. Fit complete: **33,094 ALMs**, CPU setup **-1.660 ns**, CPU TNS **-318.086 ns**. SDRAM +0.540 ns, bus +1.083 ns, HDMI +0.709 ns and minimum hold +0.189 ns pass. [Reports and RBF hashes](perf/cpu66_20261022/timing14/fit/artifact.json). CPU timing still fails; this variant has not been deployed. The existing four-clock DBcc integration setting remains enabled only for the 2× CPU.
+
+The FPU word-selection path improved, but global worst slack remains −1.660 ns. The new worst path is a memory operand into FMOVEM's dynamic-list population count, byte-count arithmetic, result selection and forwarding into `dc1_b[8]`, 11 logic levels. This exposes a further combinational optimization: compute signed byte contributions for each nibble and combine them with one small sum.
