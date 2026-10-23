@@ -595,6 +595,27 @@ function automatic xres_t xlate(input logic [31:0] la, input logic s, input logi
 	xlate = x;
 endfunction
 
+// The engine's registered transparency selector, like DC1's m1_tp, keeps
+// TTR decoding and the translation-address mux off the cache-tag compare.
+logic st_tp;
+always_ff @(posedge clk)
+ st_tp <= ttr_hit(dtt0, st_la, st_fc2) || ttr_hit(dtt1, st_la, st_fc2) || !tc_e_n;
+function automatic xres_t engine_xlate(input logic [31:0] la, input logic s,
+ input logic wr, input logic alt, input logic hitv, input atce_t e,
+ input logic [21:0] t0, t1, t2, t3, input logic [3:0] valid);
+ xres_t x;
+ logic [21:0] tg;
+ logic [3:0] tag_hits;
+ x = xlate(la, s, wr, alt, hitv, e, t0, t1, t2, t3, valid);
+ tg = st_tp ? la[31:10] : {e.pa[19:1], tc_p ? la[12] : e.pa[0], la[11:10]};
+ tag_hits = {valid[3] && t3 == tg, valid[2] && t2 == tg,
+            valid[1] && t1 == tg, valid[0] && t0 == tg};
+ x.hit = x.ok && !x.flt && |tag_hits;
+ // Way is consumed only with hit. Avoid late permission gating here.
+ x.way = tag_hits[3] ? 2'd3 : tag_hits[2] ? 2'd2 : tag_hits[1] ? 2'd1 : 2'd0;
+ engine_xlate = x;
+endfunction
+
 // DC1
 wire        m1_wr  = (m1.mem == M_ST) || (m1.mem == M_RMW);
 // DC1's cache tag compare in parallel with the translation (the timing
@@ -1316,7 +1337,7 @@ always_ff @(posedge clk) begin
 		end
 		E_SP_2: begin
 			xres_t x;
-			x  = xlate({m2.r.a[31:4] + 28'd1, 4'd0}, m2.r.smode, (m2.r.mem != M_LD),
+			x  = engine_xlate(st_la, m2.r.smode, (m2.r.mem != M_LD),
 			           fc_tt(m2.r.fc) == TT_ALT, atc_hit, atc_e,
 			           tq_a[0], tq_a[1], tq_a[2], tq_a[3], lve_q);
 			// the second part's translation and lookup, registered (the
@@ -1340,7 +1361,7 @@ always_ff @(posedge clk) begin
 			xres_t x;
 			// (after a search: the ATC holds its result, a nonresident
 			// entry for a failed one)
-			x = xlate(e_va, m2.r.smode, (m2.r.mem != M_LD), fc_tt(m2.r.fc) == TT_ALT,
+			x = engine_xlate(e_va, m2.r.smode, (m2.r.mem != M_LD), fc_tt(m2.r.fc) == TT_ALT,
 			          atc_hit, atc_e, tq_a[0], tq_a[1], tq_a[2], tq_a[3], lve_q);
 			if (m2.r.ack != 2'd0) begin
 				x    = '0;
@@ -2505,7 +2526,7 @@ wire  [7:0] lse_q = lse[lv_ra];
 assign lve_q = lse_q[3:0];
 always_comb
 	lv_ra = (sn_ph == SN_B)                            ? sn_pa[9:4] :
-	        (e_st == E_SP_2)                           ? m2.r.a[9:4] + 6'd1 :
+	        (e_st == E_SP_2)                           ? st_set :
 	        (e_st == E_S_XL2 || e_st == E_S_ACT ||
 	         e_st == E_W_PART)                         ? e_va[9:4] :
 	        (e_st == E_M_SCANW || e_st == E_M_SCAN2)   ? sc_set : f_set;
@@ -2522,6 +2543,27 @@ always_ff @(posedge clk)
 		         lvd_q, lve_q, lv[m1.a[9:4]], lv[lv_ra], m1.a[9:4], lv_ra);
 		$finish;
 	end
+// synthesis translate_on
+
+// synthesis translate_off
+integer engine_tag_checks = 0;
+always @(posedge clk) if (nreset && !sn_frz && !e_kill &&
+                         (e_st == E_SP_2 || e_st == E_S_XL2)) begin
+ xres_t actual, expected;
+ logic [31:0] la;
+ la = e_st == E_SP_2 ? st_la : e_va;
+ actual = engine_xlate(la, m2.r.smode, m2.r.mem != M_LD,
+                       fc_tt(m2.r.fc) == TT_ALT, atc_hit, atc_e,
+                       tq_a[0], tq_a[1], tq_a[2], tq_a[3], lve_q);
+ expected = xlate(la, m2.r.smode, m2.r.mem != M_LD,
+                  fc_tt(m2.r.fc) == TT_ALT, atc_hit, atc_e,
+                  tq_a[0], tq_a[1], tq_a[2], tq_a[3], lve_q);
+ if (actual.hit !== expected.hit || (actual.hit && actual.way !== expected.way) ||
+     actual.pa !== expected.pa || actual.ok !== expected.ok || actual.flt !== expected.flt)
+  $fatal(1,"FAIL: engine parallel tag select differs from original lookup");
+ engine_tag_checks <= engine_tag_checks + 1;
+end
+final $display("TIMING_ENGINE_TAG: checked=%0d", engine_tag_checks);
 // synthesis translate_on
 
 endmodule
