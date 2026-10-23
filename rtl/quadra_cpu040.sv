@@ -104,6 +104,8 @@ wire        c_ta_n, c_tea_n, c_tci_n, c_avec_n;
 
 `ifdef CPU_AP68040_2X
 wire cpu_clk = clk_cpu;
+// Match the real 68040 DBcc minimum so A/UX calibration cannot overflow.
+localparam [3:0] CPU_DBCC_FLOOR = 4'd4;
 // Both PLL outputs rise together. At the falling PCLK edge halfway
 // through the low BCLK phase, arm the next (coincident PCLK/BCLK) edge.
 // Sampling BCLK here also fixes the phase deterministically after reset;
@@ -112,6 +114,7 @@ reg cpu_bclk_en = 1'b0;
 always @(negedge clk_cpu) cpu_bclk_en <= !clk;
 `else
 wire cpu_clk = clk;
+localparam [3:0] CPU_DBCC_FLOOR = 4'd0;
 wire cpu_bclk_en = 1'b1;
 `endif
 
@@ -127,7 +130,7 @@ ap68040 #(
 	.clk(cpu_clk),
 	.bclk_en(cpu_bclk_en),
 	.rsti_n(nreset),
-	.dbcc_floor(4'd0),
+	.dbcc_floor(CPU_DBCC_FLOOR),
 
 	.a_o(c_a), .a_oe(c_a_oe), .d_o(c_do), .d_oe(),
 	.rw_n(c_rw_n), .siz(c_siz), .tt(c_tt), .tm(c_tm), .tln(), .upa(),
