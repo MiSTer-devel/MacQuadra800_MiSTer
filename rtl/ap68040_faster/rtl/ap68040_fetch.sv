@@ -192,6 +192,23 @@ always_comb begin
 end
 assign bt_tgt = {tq[0], 1'b0};
 
+// Append F3 before selecting the shifted window. The append position uses
+// the registered count, so D1's late consume only crosses the word mux;
+// it no longer subtracts from count and then decides shift versus append.
+// Ten words cover the old queue plus F3; unused mux inputs are zero.
+logic [19:0] qjoin [16];
+wire [4:0] qappend_end = cnt + {3'd0, f3_n};
+always_comb begin
+	for (int i = 0; i < 16; i++) begin
+		qjoin[i] = 20'd0;
+		if (i < QN) qjoin[i] = {qw[i], qf[i], qd[i], qa[i], qb[i]};
+		if (5'(i) == cnt)
+			qjoin[i] = {f3_w[0], f3_f, f3_d, f3_a, f3_b[0]};
+		else if (5'(i) == cnt + 5'd1)
+			qjoin[i] = {f3_w[1], f3_f, f3_d, f3_a, f3_b[1]};
+	end
+end
+
 // F2: the words of a chunk, their table words read (ap68040_pdrom, the
 // words a cycle after their addresses); F3: predecoded from the table
 // words and appended this cycle
@@ -546,32 +563,24 @@ always_ff @(posedge clk) begin
 		//------------------------------------------------------------------
 		keep = cnt - {2'b00, consume};
 		for (int i = 0; i < QN; i++) begin
+			// synthesis translate_off
 			logic [5:0] src;
 			logic [4:0] k;
 			src = 6'(i) + {3'b000, consume};
 			k   = 5'(i) - keep;
 			if (5'(i) < keep) begin
-				// synthesis translate_off
 				qps[i] <= qps[src[4:0]];
-				// synthesis translate_on
-				qw[i] <= qw[src[4:0]];
-				qf[i] <= qf[src[4:0]];
-				qd[i] <= qd[src[4:0]];
-				qa[i] <= qa[src[4:0]];
-				qb[i] <= qb[src[4:0]];
 			end
 			else if (k < {3'b000, f3_n}) begin
-				// synthesis translate_off
 				qps[i] <= f3_p[k[0]];
-				// synthesis translate_on
-				qw[i] <= f3_w[k[0]];
-				qf[i] <= f3_f;
-				qd[i] <= f3_d;
-				qa[i] <= f3_a;
-				qb[i] <= f3_b[k[0]];
 			end
+			// synthesis translate_on
+			// Keep unused entries unchanged too: D1 can inspect lookahead
+			// words while deciding whether the complete instruction is ready.
+			if (5'(i) + {2'd0, consume} < qappend_end)
+				{qw[i], qf[i], qd[i], qa[i], qb[i]} <= qjoin[4'(i) + {1'b0, consume}];
 		end
-		cnt   <= keep + {3'b000, f3_n};
+		cnt   <= qappend_end - {2'd0, consume};
 		// the predecode ring: appended at head + count (wherever D1's
 		// consume puts the head), the head moved by consume
 		begin

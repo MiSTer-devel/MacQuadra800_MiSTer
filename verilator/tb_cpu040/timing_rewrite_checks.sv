@@ -121,3 +121,57 @@ bind ap68040_backend cpu66_stall_check timing_stall_check(
  .clk(clk),.nreset(nreset),.valid({ag_v,dc1_v,dc2_v,ex_v,wb_v}),
  .hold({ag_hold,dm_hold1,dc2_hold,ex_hold,wb_hold}),
  .actual({stall_ag,stall_dc1,stall_dc2,stall_ex,stall_wb}));
+
+// Independent shifting model of the fetch queue before append-before-shift.
+// Invalid entries are not part of the interface; every valid word and all
+// four of its fault/prediction flags must agree, including across redirects.
+module cpu66_fetch_queue_check(
+ input logic clk,nreset,redirect,
+ input logic[4:0] count,
+ input logic[2:0] consume,
+ input logic[1:0] append_count,
+ input logic[15:0] words[8],append_words[2],
+ input logic[7:0] fault,demand,atc,branch,
+ input logic append_fault,append_demand,append_atc,
+ input logic[1:0] append_branch
+);
+ logic seen=0;
+ logic[4:0] ref_count;
+ logic[19:0] ref_words[8];
+ integer checked=0,simultaneous=0,redirects=0;
+ integer shifts[8]='{default:0};
+ always @(posedge clk)begin
+  if(nreset && seen)begin
+   if(count !== ref_count || consume>count || count>8 ||
+      count-consume+append_count>8)
+    $fatal(1,"FAIL: fetch queue count/consume contract");
+   for(integer i=0;i<8;i=i+1)
+    if(i<count && {words[i],fault[i],demand[i],atc[i],branch[i]} !== ref_words[i])
+     $fatal(1,"FAIL: fetch queue valid entry %0d differs",i);
+   checked<=checked+1;
+   shifts[consume]<=shifts[consume]+1;
+   if(consume!=0 && append_count!=0)simultaneous<=simultaneous+1;
+   if(redirect)redirects<=redirects+1;
+  end
+  if(!nreset)begin
+   seen<=1; ref_count<=0;
+   for(integer i=0;i<8;i=i+1)ref_words[i]<=0;
+  end else begin
+   for(integer i=0;i<8;i=i+1)begin
+    if(i<ref_count-consume)ref_words[i]<=ref_words[i+consume];
+    else if(i-(ref_count-consume)<append_count)
+     ref_words[i]<={append_words[(i-(ref_count-consume))%2],
+                     append_fault,append_demand,append_atc,
+                     append_branch[(i-(ref_count-consume))%2]};
+   end
+   ref_count<=redirect ? 5'd0 : ref_count-consume+append_count;
+  end
+ end
+ final $display("TIMING_FETCH_QUEUE: checked=%0d simultaneous=%0d redirects=%0d shifts=%p",
+                checked,simultaneous,redirects,shifts);
+endmodule
+bind ap68040_fetch cpu66_fetch_queue_check timing_fetch_queue_check(
+ .clk(clk),.nreset(nreset),.redirect(redir_any),.count(cnt),.consume(consume),
+ .append_count(f3_n),.words(qw),.append_words(f3_w),
+ .fault(qf),.demand(qd),.atc(qa),.branch(qb),
+ .append_fault(f3_f),.append_demand(f3_d),.append_atc(f3_a),.append_branch(f3_b));
