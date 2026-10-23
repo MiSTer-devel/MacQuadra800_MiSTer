@@ -90,13 +90,11 @@ bind ap68040_backend cpu66_redirect_check timing_redirect_check (
 
 module cpu66_class_check (
  input logic clk, nreset, active,
- input logic is_md, is_fp, slow, expected_md, expected_fp, expected_slow,
- input logic a_mem, b_mem, expected_a_mem, expected_b_mem
+ input logic is_md, is_fp, slow, expected_md, expected_fp, expected_slow
 );
  integer checked = 0;
  always @(posedge clk) if (nreset && active) begin
-  if ({is_md, is_fp, slow, a_mem, b_mem} !==
-      {expected_md, expected_fp, expected_slow, expected_a_mem, expected_b_mem})
+  if ({is_md, is_fp, slow} !== {expected_md, expected_fp, expected_slow})
    $fatal(1, "FAIL: registered EX classification differs from its opcode");
   checked <= checked + 1;
  end
@@ -107,7 +105,19 @@ bind ap68040_backend cpu66_class_check timing_class_check (
  .clk(clk), .nreset(nreset), .active(ex_v),
  .is_md(ex_is_md), .is_fp(ex_is_fp), .slow(ex_slow),
  .expected_md((ex_u.op == OP_MUL) || (ex_u.op == OP_DIV)),
- .expected_fp(ex_u.op == OP_FPU), .expected_slow(is_slow(ex_u.op)),
- .a_mem(ex_a_mem), .b_mem(ex_b_mem),
- .expected_a_mem(ex_u.a_src == OS_MEM), .expected_b_mem(ex_u.b_src == OS_MEM)
+ .expected_fp(ex_u.op == OP_FPU), .expected_slow(is_slow(ex_u.op))
 );
+
+module cpu66_stall_check(input logic clk,nreset,input logic[4:0] valid,hold,actual);
+ logic[4:0] expected;
+ always_comb begin
+  expected[0]=valid[0]&&hold[0];
+  for(int i=1;i<5;i++)expected[i]=valid[i]&&(hold[i]||expected[i-1]);
+ end
+ always @(posedge clk)if(nreset && actual !== expected)
+  $fatal(1,"FAIL: parallel stalls differ from original serial equations");
+endmodule
+bind ap68040_backend cpu66_stall_check timing_stall_check(
+ .clk(clk),.nreset(nreset),.valid({ag_v,dc1_v,dc2_v,ex_v,wb_v}),
+ .hold({ag_hold,dm_hold1,dc2_hold,ex_hold,wb_hold}),
+ .actual({stall_ag,stall_dc1,stall_dc2,stall_ex,stall_wb}));

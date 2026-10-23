@@ -284,11 +284,29 @@ logic dbf_hold;               // the DBcc period floor holds EX (below)
 logic ex_md_start;
 // DC2 holds until the data memory unit has its result
 assign dc2_hold  = dc2_v && (dc2_u.mem != M_NONE) && (dc2_u.exc == 8'd0) && !dm_dc2_rdy;
-assign stall_wb  = wb_v  && wb_hold;
-assign stall_ex  = ex_v  && (ex_hold  || stall_wb);
-assign stall_dc2 = dc2_v && (dc2_hold || stall_ex);
-assign stall_dc1 = dc1_v && (stall_dc2 || dm_hold1);
-assign stall_ag  = ag_v  && (ag_hold  || stall_dc1);
+// Valid-only prefixes arrive before the late unit hold. Preserve them so
+// each stage combines its holds in parallel instead of a serial stall chain.
+(* keep = "true" *) wire [9:0] stall_valid = {
+ ag_v && dc1_v && dc2_v && ex_v && wb_v,
+ ag_v && dc1_v && dc2_v && ex_v,
+ ag_v && dc1_v && dc2_v,
+ ag_v && dc1_v,
+ dc1_v && dc2_v && ex_v && wb_v,
+ dc1_v && dc2_v && ex_v,
+ dc1_v && dc2_v,
+ dc2_v && ex_v && wb_v,
+ dc2_v && ex_v,
+ ex_v && wb_v
+};
+assign stall_wb = wb_v && wb_hold;
+assign stall_ex = (ex_v && ex_hold) || (stall_valid[0] && wb_hold);
+assign stall_dc2 = (dc2_v && dc2_hold) || (stall_valid[1] && ex_hold) ||
+                   (stall_valid[2] && wb_hold);
+assign stall_dc1 = (dc1_v && dm_hold1) || (stall_valid[3] && dc2_hold) ||
+                   (stall_valid[4] && ex_hold) || (stall_valid[5] && wb_hold);
+assign stall_ag = (ag_v && ag_hold) || (stall_valid[6] && dm_hold1) ||
+                  (stall_valid[7] && dc2_hold) || (stall_valid[8] && ex_hold) ||
+                  (stall_valid[9] && wb_hold);
 
 assign adv_wb  = wb_v  && !stall_wb;
 assign adv_ex  = ex_v  && !stall_ex;
@@ -589,11 +607,9 @@ end
 // EX
 //--------------------------------------------------------------------------
 // operand values entering EX: A or B may be the load data
-// Operand-source classification travels with ex_u, off the EX data path.
-logic ex_a_mem, ex_b_mem;
-wire [31:0] ex_av0 = ex_a_mem ? ex_ld : ex_a;
+wire [31:0] ex_av0 = (ex_u.a_src == OS_MEM) ? ex_ld : ex_a;
 wire [31:0] ex_av  = ex_u.a_sxw ? {{16{ex_av0[15]}}, ex_av0[15:0]} : ex_av0;
-wire [31:0] ex_bv  = ex_b_mem ? ex_ld : ex_b;
+wire [31:0] ex_bv  = (ex_u.b_src == OS_MEM) ? ex_ld : ex_b;
 
 logic [31:0] alu_res;
 logic  [4:0] alu_flags;
@@ -1784,8 +1800,6 @@ always_ff @(posedge clk) begin
 		//------------------------------------------------------------------
 		if (adv_dc2) begin
 			ex_u     <= dc2_u;
-			ex_a_mem <= (dc2_u.a_src == OS_MEM);
-			ex_b_mem <= (dc2_u.b_src == OS_MEM);
 			ex_is_md <= (dc2_u.op == OP_MUL) || (dc2_u.op == OP_DIV);
 			ex_slow  <= is_slow(dc2_u.op);
 			ex_npc   <= dc2_u.pc + {27'd0, dc2_u.ilen, 1'b0};
