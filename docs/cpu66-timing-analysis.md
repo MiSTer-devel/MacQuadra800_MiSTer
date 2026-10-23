@@ -4,18 +4,24 @@ The first 66 MHz build boots Mac OS 8.1, completes Speedometer Mix/PR and shuts 
 
 Measured progress at the unchanged **66/33/99 MHz** and seed 38:
 
-| Candidate | ALMs | CPU setup | CPU TNS | Mac OS 8.1 |
+| Candidate | ALMs | CPU setup | CPU TNS | Hardware |
 |---|---:|---:|---:|---|
-| Original CPU66 | 34,213 | −2.391 ns | −1175.353 ns | Boot, Mix/PR, shutdown pass |
-| [FIFO + redirect](cpu66-timing-experiment1.md) | 34,146 | −1.681 ns | −361.024 ns | Boot, Mix/PR, shutdown pass |
-| [Tag RAM specialization](cpu66-timing-experiment2.md) | **33,351** | **−1.604 ns** | **−229.615 ns** | Boot, Mix/PR, shutdown pass |
+| Original CPU66 | 34,213 | −2.391 ns | −1175.353 ns | Mac pass; A/UX startup fails |
+| [FIFO + redirect](cpu66-timing-experiment1.md) | 34,146 | −1.681 ns | −361.024 ns | Mac pass |
+| [Tag RAM specialization](cpu66-timing-experiment2.md) | 33,351 | **−1.604 ns** | −229.615 ns | Mac pass; A/UX startup fails |
 | [EX classes + FPU shifter](cpu66-timing-experiment3.md) | 33,657 | −2.082 ns | −567.544 ns | Not deployed |
-| [FPU hold, normal recipe](cpu66-timing-experiment4.md) | **33,098** | −1.879 ns | −521.688 ns | Qualification in progress |
-| [Same RTL, speed synthesis](cpu66-timing-experiment4.md) | 33,154 | −1.934 ns | −218.618 ns | Not deployed; HDMI −0.043 ns |
+| [FPU hold](cpu66-timing-experiment4.md) | **33,098** | −1.879 ns | −521.688 ns | A/UX startup fails |
+| Same RTL, speed synthesis | 33,154 | −1.934 ns | −218.618 ns | Not deployed; HDMI fails |
+| [Integer funnel](cpu66-timing-experiment5.md) | 33,192 | −2.394 ns | −308.920 ns | Not deployed |
+| [Circular queue](cpu66-timing-experiment6.md) | 33,286 | −2.121 ns | −583.940 ns | Not deployed |
+| [Registered cache selector](cpu66-timing-experiment8.md) | 33,323 | −1.648 ns | −397.008 ns | Not deployed |
+| [Operand source flags](cpu66-timing-experiment9.md) | 33,202 | −2.281 ns | −630.852 ns | Not deployed |
 
-The tag RAM candidate retains the best CPU worst slack. The normal FPU-hold candidate is smallest: **102 ALMs below** the frozen minimal 33 MHz core, despite the 66 MHz CPU clock. The third candidate regressed globally despite improving some endpoints; its worst path is now FPU sub-operation decode → hold → EX advance → operand forwarding. A [fourth experiment](cpu66-timing-experiment4.md) predecodes eight FPU hold selectors and compares normal versus speed synthesis in separate pinned directories. Both sequential and pipelined FPU CPU suites pass. The normal fit makes cache-tag, second-FIFO and redirect targets pass, exposing the integer funnel as the new worst path. [Experiment 5](cpu66-timing-experiment5.md) simplifies that funnel; [experiment 6](cpu66-timing-experiment6.md) separately adds a circular representation of the same two-slot queue. Both pass 185 CPU cases and four adapters with unchanged cycle counts; their fits are running. No new pipeline stage or timing exception has been introduced.
+The smallest fit is 102 ALMs below the frozen minimal 33 MHz core. None closes 66 MHz timing. Experiment 8 fixes the cache tag/way paths without an extra cycle; its worst path is now a late write-back store hold through the serial stall chain into the FIFO immediate field. Experiment 9 regressed timing and will be removed. [Experiment 7](cpu66-timing-experiment7.md), an added cache lookup cycle, was rejected before fitting because split-store tests found a livelock; the tests were retained.
 
-A/UX on the tag RAM candidate has remained at a gray startup screen with no I/O progress; it is **not qualified at 66 MHz**. The test uses a verified clone. A user-approved recovery with known working A/UX PRAM progressed through Mac startup, then returned to gray without reaching Unix Finder. A fresh-clone comparison on the newer FPU-control candidate is in progress. These observations do not yet establish the cause.
+[Controlled A/UX comparison](perf/cpu66_20261022/aux-original66/README.md): the frozen minimal 33 MHz build boots and cleanly halts the same disposable clone that stalls with the frozen original 66 MHz build. Thus the failure predates these timing optimizations. A/UX at 66 MHz remains unqualified; root cause is unknown. The board is back at MENU and its temporary debug configuration was removed.
+
+The detailed path analysis below describes the **original** fitted checkpoint; each experiment links its own measured reports.
 
 **66 MHz looks plausible, but this fit needs several changes.** The worst CPU setup slack is −2.391 ns, with a reported Fmax of 57.01 MHz. Under this fit's clock skew and uncertainty, the worst data path needs to shrink from 16.856 ns to about 14.465 ns (14.2%). The worst paths are control and routing problems, with a separate ALU/forwarding path close behind. Fixing just the highest-ranked endpoint will not close timing.
 

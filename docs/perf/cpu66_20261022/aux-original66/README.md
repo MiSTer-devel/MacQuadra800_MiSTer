@@ -1,0 +1,7 @@
+# Original 66 MHz A/UX comparison
+
+The frozen original CPU66 RBF (MD5 `238b10a91e219725fdcc90ff73e8848b`) failed to reach Unix Finder on the disposable `AUX_3_1_1GB_timing4.hda` clone at 32 MB, Ethernet Off. Gray startup and unchanged Main I/O persisted beyond four minutes. The immediately preceding frozen minimal 33 MHz build booted the same clone, ran uname/date/df and cleanly halted: [baseline evidence](../timing4/aux/baseline33/). This failure predates the timing optimization experiments; its cause is not established.
+
+A separate diagnostic boot temporarily enabled Ethernet so the existing SONIC mailbox CPU retirement sampler could update. Its 150 live samples settle around PCs `0x55d14`–`0x55d64`; this is not yet a disassembled or identified root cause. Ethernet changes guest behavior, so this is diagnostic evidence only. Earlier zero samples taken with Ethernet Off are unavailable telemetry, not evidence of a halted PC at zero.
+
+The user authorized recovery resets of failed boots on this disposable clone. After recording the stalled diagnostic boot, the board was recovered to MENU. The create-only 16-byte `MacQuadra800.CFG` (`40000000000000000000000000000000`) was verified and deleted to restore its original absence and Ethernet Off default. No original disk image was overwritten. No 66 MHz build has passed A/UX qualification.
