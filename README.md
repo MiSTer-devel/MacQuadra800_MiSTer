@@ -5,6 +5,9 @@
 Speedometer Mix reaches 3.162 in the first trial; the fit misses CPU and SDRAM
 timing and remains experimental. See the
 [experiment status and validation](docs/cpu66-experiment.md).
+The follow-on [timing-path analysis](docs/cpu66-timing-analysis.md) identifies
+the first area-conscious changes to try; the tested checkpoint stays on
+`pipelined-040-66mhz`.
 
 **`pipelined-040-min` checkpoint, 2026-10-22:** the minimal pipelined AP68040
 port with the boot fix is complete. The exact tested bitstream is
