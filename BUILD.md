@@ -47,7 +47,8 @@ minutes at about 81% ALMs; the 2026-09-28 experimental seed31 fit took about
 18 minutes at 92% ALMs, with positive timing on every clock. See the
 [current handoff](HANDOFF-20260928.md) for its exact identity. On the current
 Linux host use a durable supervised process with captured exit status/logs,
-and preserve its inputs until completion. Only one Quartus flow may run globally.
+and preserve its inputs until completion. Parallel flows are allowed in isolated
+directories with separate databases and outputs (user, 2026-10-22).
 
 | command | what it does |
 |---|---|
@@ -235,13 +236,14 @@ The pre-hardware gate is the Verilator testbench in `verilator/` — see
 
 ## Running multiple builds on one host
 
-- **The same core twice at once — don't.** Both compiles share `db/`, `incremental_db/`,
+- **The same directory twice at once — don't.** Both compiles share `db/`, `incremental_db/`,
   and `output_files/`, so they would corrupt each other. `build_only.sh` prevents this:
   the second invocation waits (30 s poll) until the first Quartus finishes.
-- **Different cores or isolated copies:** the current project policy still allows
-  only one Quartus flow globally. Keep the host-global wait gate enabled; do
-  not use `--no-wait` to bypass it. Check for any running `quartus_*` process
-  before launching, including flows owned by other work.
+- **Different cores or isolated copies:** parallel flows are allowed by the user
+  (2026-10-22). Pin each copy's source and manifest, and verify process working
+  directories so no two flows share a database or output directory. The default
+  gate still waits globally; use `--no-wait` for a verified isolated copy.
+  Do not pause or kill another project's flow.
 
 ## Portability to other cores
 

@@ -1852,10 +1852,14 @@ always_ff @(posedge clk) begin
 			// late early-redirect decision is not its enable; WB's later
 			// loads take precedence)
 			{ras_rtp, ras_rn} <= ras_after(ex_u.ras);
+			// Only redir_v makes the candidate PC observable. Capture on
+			// every EX advance to keep the late mispredict/exception
+			// decision off this 32-bit enable. Later WB/refetch assignments
+			// retain priority over the EX candidate.
+			redir_pc <= ex_next;
 			if (ex_early) begin
 				fe_flush    <= 1'b1;
 				redir_v     <= 1'b1;
-				redir_pc    <= ex_next;
 				ras_rv      <= ex_u.ras.v;
 				eredir_pend <= 1'b1;
 			end

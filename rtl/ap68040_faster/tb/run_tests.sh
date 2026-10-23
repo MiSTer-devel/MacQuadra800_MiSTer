@@ -21,8 +21,8 @@ CFGS=(
 	"+bclk2"
 	"+bclk2 +waits +tbi=1 +retry=20"
 )
-out=$(for p in $PROGS; do for c in "${CFGS[@]}"; do printf '%s|%s\n' "$p" "$c"; done; done |
-	xargs -d '\n' -P "$JOBS" -I{} bash -c '
+out=$(for p in $PROGS; do for c in "${CFGS[@]}"; do printf '%s|%s\0' "$p" "$c"; done; done |
+	xargs -0 -P "$JOBS" -I{} bash -c '
 		p=${1%%|*}; c=${1#*|}
 		r=$('"$SIM"' +prog=build/$p.hex $c +timeout=8000000 2>&1 | grep -E "^(PASS|FAIL)" | tail -1)
 		printf "%-16s %-34s %s\n" "$p" "${c:-(zero wait)}" "${r:-FAIL (no result)}"' _ {})
