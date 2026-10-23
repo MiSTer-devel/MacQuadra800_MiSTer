@@ -102,3 +102,26 @@ with identical cycle counts in every case. Both1x and2x adapter variants
 also retain identical cycles and beat counts under normal and fast
 acknowledgements. The exact R2 inputs and mapping checks are pinned before
 restarting full synthesis.
+
+## Compiler RAM-budget comparison
+
+After the pairing fix, R2 preserves all36 RF banks and nonconstant
+companion-valid state. Its forced OSD/LCD memories infer correctly, but
+the automatic RAM-budget heuristic instead puts both scaler polyphase
+coefficient memories (10,240 bits each) into registers. The 33 MHz fitter
+reports needing4,429 LABs where the device provides4,191.
+
+R3 keeps every RTL file identical and disables
+SYNTH_RESOURCE_AWARE_INFERENCE_FOR_BLOCK_RAM in its isolated QSF. This
+setting name was obtained from the installed17.0 project API. The
+[Standard Edition guide](https://docs.altera.com/r/docs/683283/18.1/design-compilation-user-guide-quartus-prime-standard-edition/resource-aware-ram-rom-and-shift-register-inference?contentId=qyeeXMpVNhjBnX13_IsAxQ)
+describes this budget-driven RAM-to-logic fallback; the actual fit still
+must verify physical RAM availability.
+
+The 33 MHz R3 synthesis has29,315 registers and3,722,339 block-memory bits,
+compared with49,811 registers and3,701,859 bits in R2. The20,480-bit
+coefficient-memory difference accounts for the20,496-register reduction
+(including16 auxiliary registers). This is a compiler mapping comparison;
+CPU behavior, clocks and video architecture are unchanged. A matching
+66 MHz R3 build is pinned separately. Main's recipe is frozen while the
+isolated flows run.
