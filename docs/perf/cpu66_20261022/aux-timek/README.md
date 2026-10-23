@@ -4,7 +4,7 @@ The live retirement PCs from the original 66 MHz failed boot identify `/unix`'s 
 
 The routine doubles a **16-bit** trial count from `0x1000` until a bare `dbra d0,*` takes at least `0x492` VIA ticks. Its largest nonzero doubled count is `0x8000`; the next doubling wraps to zero. The pipelined CPU currently executes a warm bare DBcc about every two CPU clocks. At 33 MHz, that maximum exceeds the required interval. At 66 MHz it falls short, wraps to zero, and keeps retrying tiny loops forever. The branch predictor is not required for this failure (`LOOP_PRED=0`).
 
-A focused simulation runs the **exact extracted guest bytes**, through `quadra_cpu040` and the production `via6522` with the machine's E-clock ratio of 42 bus clocks per timer tick. No approximate timer or rewritten calibration algorithm is used. Only the CPU's existing `dbcc_floor` input is exposed as a test control in a generated wrapper copy.
+A focused simulation runs the **exact extracted guest bytes**, through `quadra_cpu040` and the production `via6522` with the machine's E-clock ratio of 42 bus clocks per timer tick. No approximate timer or rewritten calibration algorithm is used. Only the CPU's existing `dbcc_floor` input is exposed as a test control in a generated wrapper copy. A small bootstrap supplies the low-memory VIA pointer and a deterministic VIA-backed polling address for the secondary calibration; it does not execute the Mac ROM or the whole kernel. The first bare-loop calibration is the failing path and its guest instructions are unchanged. The returned values below compare the same fixture at 1× and 2×, not a dump of hardware low memory.
 
 | CPU/bus | DBcc minimum | Result |
 |---|---:|---|
@@ -23,3 +23,5 @@ python3 docs/perf/cpu66_20261022/aux-timek/reproduce.py \
 ```
 
 The image is opened read-only. The script searches valid UFS superblocks rather than mistaking the preceding Eschatology slice for the root. It verifies the extracted routine's hash, writes generated binaries only under `--out`, and checks all three outcomes. Vasm and Verilator must be on PATH. The kernel and extracted guest binary remain local artifacts and are not included here. [Source hashes](source.json) and the three logs record this run.
+
+The same three cases were rerun against the frozen original 66 MHz source `3077255`, extracted into an isolated directory with `git archive`. They reproduce the same failure and successful calibration values: [original source results](original66/source.json). Use `--rtl-source-root` to select such a snapshot without changing the working checkout.
