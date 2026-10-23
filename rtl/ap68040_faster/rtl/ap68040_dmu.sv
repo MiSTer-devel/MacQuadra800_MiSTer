@@ -1803,6 +1803,14 @@ always_ff @(posedge clk) begin
 		E_M_SCAN2: begin
 			logic [5:0] s; logic [1:0] w; logic m;
 			s = ms_i[7:2]; w = ms_i[1:0];
+			// The engine owns this port during the scan. Select its set
+			// before the tag match, which only enables the actual write.
+			// No active write or invalidation changes when the match fails.
+			// synthesis translate_off
+			if (vp_lwe || vp_dwe)
+				$fatal(1,"FAIL: maintenance scan shares the valid/dirty write port");
+			// synthesis translate_on
+			vp_set = s;
 			m = sc_lv[w] && ((mt_scope == 2'd3) ||
 			                 (mt_scope == 2'd1 && tq_b[w] == mt_addr[31:10]) ||
 			                 (mt_scope == 2'd2 && (tc_p ? tq_b[w][21:3] == mt_addr[31:13]
@@ -1818,7 +1826,7 @@ always_ff @(posedge clk) begin
 			end
 			else begin
 				if (m) begin
-					vp_set = s; vp_wm[w] = 1'b1;
+					vp_wm[w] = 1'b1;
 					vp_lwe = 1'b1; vp_lv = 1'b0; vp_dwe = 1'b1; vp_dv = 1'b0;
 				end
 				if ((mt_scope == 2'd1 && w == 2'd3) || ms_i == 8'hFF) e_st <= E_M_IC;

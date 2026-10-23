@@ -601,13 +601,14 @@ assign hold = ex_v && (
 	(hold_sub[2] && !crr_wait) || (hold_sub[3] && !mvr_wait) ||
 	(hold_sub[4] && bg));
 
+logic taken_g;                 // old gated branch decision, checked when consumed
 logic hold_g;                  // original priority expression, checked in simulation
 logic [31:0] res_g;            // the result as the hold logic forms it (checked, then unused)
 always_comb begin
 	hold_g  = 1'b0;
 	res_g   = 32'd0;
 	dkill   = 1'b0;
-	taken   = 1'b0;
+	taken_g = 1'b0;
 	xvec    = 8'd0;
 	xfmt    = 4'd0;
 	xnext   = 1'b0;
@@ -710,9 +711,9 @@ always_comb begin
 				else if (sub == FC_DBCC) begin
 					res_g = {bv[31:16], bv[15:0] - 16'd1};
 					dkill = c;
-					taken = !c && (bv[15:0] != 16'd0);
+					taken_g = !c && (bv[15:0] != 16'd0);
 				end
-				else if (is_bcc) taken = c;
+				else if (is_bcc) taken_g = c;
 				else if (is_ftrap) begin
 					if (c) begin xvec = VEC_TRAPCC; xfmt = 4'd2; xnext = 1'b1; end
 				end
@@ -749,6 +750,27 @@ always @(posedge clk) if (nreset) begin
  if (ex_v) hold_checks <= hold_checks + 1;
 end
 final $display("TIMING_FP_HOLD: checked=%0d", hold_checks);
+// synthesis translate_on
+
+// Branch data, like result data, is consumed only as EX advances.
+// Hold and exception qualification remain in the backend. In particular,
+// BSUN suppresses early redirect through ex_xvec, rather than serially
+// suppressing taken and then traversing the branch decision again.
+wire branch_bcc = (opw_q[15:7] == 9'b1111_0010_1);
+wire branch_cond = fp_cond(branch_bcc ? opw_q[5:0] : ext_q[5:0], f_cc);
+assign taken = (sub == FC_DBCC) ? (!branch_cond && bv[15:0] != 16'd0) :
+               (sub == FC_COND && branch_bcc && branch_cond);
+// synthesis translate_off
+integer branch_checks=0,branch_ops=0,branch_true=0,branch_bsun=0;
+always @(posedge clk)if(nreset && ex_v && adv && xvec == 8'd0)begin
+ if(taken !== taken_g)
+  $fatal(1,"FAIL: consumed FPU branch differs from original gated decision");
+ branch_checks<=branch_checks+1;
+ if(sub==FC_COND || sub==FC_DBCC)branch_ops<=branch_ops+1;
+ if(taken)branch_true<=branch_true+1;
+end
+always @(posedge clk)if(nreset && ex_v && adv && xvec==VEC_BSUN && taken)branch_bsun<=branch_bsun+1;
+final $display("TIMING_FP_BRANCH: checked=%0d branch_ops=%0d taken=%0d bsun_suppressed=%0d",branch_checks,branch_ops,branch_true,branch_bsun);
 // synthesis translate_on
 
 // the result, by the sub-operation only: EX takes it when the uop

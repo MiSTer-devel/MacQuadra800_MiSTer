@@ -178,7 +178,10 @@ pd_t       qpr_rd;
 assign qpr_rd = pd_t'(qh_n[0] ? qpr_o[qh_n[3:1]] : qpr_e[qh_n[3:1]]);
 assign pd0_n = (cnt == {2'b00, consume}) ? f3_p[0] : qpr_rd;
 function automatic logic [3:0] qwrap(input logic [4:0] x);   // x mod QN, x < 2*QN
-	qwrap = (x >= 5'(QN)) ? 4'(x - 5'(QN)) : x[3:0];
+	// A power-of-two queue wraps by masking. Besides the compare/subtract,
+	// this removes unreachable high pointer bits from the RAM read index.
+	if ((QN & (QN - 1)) == 0) qwrap = 4'(x & 5'(QN - 1));
+	else qwrap = (x >= 5'(QN)) ? 4'(x - 5'(QN)) : x[3:0];
 endfunction
 
 always_comb begin
