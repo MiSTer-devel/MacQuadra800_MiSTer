@@ -37,6 +37,9 @@ module quadra800
 )
 (
 	input         clk,
+`ifdef CPU_AP68040_2X
+	input         clk_cpu,
+`endif
 	input         nreset,
 	input         ce,
 
@@ -296,6 +299,9 @@ wire cpu_stall_flt;
 // CPU_AP68040 (qsf): the pipelined AP68040 behind the same ports
 `ifdef CPU_AP68040
 quadra_cpu040 cpu (
+`ifdef CPU_AP68040_2X
+	.clk_cpu(clk_cpu),
+`endif
 `else
 wombat_cpu cpu (
 `endif

@@ -1,5 +1,9 @@
 # MacQuadra800_MiSTer — Macintosh Quadra 800 (MC68040)
 
+**`pipelined-040-66mhz` development:** a fixed 66 MHz CPU / 33 MHz bus /
+99 MHz SDRAM experiment from the minimal checkpoint. See the
+[experiment status and validation](docs/cpu66-experiment.md).
+
 **`pipelined-040-min` checkpoint, 2026-10-22:** the minimal pipelined AP68040
 port with the boot fix is complete. The exact tested bitstream is
 [`releases/MacQuadra800_20261022.rbf`](releases/MacQuadra800_20261022.rbf)

@@ -4,7 +4,8 @@
 //  the qsf selects this one).
 //
 //  The core drives the real MC68040 external bus (MC68040UM section 7).
-//  It runs here on the machine clock with the bus at 1:1 (bclk_en high):
+//  The bus runs on the machine clock. CPU_AP68040_2X supplies a related
+//  2x processor clock; otherwise processor and bus clocks are identical.
 //  every bus output is a flip-flop, and address, size, kind and write data
 //  hold from TS until the transfer's last TA.  So the transaction bus that
 //  wombat_cpu exported is made straight from the pins:
@@ -42,6 +43,9 @@ module quadra_cpu040
 )
 (
 	input         clk,
+`ifdef CPU_AP68040_2X
+	input         clk_cpu,
+`endif
 	input         nreset,
 	input         ce,
 
@@ -98,6 +102,19 @@ wire        dbg_retire;
 wire [31:0] c_di;
 wire        c_ta_n, c_tea_n, c_tci_n, c_avec_n;
 
+`ifdef CPU_AP68040_2X
+wire cpu_clk = clk_cpu;
+// Both PLL outputs rise together. At the falling PCLK edge halfway
+// through the low BCLK phase, arm the next (coincident PCLK/BCLK) edge.
+// Sampling BCLK here also fixes the phase deterministically after reset;
+// a free-running divide-by-two could select the other PCLK edge.
+reg cpu_bclk_en = 1'b0;
+always @(negedge clk_cpu) cpu_bclk_en <= !clk;
+`else
+wire cpu_clk = clk;
+wire cpu_bclk_en = 1'b1;
+`endif
+
 ap68040 #(
 	.FPU_REVISION(8'h41),
 	.FPU_PIPE(0), .LOOP_PRED(0), .EARLY_RES(0), .DC1_ATC(0), .SKID(0), .DIV_STEPS(2),
@@ -107,8 +124,8 @@ ap68040 #(
 	.PA_C0_MASK(32'hC000_0000), .PA_C0_MATCH(32'h0000_0000),
 	.PA_C1_MASK(32'hF000_0000), .PA_C1_MATCH(32'h4000_0000)
 ) cpu (
-	.clk(clk),
-	.bclk_en(1'b1),
+	.clk(cpu_clk),
+	.bclk_en(cpu_bclk_en),
 	.rsti_n(nreset),
 	.dbcc_floor(4'd0),
 
@@ -222,7 +239,7 @@ assign debug_halted   = dbg_halted;
 // time dbg_retire is seen, WB may hold the next uop -- on a discarded path as
 // often as not -- so the PC is the one WB held a clock earlier.
 reg  [31:0] retired_pc, wb_pc_d;
-always @(posedge clk) begin
+always @(posedge cpu_clk) begin
 	wb_pc_d <= dbg_pc;
 	if (dbg_retire) retired_pc <= wb_pc_d;
 end

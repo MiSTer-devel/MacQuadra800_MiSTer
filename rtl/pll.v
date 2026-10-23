@@ -10,6 +10,9 @@ module pll (
 		input  wire  rst,      //   reset.reset
 		output wire  outclk_0, // outclk0.clk
 		output wire  outclk_1, // outclk1.clk
+`ifdef CPU_AP68040_2X
+		output wire  outclk_2, // 66 MHz processor clock, phase aligned to outclk_0
+`endif
 		output wire  locked    //  locked.export
 	);
 
@@ -18,6 +21,9 @@ module pll (
 		.rst      (rst),      //   reset.reset
 		.outclk_0 (outclk_0), // outclk0.clk
 		.outclk_1 (outclk_1), // outclk1.clk
+`ifdef CPU_AP68040_2X
+		.outclk_2 (outclk_2),
+`endif
 		.locked   (locked)    //  locked.export
 	);
 

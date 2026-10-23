@@ -131,7 +131,11 @@ localparam CONF_STR = {
 	"J,Trigger,Thumb,Button 3,Button 4,Button 5,Base 1,Base 2,Base 3;",
 	"jn,A,B,X,Y,L,R,Select,Start;",
 	"jp,B,A,Y,X,L,R,Select,Start;",
+`ifdef CPU_AP68040_2X
+	"V,66MHz v",`BUILD_DATE
+`else
 	"V,v",`BUILD_DATE
+`endif
 };
 
 wire  [1:0] buttons;
@@ -251,6 +255,9 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(VDNUM), .BLKSZ(2)) hps_io
 
 wire clk_sys;
 wire clk_ram;                              // 99 MHz = 3x clk_sys, SDRAM domain
+`ifdef CPU_AP68040_2X
+wire clk_cpu;                              // 66 MHz; bus and peripherals stay 33 MHz
+`endif
 wire pll_locked;
 
 // Dedicated dot clock for the DAFB scanout.  The video used to run on clk_sys,
@@ -372,6 +379,9 @@ pll pll
 	.refclk(CLK_50M),
 	.rst(0),
 	.outclk_1(clk_ram),
+`ifdef CPU_AP68040_2X
+	.outclk_2(clk_cpu),
+`endif
 	.outclk_0(clk_sys),                    // 33.000000 MHz machine clock — the
 	                                       // real Quadra 800 rate, and the exact
 	                                       // base every time-anchored divider
@@ -697,6 +707,9 @@ wire        eth_mem_rvalid;
 
 quadra800 #(.RAM_ADDR_BITS(RAM_ADDR_BITS), .CDROM(CDROM_EN), .SONIC(SONIC_EN)) machine (
 	.clk(clk_sys),
+`ifdef CPU_AP68040_2X
+	.clk_cpu(clk_cpu),
+`endif
 	.nreset(~reset),
 	.ce(1'b1),
 	.clk_vid(clk_vid),

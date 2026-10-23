@@ -7,6 +7,17 @@
 module tb_quadra_cpu040;
 reg clk = 0;
 always #5 clk = ~clk;
+`ifdef CPU_AP68040_2X
+// PCLK rises at every BCLK edge (rising and falling), as phase-aligned
+// 66/33 MHz PLL outputs do. The memory and adapter still use BCLK.
+reg clk_cpu = 1;
+always #2.5 clk_cpu = ~clk_cpu;
+always @(posedge clk_cpu) if (nreset) begin
+	#0.001; // observe both coincident testbench clock updates
+	if (dut.cpu_bclk_en !== clk)
+		$fatal(1, "PCLK/BCLK enable phase mismatch");
+end
+`endif
 reg nreset = 0;
 
 wire        bus_req, bus_write, bus_instr;
@@ -19,6 +30,9 @@ reg   [2:0] ipl = 3'b111;
 
 quadra_cpu040 dut (
 	.clk(clk), .nreset(nreset), .ce(1'b1),
+`ifdef CPU_AP68040_2X
+	.clk_cpu(clk_cpu),
+`endif
 	.ipl(ipl), .ipl_autovector(1'b1), .berr(1'b0), .stall_hold(1'b0), .dbg_stall_flt(),
 	.cache_line_valid(1'b0), .cache_line_tag(28'd0), .cache_line_data(128'd0), .store_buffer_ok(1'b1),
 	.bus_req(bus_req), .bus_write(bus_write), .bus_instr(bus_instr), .bus_size(bus_size),

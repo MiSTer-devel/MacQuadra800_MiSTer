@@ -346,9 +346,25 @@ FAST040_SRC = $(addprefix $(FAST040)/,$(shell grep -o '"[^"]*v"' $(FAST040)/ap68
 tb_quadra_cpu040: tb_cpu040/prog.s tb_cpu040/tb_quadra_cpu040.sv ../rtl/quadra_cpu040.sv
 	vasmm68k_mot -m68040 -Fbin -quiet -o tb_cpu040/prog.bin tb_cpu040/prog.s
 	xxd -p -c4 tb_cpu040/prog.bin > tb_cpu040/prog.hex
-	$V --binary --timing -Wno-fatal -Wno-lint -Wno-style -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040 -o tb_quadra_cpu040 $(FAST040_SRC) ../rtl/quadra_cpu040.sv tb_cpu040/tb_quadra_cpu040.sv
-	./obj_dir_tb_cpu040/tb_quadra_cpu040 | grep -E 'PASS|FAIL|TIMEOUT|ERROR'
-	./obj_dir_tb_cpu040/tb_quadra_cpu040 +fast | grep -E 'PASS|FAIL|TIMEOUT|ERROR'
+	$V --binary --timing -j 8 -Wno-fatal -Wno-lint -Wno-style -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040 -o tb_quadra_cpu040 $(FAST040_SRC) ../rtl/quadra_cpu040.sv tb_cpu040/tb_quadra_cpu040.sv
+	./obj_dir_tb_cpu040/tb_quadra_cpu040 > obj_dir_tb_cpu040/normal.log
+	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040/normal.log
+	grep -q '^PASS:' obj_dir_tb_cpu040/normal.log
+	./obj_dir_tb_cpu040/tb_quadra_cpu040 +fast > obj_dir_tb_cpu040/fast.log
+	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040/fast.log
+	grep -q '^PASS:' obj_dir_tb_cpu040/fast.log
+
+# Same adapter workload at 2:1 PCLK/BCLK, including phase assertions.
+tb_quadra_cpu040_2x: tb_cpu040/prog.s tb_cpu040/tb_quadra_cpu040.sv ../rtl/quadra_cpu040.sv
+	vasmm68k_mot -m68040 -Fbin -quiet -o tb_cpu040/prog.bin tb_cpu040/prog.s
+	xxd -p -c4 tb_cpu040/prog.bin > tb_cpu040/prog.hex
+	$V --binary --timing -j 8 -Wno-fatal -Wno-lint -Wno-style +define+CPU_AP68040_2X=1 -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040_2x -o tb_quadra_cpu040 $(FAST040_SRC) ../rtl/quadra_cpu040.sv tb_cpu040/tb_quadra_cpu040.sv
+	./obj_dir_tb_cpu040_2x/tb_quadra_cpu040 > obj_dir_tb_cpu040_2x/normal.log
+	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040_2x/normal.log
+	grep -q '^PASS:' obj_dir_tb_cpu040_2x/normal.log
+	./obj_dir_tb_cpu040_2x/tb_quadra_cpu040 +fast > obj_dir_tb_cpu040_2x/fast.log
+	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040_2x/fast.log
+	grep -q '^PASS:' obj_dir_tb_cpu040_2x/fast.log
 
 # The full machine with the pipelined AP68040 (CPU_AP68040): obj_dir040/Vemu.
 # The old core's observers and profiles in sim_main.cpp are compiled out.
