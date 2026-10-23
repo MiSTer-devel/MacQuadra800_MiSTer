@@ -10,3 +10,7 @@ Two variants use balanced synthesis, seed38, stamp261023, physical duplication O
 - **small**: experiment20 plus [index-scale.patch](perf/cpu66_20261022/timing23/small/index-scale.patch), which includes the experiment22 EARLY_RES-qualified bypass removal and the new scaling expression, with the original five RF read ports (25 MLAB arrays). [Validation](perf/cpu66_20261022/timing23/small/validation.json).
 
 The comparison measures whether the added read-port copies are still necessary after the scaling simplification. Each composite source is byte-verified against its tested scratch tree; RAM guards require all register-file arrays to remain MLABs and all four tag memories to remain true-dual-port M10Ks. Main RTL remains frozen at experiment20 while these independent copies fit. No fitted benefit, hardware qualification or timing closure is claimed yet. No VRAM/DDR changes are included.
+
+## Completed fit results
+
+Both fits completed: pre-read uses34,116 ALMs with CPU setup -2.030ns/TNS -333.730ns and minimum hold -0.107ns; small uses33,757 ALMs with CPU setup -2.089ns/TNS -355.869ns and minimum hold +0.133ns. All non-CPU setup clocks pass. Neither improves global timing. Neither was deployed. [Comparison and preserved reports](perf/cpu66_20261022/timing23/results.md).
