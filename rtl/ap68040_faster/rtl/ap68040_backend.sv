@@ -616,7 +616,8 @@ logic        md_go;           // this EX uop has started the unit
 logic        md_fin;          // ... and the unit has finished (done is a pulse: EX may
                               // be stalled by WB in that cycle)
 logic        md_z;            // ... is a divide by zero (from its second cycle)
-wire         ex_is_md   = (ex_u.op == OP_MUL) || (ex_u.op == OP_DIV);
+// Classified alongside ex_u, so the opcode decode is off the stall path.
+logic        ex_is_md;
 wire         ex_div0    = (ex_u.op == OP_DIV) &&
                           ((ex_u.sz == SZ_W) ? (ex_av[15:0] == 16'd0) : (ex_av == 32'd0));
 assign ex_md_start = ex_v && ex_is_md && !md_go && !ex_div0 && !md_busy && !ex_fault;
@@ -639,7 +640,7 @@ ap68040_muldiv #(.DSTEPS(DIV_STEPS)) md (
 );
 
 // FPU: OP_FPU uops act once no older uop is in flight (WB empty)
-wire         ex_is_fp = (ex_u.op == OP_FPU);
+wire         ex_is_fp = ex_kc[0];
 ap68040_fpif #(.FPU_REVISION(FPU_REVISION), .FPU_PIPE(FPU_PIPE)) fpif (
 	.clk(clk), .nreset(nreset),
 	.ex_v(ex_v && ex_is_fp && !ex_fault && ex_u.exc == 8'd0), .sub(ex_u.cond),
@@ -956,7 +957,7 @@ typedef struct packed {
 	logic [15:0] sr_new;
 } exo_t;
 
-wire  ex_slow = is_slow(ex_u.op);
+logic ex_slow;
 // shifts and rotates: N and Z are the result's sign and zero test at the
 // size, taken in the second cycle from the registered result (the barrel
 // shift and a 32-bit zero test do not fit one cycle with the count logic)
@@ -1780,6 +1781,8 @@ always_ff @(posedge clk) begin
 		//------------------------------------------------------------------
 		if (adv_dc2) begin
 			ex_u     <= dc2_u;
+			ex_is_md <= (dc2_u.op == OP_MUL) || (dc2_u.op == OP_DIV);
+			ex_slow  <= is_slow(dc2_u.op);
 			ex_npc   <= dc2_u.pc + {27'd0, dc2_u.ilen, 1'b0};
 			ex_kc    <= {dc2_u.op == OP_CAS2R, dc2_u.op == OP_CHK2B,
 			             dc2_u.op == OP_DBCC, dc2_u.op == OP_MDRES, dc2_u.op == OP_DIV,

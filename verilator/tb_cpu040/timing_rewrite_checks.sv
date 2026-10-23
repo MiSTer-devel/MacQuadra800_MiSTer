@@ -87,3 +87,23 @@ bind ap68040_backend cpu66_redirect_check timing_redirect_check (
  .wb_early(wb_eredir), .refetch(wb_refetch), .next_pc(ex_next),
  .wb_next_pc(wb_redir_pc), .wb_pc(wb_u.pc), .redirect_pc(redir_pc)
 );
+
+module cpu66_class_check (
+ input logic clk, nreset, active,
+ input logic is_md, is_fp, slow, expected_md, expected_fp, expected_slow
+);
+ integer checked = 0;
+ always @(posedge clk) if (nreset && active) begin
+  if ({is_md, is_fp, slow} !== {expected_md, expected_fp, expected_slow})
+   $fatal(1, "FAIL: registered EX classification differs from its opcode");
+  checked <= checked + 1;
+ end
+ final $display("TIMING_CLASS: checked=%0d", checked);
+endmodule
+
+bind ap68040_backend cpu66_class_check timing_class_check (
+ .clk(clk), .nreset(nreset), .active(ex_v),
+ .is_md(ex_is_md), .is_fp(ex_is_fp), .slow(ex_slow),
+ .expected_md((ex_u.op == OP_MUL) || (ex_u.op == OP_DIV)),
+ .expected_fp(ex_u.op == OP_FPU), .expected_slow(is_slow(ex_u.op))
+);
