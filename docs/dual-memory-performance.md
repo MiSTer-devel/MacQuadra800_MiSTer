@@ -19,7 +19,8 @@ loop takes the same 343 bus clocks as the unbuffered control (and the
 whole workload takes three more clocks). It adds queue registers without
 a demonstrated gain in that model. It is therefore removed from the
 active RTL. The [prototype snapshot](perf/dual_memory_20261023/comparison-prototypes.patch)
-can reproduce both prototypes from checkpoint43a5280; select
+can reproduce both prototypes from checkpoint43a5280 with
+`git apply --unidiff-zero`; select
 STORE_BUFFER=1,VRAM_POST=0 for the rejected external queue. Its logs and
 unbuffered control are under queue-prototype.
 
@@ -66,6 +67,19 @@ CPU's hardware path.
 The general 225-case CPU regression runs from an isolated copy so its
 generator cannot modify the pinned FPGA build inputs. Its default
 PA_VRAM_POST=0 covers unchanged upstream behavior; the adapter cases
-exercise the newly enabled platform feature. FPGA area/timing and hardware
-performance are still pending; synthetic loop gains are not Speedometer
+exercise the newly enabled platform feature. All225 cases pass with exactly matching
+cycle counts against an unchanged43a5280 source control built in the same
+environment. Historical logs differ in138 cases, reproduced by that
+unchanged control; their cause is not attributed to this candidate.
+All12 adapter/control cases and the corrected queue unit test pass.
+
+With next-clock platform writes, the33MHz VRAM write loop takes281 versus
+343 bus clocks (18.1% fewer); at66MHz it takes187 versus218 (14.2% fewer).
+Including readback:855 versus918 at33MHz and554 versus582 at66MHz.
+[Validation and raw logs](perf/dual_memory_20261023/validation.json).
+
+FPGA area/timing and hardware performance are still pending; synthetic loop gains are not Speedometer
 results or a release qualification.
+
+The first33MHz fit is running from source8e3e0b9 in a separate pinned
+Quartus directory; the source manifest records every build input.
