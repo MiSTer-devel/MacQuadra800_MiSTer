@@ -265,6 +265,21 @@ gate; CD audio skipped, no image on the board) was still running as an
 agent session when this was written; its results land under
 `docs/perf/sweep_20261024/`, uncommitted until reviewed.
 
+**Phase 1 started (2026-10-24 ~10:40 PDT).** Branch `pipelined-040-fast60`,
+commit `a474308` on top of `6d8e81d` (RTL of `6bfd9c0` plus the clock
+change), pushed to `alanswx`: `CLK_60_30_90` switches the PLL to 30/90/60
+and drives every clk_sys time base from one `SYS_HZ` (the nine constants
+below; 33 MHz defaults bit-identical, so no other build changes), the SDRAM
+refresh count from a `CLK_HZ` on `rtl/sdram.sv` (702 at 90 MHz), with
+`CPU_AP68040_2X` on; residual: the VIA E clock is 789.5 kHz at 30 MHz
+(+0.8 %) against 785.7 kHz (+0.3 %) at 33. The branch was committed through
+a temporary index from `scratch/fast60/` so the checkout could stay on the
+memory branch under the running hardware sweep. Fit 1 (the unchanged core
+at 60/30/90, seed 38) runs on misterubuntu in `~/mister/q800_fast60_ctrl_20261024`
+as unit `q800-fast60-ctrl-20261024`; the directed benches for the touched
+modules run beside it. The stop rule stands: a 60 MHz fit judged by CPU
+setup slack, then one decode-stage change (D1 attribute-ROM address).
+
 **60/30/90 time-base audit (2026-10-24, before Phase 1's first fit).** The
 66/33/99 experiments kept the bus at 33 MHz; 60/30/90 is the first time
 `clk_sys` itself changes, and everything divided from it would otherwise
