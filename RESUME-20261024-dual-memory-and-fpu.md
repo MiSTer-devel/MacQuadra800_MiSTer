@@ -276,9 +276,31 @@ refresh count from a `CLK_HZ` on `rtl/sdram.sv` (702 at 90 MHz), with
 a temporary index from `scratch/fast60/` so the checkout could stay on the
 memory branch under the running hardware sweep. Fit 1 (the unchanged core
 at 60/30/90, seed 38) runs on misterubuntu in `~/mister/q800_fast60_ctrl_20261024`
-as unit `q800-fast60-ctrl-20261024`; the directed benches for the touched
-modules run beside it. The stop rule stands: a 60 MHz fit judged by CPU
-setup slack, then one decode-stage change (D1 attribute-ROM address).
+as unit `q800-fast60-ctrl-20261024`. The directed benches for every touched
+module pass at the 33 MHz defaults in that copy (`verilator/bench2.log`,
+`bench4.log`): tb_sdram 174 checks, tb_memory_path x2, tb_ncr53c96 528,767
+checks, tb_easc, tb_iosb_scc, tb_via_irq_race 29 rows, tb_scc_ctl_phase,
+tb_sdma_ack_watchdog, tb_scsi_irq_ack_race, and all six tb_quadra_cpu040
+adapter cases (1x 38,262 / 37,010 / 37,917 cycles, 2x 30,915 / 29,450 /
+29,982), 0 failures. (A git-archive copy lacks the gitignored
+`verilator/sim/mac/` CD-ROM model sources -- scp them in before
+tb_ncr53c96 -- and `tb_quadra_cpu040` needs `~/opt/vbcc/bin` on PATH for
+`vasmm68k_mot`.) The stop rule stands: a 60 MHz fit judged by CPU setup
+slack, then one decode-stage change (D1 attribute-ROM address).
+
+**Fit 1 result (control, seed 38, 2026-10-24 ~11:10 PDT):** the unchanged
+core at 60/30/90 misses the CPU clock by **-0.729 ns, TNS -30.713 ns**
+(implied Fmax 57.5 MHz) -- against -3.308 ns / TNS -2,114 ns for the same
+RTL at 66/33/99. SDRAM +0.653, bus +1.228, HDMI +0.257, every hold
+positive (CPU +0.107). 35,483 ALMs (85 %), 31,110 registers, 497 M10K,
+38 DSP. RBF md5 `9bcfd99e80df5ef3ce01aae425dade3a` (not a shippable
+build: CPU-clock miss). Summaries under
+`docs/perf/fast60_20261024/ctrl-s38/`. A TNS that small is a few dozen
+endpoints, so **seeds 39-42 were launched at once** in isolated copies
+(`~/mister/q800_fast60_s39..42_20261024`, units `q800-fast60-s39..42-20261024`,
+all four running in parallel beside another session's `clock_fit` flow)
+before any RTL change; the decode-stage change is next only if no seed
+closes.
 
 **60/30/90 time-base audit (2026-10-24, before Phase 1's first fit).** The
 66/33/99 experiments kept the bus at 33 MHz; 60/30/90 is the first time
