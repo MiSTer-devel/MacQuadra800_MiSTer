@@ -212,13 +212,35 @@ run driven by a **Sonnet or Opus session**, not hand-stepped from the
 design session (user, 2026-10-24); its recipe is in the memory
 `test-hosts-2026-10` (kvms on mister192) and `scratch/hw/k.sh`.
 
-Open decisions as of 2026-10-24 (the comparison table is
-[docs/core-comparison-20261024.md](docs/core-comparison-20261024.md)):
-fix up the 33 MHz dual core (FPU divider, uncached reads, A-line/JSR cost)
-and whether that bloats away the ~4,500-ALM saving; chase 66 MHz closure
-alone; a hybrid; or port the shipping core's memory-path ideas (store
-buffer, retained-line sideband) into the dual core. The user asked to
-discuss these before any RTL is changed.
+## Plan of record (agreed with the user 2026-10-24)
+
+The comparison behind it is [docs/core-comparison-20261024.md](docs/core-comparison-20261024.md),
+including the 33/66 scaling proof that Speedometer's Mix, CPU, Math and
+FPU never wait on memory and that about a fifth of Graphics is ROM fetch.
+Two cores are the goal: a **small** one and a **fast** one. VRAM in DDR3
+and the other video modes come **after** the CPU reaches its target: the
+CPU decision decides which core the video work builds on (it does not fit
+the shipping core at 94 %), and A/UX on the dual core is the biggest
+unknown left. Meanwhile the CPU work must not harden around on-chip VRAM
+assumptions (keep the 1-clk-ack / `PA_VRAM_POST` policy behind its
+parameter).
+
+**Decision rule.** Fast core: beats the shipping core on every PR component
+and the FPU suite, CPU clock timing clean, both guest gates and CD audio
+pass. Small core: at most 36,000 ALMs, Mix at least the shipping core's,
+Graphics and FPU within 10 % of it, same gates. Whether the small core
+needs Ethernet (the SONIC snoop, cost unknown) is still open.
+
+| Phase | Work | Gate / stop rule |
+|---|---|---|
+| **0. Measure** (started 2026-10-24, no RTL) | Hardware sweep on mister192 by a Sonnet/Opus session: memory33 `500c3661`, dual R3 66, the 20261002 release as same-box control -- 8.1 gate, A/UX 3.1 at 32 MB, CD audio transport, Speedometer Mix / PR / FPU as medians of 3-5 with the full Mix sub-tests transcribed, the DOTT / DOOM II / Dracula hang checks where the images exist. In parallel: a cycle attribution of the FP gap on the dual core (divider vs FP store path vs op latency) and a `--check` synthesis to read the dual FPU's entity size against the shipping FPU. | A/UX must boot and shut down on memory33; if not, the MMU comes before everything else. The attribution decides which FP fix Phase 2 makes. |
+| **1. Fast core, 60/30/90** (new branch from `6bfd9c0`) | Fit 1: the unchanged core at 60/30/90 as control. Fit 2: one change, a register stage on the D1 attribute-ROM address path (76 of the worst 100 paths). Fit 66/33/99 as well, for the record. | Closes at 60: sweep it, ship candidate. Slack improves by 1.5 ns or more but still open: one more iteration on the MMU / cache-hit family. Under 1 ns: **stop**, the fast core stays the shipping core. About four fits. |
+| **2. Small core at 33** (second branch from `6bfd9c0`, concurrent with 1; the two do not share files) | Only what Phase 0 points at, one change per fit, hardware medians after each: the FP fix (divider steps and/or the FP store path), uncached-read ordering (Graphics), then the ROM next-line prefetch (platform side, helps both cores). | Hard cap 36,000 ALMs. No FPU_PIPE / LOOP_PRED / EARLY_RES / second-slot loads: all measured as area for nothing. |
+| **3. VRAM to DDR3 and the video modes** | After a core meets its target. First a DDR3 bridge model with randomised latency for the sim (the full-machine sim instantiates `quadra800`, not `emu`), then write FIFO + read line cache + scanline buffer, then the DAFB timing generator and monitor-sense codes (the video PLL is already reconfigurable). | Discussed with the user before it starts. |
+
+Housekeeping for the first RTL commit on either branch: the header of
+`MacQuadra800.sv` still says RAM and ROM live in DDR3; RAM is in SDRAM
+(`MacQuadra800.sv:1007`).
 
 Read [CLAUDE.md](CLAUDE.md) and [BUILD.md](BUILD.md) before hardware work.
 Never deploy/reset a running guest, and never hash/copy a mounted image.
