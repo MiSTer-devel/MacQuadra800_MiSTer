@@ -94,7 +94,8 @@ relying on an exact figure.
 | Cached loads, EAs, LEA, MULS.L | -- | 1.5-3x faster |
 | SONIC D-cache snoop (Ethernet) | Yes | No -- Ethernet must stay Off |
 | MMU table walker port into quadra800 | Yes | Walks through its own bus |
-| CPU entity | 25,773 ALMs, 13 DSP | ~20,090 ALMs + 82 M10K, 15 DSP (scalar); dual issue about +1,400 |
+| CPU entity | 25,773 fitted ALMs, 13 DSP; at synthesis 37,826 ALUTs / 8,296 regs / 297 kbit | ~20,090 fitted ALMs + 82 M10K, 15 DSP (scalar); dual issue about +1,400; at synthesis 29,778 ALUTs / 12,562 regs / 626 kbit |
+| FPU entity at synthesis (2026-10-24, [report](perf/fpu_entity_20261024/README.md)) | `ap040_fpu` **6,800 ALUTs / 1,387 regs / 9 DSP** | `ap040_fpu` **6,336 ALUTs / 2,249 regs / 12 DSP**, plus 617 / 464 in the `ap68040_fpif` wrapper. The dual FPU is already the smaller one in logic: porting the compacted shipping FPU gains no area, and a 2 -> 3 steps/clock divider port adds logic |
 
 ## What the tables say
 

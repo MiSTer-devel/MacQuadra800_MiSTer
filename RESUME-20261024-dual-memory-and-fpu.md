@@ -238,6 +238,20 @@ needs Ethernet (the SONIC snoop, cost unknown) is still open.
 | **2. Small core at 33** (second branch from `6bfd9c0`, concurrent with 1; the two do not share files) | Only what Phase 0 points at, one change per fit, hardware medians after each: the FP fix (divider steps and/or the FP store path), uncached-read ordering (Graphics), then the ROM next-line prefetch (platform side, helps both cores). | Hard cap 36,000 ALMs. No FPU_PIPE / LOOP_PRED / EARLY_RES / second-slot loads: all measured as area for nothing. |
 | **3. VRAM to DDR3 and the video modes** | After a core meets its target. First a DDR3 bridge model with randomised latency for the sim (the full-machine sim instantiates `quadra800`, not `emu`), then write FIFO + read line cache + scanline buffer, then the DAFB timing generator and monitor-sense codes (the video PLL is already reconfigurable). | Discussed with the user before it starts. |
 
+**Phase 0 status (2026-10-24 09:30 PDT).** The two `--check` syntheses are
+done ([docs/perf/fpu_entity_20261024/](docs/perf/fpu_entity_20261024/README.md)):
+the dual core's `ap040_fpu` is 6,336 ALUTs / 2,249 regs / 12 DSP against
+the shipping FPU's 6,800 / 1,387 / 9, so porting the compacted shipping
+FPU gains no area and the divider-steps port costs some. The FP cycle
+attribution (standalone Whetstone + matrix + FFT kernels with a retired-
+instruction trace, on misterubuntu) and the mister192 hardware sweep
+(memory33 -> 20261002 control -> dual66; Speedometer medians of 3 with
+full sub-tests; A/UX on memory33 as the gate; CD audio skipped, no image
+on the board) were running as separate agent sessions when this was
+written; their results land under `docs/perf/fp_attribution_20261024/`,
+`docs/fp-gap-attribution.md` and `docs/perf/sweep_20261024/`, uncommitted
+until reviewed.
+
 **60/30/90 time-base audit (2026-10-24, before Phase 1's first fit).** The
 66/33/99 experiments kept the bus at 33 MHz; 60/30/90 is the first time
 `clk_sys` itself changes, and everything divided from it would otherwise
