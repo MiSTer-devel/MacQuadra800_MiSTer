@@ -17,6 +17,7 @@ for earlier CPU66 trials. Baseline PRAM was restored before each new run.
 | Previous timing 24-small (last tested) | 66 | 3.159 | 3.475 | 1.397 | 2.515 | 26.642 | 2.420 |
 | New dual issue R3 | 33 | **1.800** | **1.806** | **0.937** | **2.269** | **13.309** | **1.569** |
 | New dual issue R3 | 66 | **3.614** | **3.637** | **1.579** | **2.807** | **26.824** | **2.667** |
+| New VRAM retirement | 33 | **1.801** | **1.807** | **0.982** | **2.381** | **13.313** | **1.617** |
 
 The new 33 MHz Mix improves 11.7% over the previous minimal build and
 reaches 94.8% of the photographed real machine. At 66 MHz, Mix improves
@@ -71,3 +72,8 @@ qualified on the new CPU, and 66 MHz CPU timing remains open.
 The [separate FPU suite comparison](dual-fpu-comparison.md) now includes
 first and after-Mix runs at both clocks, plus the older shipping and real
 Quadra references.
+
+The subsequent [memory-performance port](dual-memory-performance.md)
+measures 4.8% higher graphics at 33 MHz with timing closed and 89 fewer
+fitted ALMs. This is a single comparison, with disk/load variation noted
+in that report.

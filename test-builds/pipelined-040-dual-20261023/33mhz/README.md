@@ -16,7 +16,7 @@ fixes and documented Quartus17 workarounds. DUAL and BTIC are enabled,
 S1_CLASSES=011 (register/address companions; second-slot loads disabled),
 with8 KB each I/D cache and the other optional CPU features off.
 
-The branch defaults to this33 MHz recipe. All190 build-source files were
+The saved pipelined-040-dual checkpoint defaults to this33 MHz recipe. All190 build-source files were
 verified against the fitted archive; active QSF assignments match source
 commit19d9fc3. Artifact hashes, the original source88a3b0b plus its pinned
 compiler setting, and verification are recorded in artifact.json and
