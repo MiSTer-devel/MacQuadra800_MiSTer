@@ -7,7 +7,7 @@ and replaces its CPU RTL with apolkosnik's current `faster` branch,
 work and newer [Minimig fixes](https://github.com/apolkosnik/AP68040/tree/eed15a0c7553d4bf220d2f9c164077d76ea69cb6).
 The NeXT branch is still the older source we previously imported.
 
-The measured baseline will use upstream's register/address-register dual
+The measured baseline uses upstream's register/address-register dual
 issue and BTB target-word cache, with 8 KB instruction and data caches.
 Second-slot loads are disabled, matching upstream's latest hardware
 default: intermittent bad load data corrupted Minimig disk contents with
@@ -21,8 +21,8 @@ No old CPU66 timing optimization or DDR-VRAM change is included.
 
 The working branch defaults to CPU/bus 33 MHz, SDRAM 99 MHz. The existing
 CPU_AP68040_2X adapter selects the separate 66/33/99 MHz comparison. Each
-fit will pin its inputs and keep a separate Quartus database. Mac hardware
-qualification and Speedometer proceed at 33 MHz first, then 66 MHz.
+fit pins its inputs and keeps a separate Quartus database. Mac hardware
+qualification and Speedometer were run at 33 MHz first, then 66 MHz.
 
 Initial tag-RAM checks pass (8,192 cycles, 4,065 writes and 1,064
 same-address collisions). All four Quadra adapter cases pass: 1x normal
@@ -39,8 +39,8 @@ under [measurements](perf/dual_20261023).
 
 Removing only the Quadra load-capture fix makes adapter test 11 fail again;
 the retained fix passes. The t_ld1 event report also confirms actual paired
-retirements with the chosen hardware parameters. No new FPGA timing or
-hardware boot result is claimed yet.
+retirements with the chosen hardware parameters. Final fitting and
+hardware results follow below.
 
 ## What changes in the CPU
 
@@ -60,8 +60,8 @@ supply them while the instruction-cache lookup catches up. Its valid
 state and target tags must survive neither invalidation nor discarded
 refetches; the newer D1 hold fix addresses a stale-BTB livelock. The cache
 set count grows from 64 to 128, yielding 8 KB per I/D cache. The byte
-enable and tag templates remain explicit for Quartus17 inference. Final
-M10K use, area and timing must be measured after fitting.
+enable and tag templates remain explicit for Quartus 17 inference. Both
+final fits use 497 of 553 M10Ks; area and timing are recorded below.
 
 The upstream README's published out-of-context numbers describe the
 earlier scalar core, and the dual-issue design notes report Xilinx LUTs
@@ -136,8 +136,7 @@ hardware qualification; MD5467a90ca4793e68cf39981a7fea9f8ea.
 
 The whole-core area exceeds the minimal33MHz checkpoint by1,443ALMs
 (4.35% relative). The quoted26kALM context was not established by this
-measurement. Mac boot/Speedometer and the matching66MHz result remain
-pending at this checkpoint.
+measurement. The matching 66 MHz result is recorded in the final comparison below.
 
 ## 33 MHz hardware qualification
 
@@ -155,3 +154,34 @@ switch-off screen was observed. The source recipe now matches this exact
 candidate at19d9fc3; all190 build-source files were checked, with identical
 active QSF assignments. [Evidence](perf/dual_20261023/33mhz/mac/result.json).
 A/UX and CD audio are not qualified on this new CPU.
+
+## 66 MHz result and comparison
+
+R3 seed 38 fits at **35,346 ALMs (84.34%)**, 31,088 registers,
+497/553 M10Ks and 38 DSPs. CPU setup fails at **−3.308 ns** with
+TNS −2114.552 ns; CPU Fmax is 54.17 MHz. SDRAM +0.335 ns,
+machine bus +1.040 ns, HDMI +0.269 ns and minimum hold +0.180 ns pass.
+This is **1.769 ns worse** than the previously tested timing24-small
+CPU slack of −1.539 ns, while using 2,018 more ALMs (6.1%).
+
+The exact 66 MHz RBF (MD5 `45308760ed233a198ecdcbcd613836ef`) boots Mac OS 8.1
+with the same disposable image and baseline PRAM as 33 MHz. Finder,
+keyboard/mouse and clock advance pass. Speedometer completes Mix **3.614**
+and full PR **2.667**: CPU 3.637, graphics 1.579, disk 2.807, math 26.824,
+all one iteration. The Mix gain over timing24-small is **14.4%**;
+overall PR gains 10.2%. [Full comparison, including the real Quadra and
+previous runs](dual-speedometer-comparison.md).
+
+The [path analysis](perf/dual_20261023/66mhz/r3/path-analysis.json)
+identifies a different bottleneck from the previous scalar timing stack:
+76 of the worst 100 paths end in the D1 attribute-ROM address; six involve
+MMU translation/cache-hit logic. The worst path has 14 levels and 18.416 ns
+data delay, 57% routing. These are the next optimization targets; no new
+CPU optimization is included in this checkpoint. A/UX and CD audio remain
+unqualified, and 66 MHz is not timing-closed.
+
+Speedometer was quit without saving, Finder Shut Down was selected with
+a verified continuous gesture, and the explicit safe-to-switch-off screen
+was visually confirmed. [66 MHz hardware evidence](perf/dual_20261023/66mhz/mac/result.json).
+The board was then returned to Menu, clean test settings saved, and the
+original S0/PRAM restored with S2/CFG absences preserved.
