@@ -117,6 +117,91 @@ relying on an exact figure.
 - The shipping core is at 93-94 % of the device and its fits are a seed
   lottery; the dual core at 82 % fits every seed tried at 33 MHz.
 
+## Is the slowdown memory? (added 2026-10-24)
+
+The memory map as built -- the header comment at the top of
+`MacQuadra800.sv` ("RAM and ROM live in DDR3") is stale; the read mux at
+`MacQuadra800.sv:1007` is the truth:
+
+| Region | Where | Path and cost |
+|---|---|---|
+| RAM, 32/128 MB | **SDRAM** (16-bit, 99 MHz, open page, BL8) via `sdram_beat32` | first data 5 clk_sys (hardware-measured), a 16-byte line fill **15 clk_sys**; one retained line; 8-entry posted write FIFO |
+| ROM, 1 MB | **DDR3** (f2h bridge, 64-bit, `DDRAM_CLK = clk_sys`) | one 2-beat burst per 16-byte line, **9 clk_sys**; one retained line (`rom_line`) |
+| VRAM, 320 KB (advertised 512 KB by row compaction) | **on-chip**, 4 byte lanes x 82,016 = **324 M10Ks, 59 % of the 553** | CPU write acked in 1 clk, read in 3; DAFB scanout at 640x480, 1/2/4/8 bpp, registered 1-cycle port |
+| Ethernet mailbox | DDR3 | SONIC doorbell ring, not latency-sensitive |
+
+The decisive measurement is the dual R3 pair: the same bitstream family at
+33 and 66 MHz CPU with the **bus fixed at 33 MHz** in both. If a test
+waited on memory, doubling only the CPU clock could not double its score.
+
+| Score | 33 MHz | 66 MHz | Scaling |
+|---|---:|---:|---:|
+| Mix | 1.800 | 3.614 | 2.008x |
+| PR CPU | 1.806 | 3.637 | 2.014x |
+| PR Math | 13.309 | 26.824 | 2.015x |
+| FPU suite (after Mix) | 0.744 | 1.492 | 2.005x |
+| PR Graphics | 0.937 | 1.579 | 1.685x |
+| PR Disk | 2.269 | 2.807 | 1.237x |
+
+So Mix, CPU, Math and the FPU suite are **0 % memory-bound** on this core:
+their working sets sit in the 8 KB caches and the deficits against the
+shipping core (Math -37 %, FPU -23 %) are inside the CPU (FP store path,
+divider steps, FP op latency). Graphics is the one test with a bus
+component: solving a + b = 1, a/2 + b = 1/1.685 gives b = 0.19, so about a
+fifth of the Graphics test's time at 33 MHz is bus waits. The `+fillprobe`
+run (`rtl/quadra800.sv:639-646`) says what that fifth is: QuickDraw runs
+from ROM, misses the 8 KB I-cache hard, and in the 8-bit Color test **ROM
+fill beats outnumber VRAM beats several times** -- each a 9-clk DDR3 trip;
+the VRAM accesses themselves are acked in 1-3 clocks and the cost there is
+the CPU's 11-14 clk handling of an uncached access, not the memory. Faster
+memory therefore cannot move Mix/CPU/Math/FPU at all and can move Graphics
+by at most ~19 %, mostly through ROM fetch.
+
+Against the shipping core the memory path is identical (both 15/9 clk), so
+none of the dual core's deficit is memory. Against the real Quadra 800 the
+gap is partly memory: a real 68040 line burst at 33 MHz is on the order of
+10-12 bus clocks where ours is 15, and the real ROM is a zero-wait-state
+burst device where ours is a DDR3 round trip.
+
+**BlockMove.** Measured per byte (2026-10-22 microbenchmarks): MOVE16 2.40
+clk (shipping) vs 2.7 (pipelined); a `move.l (a0)+,(a1)+` loop 1.66 vs
+4.4. The 040 BlockMove uses MOVE16 for aligned bulk, so the common path is
+near parity; the plain-loop loss is copyback write-allocate (a destination
+line costs a 15-clk fill plus a 7-clk push where the write-through core
+posted four stores), which is authentic 68040 behaviour and is avoided only
+by MOVE16. Speeding up bulk copies on either core means a shorter SDRAM
+line fill; the floor is about 5 (first data) + 3 (eight 16-bit beats at
+99 MHz) + CPU/bus overhead, so ~10-11 clk is the realistic target, ~25 %
+per miss, felt in large copies and cache-missing code, not in Speedometer.
+
+**VRAM in DDR3 -- what it would look like.** It is an enabler, not a
+speedup: it frees ~320 M10Ks (room for 16+16 or 32+32 KB caches, a larger
+BTB/ATC) and allows a real 1 MB VRAM (16-bit 640x480, 832x624 at 8 bpp)
+if the DAFB model grows to match. The parts: (1) CPU stores post into a
+write FIFO with a byte/word combiner into 64-bit beats (the rejected
+external queue returns here; `PA_VRAM_POST` retirement stays); (2) CPU
+reads go through a small VRAM line cache (a handful of 64-byte lines,
+updated by the write path) because a DDR3 read is ~9 clk against 3 today
+and QuickDraw reads ~1 word per 2 it writes -- without the cache Graphics
+gets *worse*; (3) scanout prefetches a whole scanline into an M10K buffer
+(up to 1,280 bytes at 16 bpp, 2-3 M10Ks) so DDR3 arbitration jitter under
+the scaler never reaches the pixel clock; bandwidth is trivial (37 MB/s at
+640x480x16x60). `MISTER_FB` is not a shortcut: the framework's framebuffer
+reads 8/16/24/32 bpp only, and the Mac's 1/2/4 bpp modes would need
+expansion on write and a shadow for read-back. Cost estimate +700-1,000
+ALMs and a week-scale effort; the full-machine sim instantiates
+`quadra800`, not `emu`, so a DDR3 bridge model with randomised latency
+must come first. SDRAM is the wrong home (the one 16-bit port already
+carries every CPU fill, scanout would take ~20 % of it with page misses,
+and the 128 MB RAM option fills the module). The user has asked for this to
+be discussed before any architectural change.
+
+Ranked by speed per ALM, the memory-side items are: a **ROM next-line
+prefetch** (a second retained line, speculative DDR3 burst for line+1;
+~200 ALMs; attacks the Graphics bus share directly, both cores, measurable
+with `+fillprobe`); the **SDRAM fill 15 -> ~11 clk** (both cores, every
+miss); then **DDR3 VRAM** as the way to afford bigger caches.
+
 ## Provenance
 
 - Real Quadra 800: `docs/perf/dual_20261023/reference/result.json` (photograph transcription).

@@ -23,7 +23,11 @@ The user wants a small core close to apolkosnik's pipeline integration and a
 separate performance version, while avoiding feature growth that erases area
 savings. Keep useful checkpoints recoverable before further CPU changes.
 The requested clock target remains **66/33/99 MHz**; do not silently replace
-it with 30/60/90. The latest experiment tried FPU_PIPE alone at 33 MHz.
+it with a lower set. On 2026-10-24 the user said **60/30/90 MHz is possible**
+as an explicit intermediate step (CPU/bus/SDRAM, same 2:1 ratio; the dual
+R3 fit's Fmax is 54.17 MHz, so 60 needs about 10 % off the worst path
+where 66 needs 18 %) -- offer it as a named option, never as a quiet
+substitute. The latest experiment tried FPU_PIPE alone at 33 MHz.
 
 A later DDR-VRAM experiment is desired for more user VRAM/video capacity.
 The user explicitly requested discussion before making that architectural
