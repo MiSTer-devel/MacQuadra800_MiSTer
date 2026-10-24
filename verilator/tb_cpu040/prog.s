@@ -172,6 +172,62 @@ start:
 	lea	$10(a0),a0
 	cmpa.l	#$210,a0
 	bne	fail
+	moveq	#17,d7		; uncached VRAM stores, then read-after-write
+	lea	$F9009000,a0
+	move.w	#31,d1
+	move.l	#$10203040,d0
+.vfill	move.l	d0,(a0)+
+	addq.l	#1,d0
+	dbf	d1,.vfill
+	lea	$F9009000,a0
+	move.w	#31,d1
+	move.l	#$10203040,d0
+.vcheck	cmp.l	(a0)+,d0
+	bne	fail
+	addq.l	#1,d0
+	dbf	d1,.vcheck
+	lea	$F9009100,a0
+	move.l	#$11223344,(a0)
+	move.b	#$AA,1(a0)
+	move.w	#$BBCC,2(a0)
+	move.l	#$11AABBCC,$5000000C ; bench checks device did not pass stores
+	cmp.l	#$11AABBCC,(a0)
+	bne	fail
+	moveq	#18,d7		; locked RMW after an ordinary queued VRAM store
+	move.l	#$12345678,(a0)
+	move.l	#$12345678,d0
+	move.l	#$89ABCDEF,d1
+	cas.l	d0,d1,(a0)
+	bne	fail
+	cmp.l	#$89ABCDEF,(a0)
+	bne	fail
+	moveq	#19,d7		; crossing bus words keeps the precise slow path
+	move.l	#$CAFEBABE,9(a0)
+	cmp.l	#$CAFEBABE,9(a0)
+	bne	fail
+	move.w	#$4321,19(a0)
+	cmp.w	#$4321,19(a0)
+	bne	fail
+	moveq	#20,d7		; retirement and device ordering under interrupts
+	move.l	#1,$50000008
+	lea	$F9009200,a0
+	move.w	#31,d1
+	move.l	#$50607080,d0
+.v_irq	move.l	d0,(a0)+
+	addq.l	#1,d0
+	dbf	d1,.v_irq
+	move.l	#0,$50000008
+	lea	$F9009200,a0
+	move.w	#31,d1
+	move.l	#$50607080,d0
+.v_verify cmp.l	(a0)+,d0
+	bne	fail
+	addq.l	#1,d0
+	dbf	d1,.v_verify
+	moveq	#21,d7		; maintenance waits for the earlier posted store
+	move.l	#$55667788,$F9009100
+	cpusha	dc
+	move.l	#$55667788,$5000000C
 	cpusha	dc
 	move.l	#$A5A5A5A5,$50000000
 	cpusha	dc

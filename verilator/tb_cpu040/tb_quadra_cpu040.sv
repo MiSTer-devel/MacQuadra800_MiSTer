@@ -4,7 +4,9 @@
 // right-aligned data -- running tb_cpu040/prog.s.  Mailbox at $5000000x:
 // +0 the result ($A5A5A5A5 = pass), +4 drops the level 1 interrupt.
 `timescale 1ns/1ps
-module tb_quadra_cpu040;
+module tb_quadra_cpu040 #(
+	parameter VRAM_POST = 1
+);
 reg clk = 0;
 always #5 clk = ~clk;
 `ifdef CPU_AP68040_2X
@@ -28,7 +30,7 @@ reg         bus_ack = 0;
 reg  [31:0] bus_rdata = 0;
 reg   [2:0] ipl = 3'b111;
 
-quadra_cpu040 dut (
+quadra_cpu040 #(.AP040_VRAM_POST(VRAM_POST)) dut (
 	.clk(clk), .nreset(nreset), .ce(1'b1),
 `ifdef CPU_AP68040_2X
 	.clk_cpu(clk_cpu),
@@ -60,20 +62,40 @@ end
 integer nbytes;
 reg busy = 0;
 reg fast = 0;
+reg platform = 0;
 reg storm = 0;
 integer storm_iacks = 0;
 reg [31:0] port_cnt = 0;
 initial fast = $test$plusargs("fast");
+// Quadra's direct RAM/VRAM writes acknowledge in the next bus clock.
+initial platform = $test$plusargs("platform");
 reg [2:0] wait_n;
 reg [31:0] lfsr = 32'h1234567;
 integer beats = 0, reads = 0, writes = 0, cyc = 0;
+integer locked_writes = 0;
+integer vram_write_start = 0, vram_write_cycles = 0, vram_readback_cycles = 0;
+integer vram_posts = 0;
+always @(posedge dut.cpu_clk) if (nreset && dut.cpu.dmu.wb_vram_post && !dut.cpu.dmu.sn_frz)
+	vram_posts <= vram_posts + 1;
+always @(posedge clk) if (nreset) begin
+	if (dut.req && bus_ack && bus_addr == 32'hF9009000 && !dut.c_rw_n)
+		vram_write_start <= cyc;
+	if (dut.req && bus_ack && bus_addr == 32'hF900907C) begin
+		if (!dut.c_rw_n) vram_write_cycles <= cyc - vram_write_start;
+		else vram_readback_cycles <= cyc - vram_write_start;
+	end
+	if (dut.req && bus_ack && !dut.c_rw_n && !dut.cpu.lock_n) begin
+		locked_writes <= locked_writes + 1;
+	end
+end
 always @(posedge clk) begin
 	cyc <= cyc + 1;
 	lfsr <= {lfsr[30:0], lfsr[31] ^ lfsr[21] ^ lfsr[1] ^ lfsr[0]};
 	bus_ack <= 0;
 	// an ack in the clock after the request (quadra800's retained-line hit)
 	// or 1..4 clocks later
-	if (!busy && bus_req && !bus_ack && !(fast && lfsr[3])) begin
+	if (!busy && bus_req && !bus_ack && !(fast && lfsr[3]) &&
+	    !(platform && bus_write && ((bus_addr[31:30] == 2'b00) || bus_addr[31:21] == 11'b1111_1001_000))) begin
 		busy <= 1;
 		wait_n <= {1'b0, lfsr[1:0]};
 	end
@@ -88,6 +110,11 @@ always @(posedge clk) begin
 			if (bus_addr[31:28] == 4'h5) begin
 				if (bus_write && bus_addr[3:0] == 0) begin
 					if (bus_wdata == 32'hA5A5A5A5) begin
+						if (locked_writes == 0) $fatal(1, "locked write was not exercised");
+						if (VRAM_POST != 0 && vram_posts == 0) $fatal(1, "VRAM post was not exercised");
+						$display("VRAM posts: %0d", vram_posts);
+						$display("locked writes: %0d", locked_writes);
+						$display("VRAM: %0d write-stream cycles, %0d through readback", vram_write_cycles, vram_readback_cycles);
 						$display("PASS: %0d cycles, %0d beats", cyc, beats);
 						$finish;
 					end
@@ -98,6 +125,11 @@ always @(posedge clk) begin
 				if (bus_write && bus_addr[3:0] == 8) begin
 					if (!bus_wdata[0]) $display("storm: %0d interrupts during the copy, %0d port reads", storm_iacks, port_cnt);
 					storm <= bus_wdata[0]; port_cnt <= 0;
+				end
+				if (bus_write && bus_addr[3:0] == 12) begin
+					// Device writes must observe every older VRAM store.
+					if ({mem[16'h9100],mem[16'h9101],mem[16'h9102],mem[16'h9103]} !== bus_wdata)
+						$fatal(1, "device write overtook a queued VRAM write");
 				end
 				bus_rdata <= 0;
 				if (!bus_write && bus_addr[4]) begin

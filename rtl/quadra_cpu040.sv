@@ -30,7 +30,7 @@
 //
 //  Not provided with this CPU: the MMU walker port (the core walks through
 //  its own data cache and the bus), the retained-line sideband into the
-//  cache, the store buffer (the core has its own push buffer and copyback),
+//  cache, the external store buffer (VRAM stores retire in the DMU),
 //  and the SONIC D-cache snoop (the core snoops the 68040 way, which needs
 //  bus arbitration quadra800 does not have) -- build with the Ethernet off.
 //============================================================================
@@ -39,7 +39,8 @@ module quadra_cpu040
 #(
 	parameter AP040_HAS_FPU      = 1,   // (the core always has its FPU)
 	parameter AP040_ENABLE_CACHE = 1,
-	parameter AP040_STORE_BUFFER = 1
+	parameter AP040_STORE_BUFFER = 1, // legacy interface; external queue unused
+	parameter AP040_VRAM_POST = 1
 )
 (
 	input         clk,
@@ -125,6 +126,7 @@ ap68040 #(
 	// only RAM ($0-$3FFFFFFF) and the ROM window ($4xxxxxxx) are cacheable:
 	// everything else is a device, never read speculatively
 	.PA_IO_SERIAL(1),
+	.PA_VRAM_POST(AP040_VRAM_POST),
 	.PA_C0_MASK(32'hC000_0000), .PA_C0_MATCH(32'h0000_0000),
 	.PA_C1_MASK(32'hF000_0000), .PA_C1_MATCH(32'h4000_0000)
 ) cpu (

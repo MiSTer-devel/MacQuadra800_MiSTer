@@ -47,3 +47,11 @@ new implementation.
 Area figures for an isolated CPU or another host core cannot establish
 Quadra area or timing. The requested 33 and 66 MHz results must come from
 this complete integration and matched Speedometer hardware runs.
+
+Memory-performance follow-up (`pipelined-040-dual-memory`): the optional
+PA_VRAM_POST parameter defaults off upstream and is enabled by the Quadra
+wrapper. A validated, cache-inhibited, non-locked VRAM store within one
+bus word can retire when captured in the existing DMU bus registers. The
+engine remains occupied until the write finishes. Faults, cache hits,
+locked/RMW operations, crossing accesses and MOVE16 retain the precise
+path. See docs/dual-memory-performance.md for controls and qualification.

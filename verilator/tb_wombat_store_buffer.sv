@@ -36,7 +36,7 @@ integer guard;
 wombat_store_buffer dut (
 	.clk(clk), .nreset(nreset), .ce(ce),
 	.buffer_writes(buffer_writes),
-	.s_req(s_req), .s_write(s_write), .s_instr(s_instr),
+	.s_req(s_req), .s_posted(1'b0), .s_write(s_write), .s_instr(s_instr),
 	.s_size(s_size), .s_addr(s_addr), .s_wdata(s_wdata), .s_fc(s_fc),
 	.s_ack(s_ack), .s_rdata(s_rdata),
 	.m_req(m_req), .m_write(m_write), .m_instr(m_instr),
@@ -168,18 +168,20 @@ initial begin
 	repeat (2) @(posedge clk);
 
 	//------------------------------------------------------------------
-	// T3: two writes queue. A third is backpressured while full, then
-	// enters the freed slot and all three drain in program order.
+	// T3: the current queue has four slots. A fifth is backpressured
+	// while full, then enters the freed slot; all five drain in order.
 	//------------------------------------------------------------------
 	buffered_store(32'h0000_3000, 32'hB0B0_0001);
 	buffered_store(32'h0000_3004, 32'hB0B0_0002);
+	buffered_store(32'h0000_3008, 32'hB0B0_0003);
+	buffered_store(32'h0000_300C, 32'hB0B0_0004);
 	expect_head(32'h0000_3000, 32'hB0B0_0001);
 
 	@(negedge clk);
-	s_req = 1; s_write = 1; s_addr = 32'h0000_3008;
-	s_wdata = 32'hB0B0_0003;
+	s_req = 1; s_write = 1; s_addr = 32'h0000_3010;
+	s_wdata = 32'hB0B0_0005;
 	repeat (3) @(posedge clk);
-	if (s_ack) fail("full queue acknowledged a third store");
+	if (s_ack) fail("full queue acknowledged a fifth store");
 	ack_head();
 
 	guard = 0;
@@ -187,13 +189,17 @@ initial begin
 		@(posedge clk);
 		guard = guard + 1;
 	end
-	if (guard >= 30) fail("third store was not accepted after a slot freed");
+	if (guard >= 30) fail("fifth store was not accepted after a slot freed");
 	@(negedge clk);
 	s_req = 0;
 
 	expect_head(32'h0000_3004, 32'hB0B0_0002);
 	ack_head();
 	expect_head(32'h0000_3008, 32'hB0B0_0003);
+	ack_head();
+	expect_head(32'h0000_300C, 32'hB0B0_0004);
+	ack_head();
+	expect_head(32'h0000_3010, 32'hB0B0_0005);
 	ack_head();
 	repeat (3) @(posedge clk);
 	if (pending || m_req) fail("queue did not become idle after ordered drain");
@@ -492,14 +498,13 @@ initial begin
 	repeat (3) @(posedge clk);
 
 	if (errors == 0) $display("ALL TESTS PASSED");
-	else $display("TEST FAILED with %0d errors", errors);
+	else $fatal(1, "TEST FAILED with %0d errors", errors);
 	$finish;
 end
 
 initial begin
 	#200000;
-	$display("FAIL: global timeout");
-	$finish;
+	$fatal(1, "FAIL: global timeout");
 end
 
 endmodule

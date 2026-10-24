@@ -1,0 +1,345 @@
+diff --git a/MacQuadra800.qsf b/MacQuadra800.qsf
+--- a/MacQuadra800.qsf
++++ b/MacQuadra800.qsf
+@@ -889,0 +890 @@
++set_global_assignment -name SYSTEMVERILOG_FILE rtl/wombat_store_buffer.sv
+diff --git a/files.qip b/files.qip
+--- a/files.qip
++++ b/files.qip
+@@ -9,0 +10 @@
++set_global_assignment -name SYSTEMVERILOG_FILE rtl/wombat_store_buffer.sv
+diff --git a/rtl/ap68040_faster/rtl/ap68040.sv b/rtl/ap68040_faster/rtl/ap68040.sv
+--- a/rtl/ap68040_faster/rtl/ap68040.sv
++++ b/rtl/ap68040_faster/rtl/ap68040.sv
+@@ -37,0 +38,3 @@
++	// Quadra's on-chip, non-faulting VRAM: retire an ordinary store once
++	// captured by the DMU bus engine. Other hosts retain normal bus timing.
++	parameter bit          PA_VRAM_POST = 0,
+@@ -311 +314 @@
+-ap68040_dmu #(.DC1_ATC(DC1_ATC), .PA_IO_SERIAL(PA_IO_SERIAL),
++ap68040_dmu #(.DC1_ATC(DC1_ATC), .PA_IO_SERIAL(PA_IO_SERIAL), .PA_VRAM_POST(PA_VRAM_POST),
+diff --git a/rtl/ap68040_faster/rtl/ap68040_dmu.sv b/rtl/ap68040_faster/rtl/ap68040_dmu.sv
+--- a/rtl/ap68040_faster/rtl/ap68040_dmu.sv
++++ b/rtl/ap68040_faster/rtl/ap68040_dmu.sv
+@@ -66,0 +67 @@
++	parameter bit          PA_VRAM_POST = 0,
+@@ -766 +767 @@
+-	E_I_DONE
++	E_I_DONE, E_VRAM_DONE
+@@ -937,0 +939,12 @@
++// A platform-owned, non-faulting frame buffer can retire its store while
++// the existing bus engine drains it. Reuse bo's address/data registers;
++// add no write FIFO. The engine stays busy until completion, so a later
++// device/read/maintenance operation cannot pass it. A cache hit, fault,
++// locked RMW, split word, or MOVE16 keeps the normal precise path.
++wire wb_vram_post = PA_VRAM_POST && PA_IO_SERIAL && wb_st && (m4.r.mem == M_ST) &&
++                    !m4.split && m4.x.ok && !m4.x.flt && (!dc_en || !m4.x.hit) &&
++                    m4.x.cm[1] && !m4.r.lock && (m4.r.ack == 2'd0) &&
++                    (m4.r.msz != SZ_Q) &&
++                    ({1'b0,m4.r.a[1:0]} + nbytes(m4.r.msz) <= 3'd4) &&
++                    (m4.x.pa[31:21] == 11'b1111_1001_000) &&
++                    (e_st == E_IDLE) && !e_wst_done && !wfs_p1 && !mt_v;
+@@ -964 +977 @@
+-assign st_rdy   = st_rdy_r || (wb_fast && !sn_frz) || (wfs_p1 && m4.x1.hit && !sn_frz);
++assign st_rdy   = st_rdy_r || ((wb_fast || wb_vram_post) && !sn_frz) || (wfs_p1 && m4.x1.hit && !sn_frz);
+@@ -1257,0 +1271,20 @@
++			else if (wb_vram_post) begin
++				bo.line <= 1'b0;
++				bo.rd <= 1'b0;
++				bo.tt <= fc_tt(m4.r.fc);
++				bo.tm <= fc_tm(m4.r.fc);
++				bo.upa <= m4.x.upa;
++				bo.ci <= 1'b1;
++				bo.lock <= 1'b0;
++				bo.locke <= 1'b0;
++				bo.ack <= 2'd0;
++				bo.tln <= 2'd0;
++				bo_pa <= m4.x.pa;
++				bo_left <= nbytes(m4.r.msz);
++				bo_wd <= lalign(st_data, m4.r.msz);
++				e_ret <= E_VRAM_DONE;
++				e_st <= E_BUS;
++				st_rdy_r <= !adv_wb;
++				st_fault_r <= 1'b0;
++				e_wst_done <= !adv_wb;
++			end
+@@ -2306,0 +2340,8 @@
++		E_VRAM_DONE: begin
++			// WB already accepted the store. The engine was the only
++			// outstanding writer; it can now serve the next memory job.
++			// synthesis translate_off
++			if (bo_err) $fatal(1, "non-faulting VRAM post received a bus error");
++			// synthesis translate_on
++			e_st <= E_IDLE;
++		end
+diff --git a/rtl/quadra_cpu040.sv b/rtl/quadra_cpu040.sv
+--- a/rtl/quadra_cpu040.sv
++++ b/rtl/quadra_cpu040.sv
+@@ -18,2 +18,3 @@
+-//    first-miss fast paths expect.
+-//  - TA is bus_ack itself (quadra800's acknowledges are registered), with the
++//    first-miss fast paths expect. An ordered physical write queue can
++//    acknowledge qualified RAM/VRAM stores before they finish downstream.
++//  - TA is the transaction-side acknowledgement, with the
+@@ -33 +34 @@
+-//  cache, the store buffer (the core has its own push buffer and copyback),
++//  cache,
+@@ -42 +43,2 @@
+-	parameter AP040_STORE_BUFFER = 1
++	parameter AP040_STORE_BUFFER = 0,  // optional external queue; no fast-platform gain
++	parameter AP040_VRAM_POST = 1     // retire non-faulting VRAM writes in the DMU
+@@ -103,0 +106,5 @@
++wire        c_lock_n;
++wire        cpu_bus_ack, buffered_store_pending;
++wire [31:0] cpu_bus_rdata;
++wire [31:0] cpu_bus_addr, cpu_bus_wdata;
++wire  [1:0] cpu_bus_size;
+@@ -127,0 +135 @@
++	.PA_VRAM_POST(AP040_VRAM_POST),
+@@ -138 +146 @@
+-	.ciout_n(), .lock_n(), .locke_n(), .ts_n(c_ts_n), .tip_n(),
++	.ciout_n(), .lock_n(c_lock_n), .locke_n(), .ts_n(c_ts_n), .tip_n(),
+@@ -177 +185 @@
+-		else if (req && bus_ack) begin
++		else if (req && cpu_bus_ack) begin
+@@ -186,5 +194,2 @@
+-assign bus_req   = req;
+-assign bus_write = !c_rw_n;
+-assign bus_instr = (c_tm == 3'd2) || (c_tm == 3'd6);
+-assign bus_fc    = c_tm;
+-assign bus_size  = (c_siz == 2'b01) ? 2'd0 :          // byte
++wire cpu_bus_instr = (c_tm == 3'd2) || (c_tm == 3'd6);
++assign cpu_bus_size = (c_siz == 2'b01) ? 2'd0 :          // byte
+@@ -192 +197 @@
+-assign bus_addr  = is_line ? {c_a[31:4], c_a[3:2] + beat, 2'b00} : c_a;
++assign cpu_bus_addr = is_line ? {c_a[31:4], c_a[3:2] + beat, 2'b00} : c_a;
+@@ -194 +199 @@
+-assign bus_wdata = (c_siz == 2'b01) ? (c_do >> {~c_a[1:0], 3'd0}) :
++assign cpu_bus_wdata = (c_siz == 2'b01) ? (c_do >> {~c_a[1:0], 3'd0}) :
+@@ -197,0 +203,30 @@
++generate if (AP040_STORE_BUFFER != 0) begin : g_store_buffer
++	// Only non-faulting RAM/VRAM writes can be posted. The host qualifier
++	// excludes the boot overlay, and the queue checks the physical window.
++	// Locked writes go directly to memory. All reads and non-posted writes
++	// drain older stores first, preserving device and RMW ordering.
++	wombat_store_buffer #(.READ_BYPASS(0)) store_buffer (
++		.clk(clk), .nreset(nreset), .ce(ce),
++		.buffer_writes(store_buffer_ok && c_lock_n),
++		.s_req(req), .s_posted(1'b0), .s_write(!c_rw_n),
++		.s_instr(cpu_bus_instr), .s_size(cpu_bus_size),
++		.s_addr(cpu_bus_addr), .s_wdata(cpu_bus_wdata), .s_fc(c_tm),
++		.s_ack(cpu_bus_ack), .s_rdata(cpu_bus_rdata),
++		.m_req(bus_req), .m_write(bus_write), .m_instr(bus_instr),
++		.m_size(bus_size), .m_addr(bus_addr), .m_wdata(bus_wdata), .m_fc(bus_fc),
++		.m_ack(bus_ack), .m_rdata(bus_rdata), .m_err(berr),
++		.pending(buffered_store_pending)
++	);
++end else begin : g_no_store_buffer
++	assign bus_req = req;
++	assign bus_write = !c_rw_n;
++	assign bus_instr = cpu_bus_instr;
++	assign bus_size = cpu_bus_size;
++	assign bus_addr = cpu_bus_addr;
++	assign bus_wdata = cpu_bus_wdata;
++	assign bus_fc = c_tm;
++	assign cpu_bus_ack = bus_ack;
++	assign cpu_bus_rdata = bus_rdata;
++	assign buffered_store_pending = 1'b0;
++end endgenerate
++
+@@ -199,2 +234,2 @@
+-assign c_di      = (c_siz == 2'b01) ? {4{bus_rdata[7:0]}} :
+-                   (c_siz == 2'b10) ? {2{bus_rdata[15:0]}} : bus_rdata;
++assign c_di      = (c_siz == 2'b01) ? {4{cpu_bus_rdata[7:0]}} :
++                   (c_siz == 2'b10) ? {2{cpu_bus_rdata[15:0]}} : cpu_bus_rdata;
+@@ -204 +239 @@
+-assign c_ta_n    = !((req && bus_ack) || iack);
++assign c_ta_n    = !((req && cpu_bus_ack) || iack);
+@@ -217 +252 @@
+-	if (!nreset || !((ts && !is_ack) || xfer) || bus_ack || stall_hold)
++	if (!nreset || !((ts && !is_ack) || xfer) || cpu_bus_ack || stall_hold)
+@@ -238 +273 @@
+-assign debug_busy     = xfer;
++assign debug_busy     = xfer || buffered_store_pending;
+diff --git a/rtl/wombat_store_buffer.sv b/rtl/wombat_store_buffer.sv
+--- a/rtl/wombat_store_buffer.sv
++++ b/rtl/wombat_store_buffer.sv
+@@ -2 +2 @@
+-//  wombat_store_buffer — two-entry ordered CPU write queue.
++//  wombat_store_buffer — four-entry ordered CPU write queue.
+@@ -20 +20,4 @@
+-	parameter ENABLE = 1
++	parameter ENABLE = 1,
++	// The pin-bus CPU integration drains before every read, including locked
++	// read/modify/write cycles. Preserve the older cache wrapper's bypass.
++	parameter READ_BYPASS = 1
+@@ -113 +116 @@
+-wire pass_ok = (ENABLE != 0) && s_req && !s_write && !buffer_req &&
++wire pass_ok = (ENABLE != 0) && (READ_BYPASS != 0) && s_req && !s_write && !buffer_req &&
+diff --git a/verilator/Makefile b/verilator/Makefile
+--- a/verilator/Makefile
++++ b/verilator/Makefile
+@@ -352,0 +353,3 @@
++CPU040_STORE_BUFFER ?= 0
++CPU040_VRAM_POST ?= 1
++CPU040_TAG ?=
+@@ -356,7 +359,7 @@
+-	$V --binary --timing -j 8 -Wno-fatal -Wno-lint -Wno-style -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040 -o tb_quadra_cpu040 $(FAST040_SRC) ../rtl/quadra_cpu040.sv tb_cpu040/tb_quadra_cpu040.sv $(FAST040_CHECKS)
+-	./obj_dir_tb_cpu040/tb_quadra_cpu040 > obj_dir_tb_cpu040/normal.log
+-	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040/normal.log
+-	grep -q '^PASS:' obj_dir_tb_cpu040/normal.log
+-	./obj_dir_tb_cpu040/tb_quadra_cpu040 +fast > obj_dir_tb_cpu040/fast.log
+-	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040/fast.log
+-	grep -q '^PASS:' obj_dir_tb_cpu040/fast.log
++	$V --binary --timing -j 8 -Wno-fatal -Wno-lint -Wno-style -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040$(CPU040_TAG) -o tb_quadra_cpu040 -GSTORE_BUFFER=$(CPU040_STORE_BUFFER) -GVRAM_POST=$(CPU040_VRAM_POST) $(FAST040_SRC) ../rtl/quadra_cpu040.sv ../rtl/wombat_store_buffer.sv tb_cpu040/tb_quadra_cpu040.sv $(FAST040_CHECKS)
++	./obj_dir_tb_cpu040$(CPU040_TAG)/tb_quadra_cpu040 > obj_dir_tb_cpu040$(CPU040_TAG)/normal.log
++	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040$(CPU040_TAG)/normal.log
++	grep -q '^PASS:' obj_dir_tb_cpu040$(CPU040_TAG)/normal.log
++	./obj_dir_tb_cpu040$(CPU040_TAG)/tb_quadra_cpu040 +fast > obj_dir_tb_cpu040$(CPU040_TAG)/fast.log
++	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040$(CPU040_TAG)/fast.log
++	grep -q '^PASS:' obj_dir_tb_cpu040$(CPU040_TAG)/fast.log
+@@ -368,7 +371,7 @@
+-	$V --binary --timing -j 8 -Wno-fatal -Wno-lint -Wno-style +define+CPU_AP68040_2X=1 -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040_2x -o tb_quadra_cpu040 $(FAST040_SRC) ../rtl/quadra_cpu040.sv tb_cpu040/tb_quadra_cpu040.sv $(FAST040_CHECKS)
+-	./obj_dir_tb_cpu040_2x/tb_quadra_cpu040 > obj_dir_tb_cpu040_2x/normal.log
+-	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040_2x/normal.log
+-	grep -q '^PASS:' obj_dir_tb_cpu040_2x/normal.log
+-	./obj_dir_tb_cpu040_2x/tb_quadra_cpu040 +fast > obj_dir_tb_cpu040_2x/fast.log
+-	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040_2x/fast.log
+-	grep -q '^PASS:' obj_dir_tb_cpu040_2x/fast.log
++	$V --binary --timing -j 8 -Wno-fatal -Wno-lint -Wno-style +define+CPU_AP68040_2X=1 -I$(FAST040) -I$(FAST040)/gen -I$(FAST040)/fpu --top-module tb_quadra_cpu040 --Mdir ./obj_dir_tb_cpu040_2x$(CPU040_TAG) -o tb_quadra_cpu040 -GSTORE_BUFFER=$(CPU040_STORE_BUFFER) -GVRAM_POST=$(CPU040_VRAM_POST) $(FAST040_SRC) ../rtl/quadra_cpu040.sv ../rtl/wombat_store_buffer.sv tb_cpu040/tb_quadra_cpu040.sv $(FAST040_CHECKS)
++	./obj_dir_tb_cpu040_2x$(CPU040_TAG)/tb_quadra_cpu040 > obj_dir_tb_cpu040_2x$(CPU040_TAG)/normal.log
++	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040_2x$(CPU040_TAG)/normal.log
++	grep -q '^PASS:' obj_dir_tb_cpu040_2x$(CPU040_TAG)/normal.log
++	./obj_dir_tb_cpu040_2x$(CPU040_TAG)/tb_quadra_cpu040 +fast > obj_dir_tb_cpu040_2x$(CPU040_TAG)/fast.log
++	grep -E 'PASS|FAIL|TIMEOUT|ERROR' obj_dir_tb_cpu040_2x$(CPU040_TAG)/fast.log
++	grep -q '^PASS:' obj_dir_tb_cpu040_2x$(CPU040_TAG)/fast.log
+@@ -378 +381 @@
+-V_SRC040 = $(filter-out $(RTL)/wombat_cpu.sv $(RTL)/wombat_store_buffer.sv $(AP)/% $(RTL)/ap68040/%,$(V_SRC)) \
++V_SRC040 = $(filter-out $(RTL)/wombat_cpu.sv $(AP)/% $(RTL)/ap68040/%,$(V_SRC)) \
+diff --git a/verilator/tb_cpu040/prog.s b/verilator/tb_cpu040/prog.s
+--- a/verilator/tb_cpu040/prog.s
++++ b/verilator/tb_cpu040/prog.s
+@@ -174,0 +175,29 @@
++	moveq	#17,d7		; uncached VRAM stores, then read-after-write
++	lea	$F9009000,a0
++	move.w	#31,d1
++	move.l	#$10203040,d0
++.vfill	move.l	d0,(a0)+
++	addq.l	#1,d0
++	dbf	d1,.vfill
++	lea	$F9009000,a0
++	move.w	#31,d1
++	move.l	#$10203040,d0
++.vcheck	cmp.l	(a0)+,d0
++	bne	fail
++	addq.l	#1,d0
++	dbf	d1,.vcheck
++	lea	$F9009100,a0
++	move.l	#$11223344,(a0)
++	move.b	#$AA,1(a0)
++	move.w	#$BBCC,2(a0)
++	move.l	#$11AABBCC,$5000000C ; bench checks device did not pass stores
++	cmp.l	#$11AABBCC,(a0)
++	bne	fail
++	moveq	#18,d7		; locked RMW after an ordinary queued VRAM store
++	move.l	#$12345678,(a0)
++	move.l	#$12345678,d0
++	move.l	#$89ABCDEF,d1
++	cas.l	d0,d1,(a0)
++	bne	fail
++	cmp.l	#$89ABCDEF,(a0)
++	bne	fail
+diff --git a/verilator/tb_cpu040/tb_quadra_cpu040.sv b/verilator/tb_cpu040/tb_quadra_cpu040.sv
+--- a/verilator/tb_cpu040/tb_quadra_cpu040.sv
++++ b/verilator/tb_cpu040/tb_quadra_cpu040.sv
+@@ -7 +7,4 @@
+-module tb_quadra_cpu040;
++module tb_quadra_cpu040 #(
++	parameter STORE_BUFFER = 0,
++	parameter VRAM_POST = 1
++);
+@@ -31 +34 @@
+-quadra_cpu040 dut (
++quadra_cpu040 #(.AP040_STORE_BUFFER(STORE_BUFFER), .AP040_VRAM_POST(VRAM_POST)) dut (
+@@ -62,0 +66 @@
++reg platform = 0;
+@@ -66,0 +71,2 @@
++// Quadra's direct RAM/VRAM writes acknowledge in the next bus clock.
++initial platform = $test$plusargs("platform");
+@@ -69,0 +76,20 @@
++integer early_stores = 0, locked_writes = 0;
++integer vram_write_start = 0, vram_write_cycles = 0, vram_readback_cycles = 0;
++integer vram_posts = 0;
++always @(posedge dut.cpu_clk) if (nreset && dut.cpu.dmu.wb_vram_post && !dut.cpu.dmu.sn_frz)
++	vram_posts <= vram_posts + 1;
++always @(posedge clk) if (nreset) begin
++	if (dut.req && dut.cpu_bus_ack && dut.cpu_bus_addr == 32'hF9009000 && !dut.c_rw_n)
++		vram_write_start <= cyc;
++	if (dut.req && dut.cpu_bus_ack && dut.cpu_bus_addr == 32'hF900907C) begin
++		if (!dut.c_rw_n) vram_write_cycles <= cyc - vram_write_start;
++		else vram_readback_cycles <= cyc - vram_write_start;
++	end
++	if (dut.req && dut.cpu_bus_ack && !dut.c_rw_n && !bus_ack)
++		early_stores <= early_stores + 1;
++	if (dut.req && dut.cpu_bus_ack && !dut.c_rw_n && !dut.c_lock_n) begin
++		locked_writes <= locked_writes + 1;
++		if (!bus_ack || dut.buffered_store_pending)
++			$fatal(1, "locked write acknowledged before earlier stores drained");
++	end
++end
+@@ -76 +102,2 @@
+-	if (!busy && bus_req && !bus_ack && !(fast && lfsr[3])) begin
++	if (!busy && bus_req && !bus_ack && !(fast && lfsr[3]) &&
++	    !(platform && bus_write && ((bus_addr[31:30] == 2'b00) || bus_addr[31:21] == 11'b1111_1001_000))) begin
+@@ -90,0 +118,7 @@
++						if (STORE_BUFFER != 0 && early_stores == 0)
++							$fatal(1, "write queue was not exercised");
++						if (locked_writes == 0) $fatal(1, "locked write was not exercised");
++						if (VRAM_POST != 0 && vram_posts == 0) $fatal(1, "VRAM post was not exercised");
++						$display("VRAM posts: %0d", vram_posts);
++						$display("queue: %0d early stores, %0d locked writes", early_stores, locked_writes);
++						$display("VRAM: %0d write-stream cycles, %0d through readback", vram_write_cycles, vram_readback_cycles);
+@@ -100,0 +135,5 @@
++				end
++				if (bus_write && bus_addr[3:0] == 12) begin
++					// Device writes must observe every older VRAM store.
++					if ({mem[16'h9100],mem[16'h9101],mem[16'h9102],mem[16'h9103]} !== bus_wdata)
++						$fatal(1, "device write overtook a queued VRAM write");
+diff --git a/verilator/tb_wombat_store_buffer.sv b/verilator/tb_wombat_store_buffer.sv
+--- a/verilator/tb_wombat_store_buffer.sv
++++ b/verilator/tb_wombat_store_buffer.sv
+@@ -39 +39 @@
+-	.s_req(s_req), .s_write(s_write), .s_instr(s_instr),
++	.s_req(s_req), .s_posted(1'b0), .s_write(s_write), .s_instr(s_instr),
+@@ -171,2 +171,2 @@
+-	// T3: two writes queue. A third is backpressured while full, then
+-	// enters the freed slot and all three drain in program order.
++	// T3: the current queue has four slots. A fifth is backpressured
++	// while full, then enters the freed slot; all five drain in order.
+@@ -175,0 +176,2 @@
++	buffered_store(32'h0000_3008, 32'hB0B0_0003);
++	buffered_store(32'h0000_300C, 32'hB0B0_0004);
+@@ -179,4 +181,4 @@
+-	s_req = 1; s_write = 1; s_addr = 32'h0000_3008;
+-	s_wdata = 32'hB0B0_0003;
+-	repeat (3) @(posedge clk);
+-	if (s_ack) fail("full queue acknowledged a third store");
++	s_req = 1; s_write = 1; s_addr = 32'h0000_3010;
++	s_wdata = 32'hB0B0_0005;
++	repeat (3) @(posedge clk);
++	if (s_ack) fail("full queue acknowledged a fifth store");
+@@ -190 +192 @@
+-	if (guard >= 30) fail("third store was not accepted after a slot freed");
++	if (guard >= 30) fail("fifth store was not accepted after a slot freed");
+@@ -196,0 +199,4 @@
++	ack_head();
++	expect_head(32'h0000_300C, 32'hB0B0_0004);
++	ack_head();
++	expect_head(32'h0000_3010, 32'hB0B0_0005);
+@@ -495 +501 @@
+-	else $display("TEST FAILED with %0d errors", errors);
++	else $fatal(1, "TEST FAILED with %0d errors", errors);
+@@ -501,2 +507 @@
+-	$display("FAIL: global timeout");
+-	$finish;
++	$fatal(1, "FAIL: global timeout");

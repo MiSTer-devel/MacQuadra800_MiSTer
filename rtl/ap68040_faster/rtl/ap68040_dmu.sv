@@ -64,6 +64,7 @@ module ap68040_dmu
 	// -- the Mac ROM runs with translation off, whose default mode is
 	// cacheable, and the bus's TCI comes too late to stop a speculative read.
 	parameter bit          PA_IO_SERIAL = 0,
+	parameter bit          PA_VRAM_POST = 0,
 	parameter logic [31:0] PA_C0_MASK = 32'h0, PA_C0_MATCH = 32'h0,
 	parameter logic [31:0] PA_C1_MASK = 32'h0, PA_C1_MATCH = 32'h0
 )
@@ -763,7 +764,7 @@ typedef enum logic [5:0] {
 	E_BUS, E_BUS_W,
 	E_TW_START, E_TW_DESC, E_TW_DESCW, E_TW_DESCW2, E_TW_DLK, E_TW_DBUS, E_TW_EVAL, E_TW_UPD, E_TW_UPD_W,
 	E_TW_LKW, E_TW_DONE,
-	E_I_DONE
+	E_I_DONE, E_VRAM_DONE
 } est_t;
 
 est_t        e_st, e_ret, e_sret, e_wret;
@@ -935,6 +936,18 @@ logic        wfs_p1;
 wire wb_fs = wb_st && m4.split && m4.x.ok && !m4.x.flt && m4.x.hit && m4.x.cm == 2'b01 &&
              m4.x1.ok && !m4.x1.flt && m4.x1.hit && m4.x1.cm == 2'b01 && dc_en &&
              !m4.r.lock && (m4.r.msz != SZ_Q) && (e_st == E_IDLE) && !e_wst_done && !wfs_p1;
+// A platform-owned, non-faulting frame buffer can retire its store while
+// the existing bus engine drains it. Reuse bo's address/data registers;
+// add no write FIFO. The engine stays busy until completion, so a later
+// device access or maintenance operation cannot pass it. A cache hit, fault,
+// locked RMW, split word, or MOVE16 keeps the normal precise path.
+wire wb_vram_post = PA_VRAM_POST && PA_IO_SERIAL && wb_st && (m4.r.mem == M_ST) &&
+                    !m4.split && m4.x.ok && !m4.x.flt && (!dc_en || !m4.x.hit) &&
+                    m4.x.cm[1] && !m4.r.lock && (m4.r.ack == 2'd0) &&
+                    (m4.r.msz != SZ_Q) &&
+                    ({1'b0,m4.r.a[1:0]} + nbytes(m4.r.msz) <= 3'd4) &&
+                    (m4.x.pa[31:21] == 11'b1111_1001_000) &&
+                    (e_st == E_IDLE) && !e_wst_done && !wfs_p1 && !mt_v;
 wire   [2:0] wfs_n0  = 3'(5'd16 - {1'b0, m4.r.a[3:0]});
 wire  [31:0] wfs_acc = lalign(st_data, m4.r.msz);
 
@@ -961,7 +974,7 @@ always_ff @(posedge clk)
 // store ready: the fast store answers in its own WB cycle (the engine's
 // stores through the registered pulse)
 logic st_rdy_r, st_fault_r;
-assign st_rdy   = st_rdy_r || (wb_fast && !sn_frz) || (wfs_p1 && m4.x1.hit && !sn_frz);
+assign st_rdy   = st_rdy_r || ((wb_fast || wb_vram_post) && !sn_frz) || (wfs_p1 && m4.x1.hit && !sn_frz);
 assign st_fault = st_rdy_r && st_fault_r;
 
 // a failed line fill: the long words of the line the access needs (this
@@ -1255,6 +1268,26 @@ always_ff @(posedge clk) begin
 				;                       // a split WB store's second part next
 			else if (mt_v && !mt_done)
 				e_st <= E_M_START;
+			else if (wb_vram_post) begin
+				bo.line <= 1'b0;
+				bo.rd <= 1'b0;
+				bo.tt <= fc_tt(m4.r.fc);
+				bo.tm <= fc_tm(m4.r.fc);
+				bo.upa <= m4.x.upa;
+				bo.ci <= 1'b1;
+				bo.lock <= 1'b0;
+				bo.locke <= 1'b0;
+				bo.ack <= 2'd0;
+				bo.tln <= 2'd0;
+				bo_pa <= m4.x.pa;
+				bo_left <= nbytes(m4.r.msz);
+				bo_wd <= lalign(st_data, m4.r.msz);
+				e_ret <= E_VRAM_DONE;
+				e_st <= E_BUS;
+				st_rdy_r <= !adv_wb;
+				st_fault_r <= 1'b0;
+				e_wst_done <= !adv_wb;
+			end
 			else if (wb_slow)
 				e_st <= E_W_START;
 			else if (((dc2_slow && !dm_s1) || (e_job && m2.r.v && !e_dc2_done)) && !kill_now) begin
@@ -2303,6 +2336,14 @@ always_ff @(posedge clk) begin
 			end
 			steal <= 1'b0;
 			e_st  <= e_ret;
+		end
+		E_VRAM_DONE: begin
+			// WB already accepted the store. The engine was the only
+			// outstanding writer; it can now serve the next memory job.
+			// synthesis translate_off
+			if (bo_err) $fatal(1, "non-faulting VRAM post received a bus error");
+			// synthesis translate_on
+			e_st <= E_IDLE;
 		end
 		E_I_DONE: begin
 			iw_done <= 1'b1;
