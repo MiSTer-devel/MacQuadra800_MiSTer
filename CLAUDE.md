@@ -1,6 +1,10 @@
 # MacQuadra800_MiSTer — working notes for Claude
 
-Start with [RESUME-20261002-release-and-scaler.md](RESUME-20261002-release-and-scaler.md):
+Start with [RESUME-20261024-dual-memory-and-fpu.md](RESUME-20261024-dual-memory-and-fpu.md)
+for the current dual-issue memory branch, completed FPU trial, saved checkpoints,
+open 66 MHz timing work and restored hardware state.
+
+For earlier release history, read [RESUME-20261002-release-and-scaler.md](RESUME-20261002-release-and-scaler.md):
 the state after the 20261002 release (three fixes, one known scaler fault),
 what is open (area by code optimisation only, the unproven scaler guard) and
 the rules the user set that night -- no reboot loops or repeat-load screens
