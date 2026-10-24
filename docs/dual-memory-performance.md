@@ -81,5 +81,12 @@ Including readback:855 versus918 at33MHz and554 versus582 at66MHz.
 FPGA area/timing and hardware performance are still pending; synthetic loop gains are not Speedometer
 results or a release qualification.
 
-The first33MHz fit is running from source8e3e0b9 in a separate pinned
-Quartus directory; the source manifest records every build input.
+The first33MHz fit from source8e3e0b9 passes all timing checks: CPU/bus
++1.245ns,SDRAM+0.511ns,HDMI+0.668ns,minimumhold+0.194ns. It uses34,554
+ALMs (82.45%),89 fewer than the baseline fit; placement differences also
+affect whole-core area. Synthesis adds only3 registers (29,318 versus
+29,315); fitted registers are30,052 versus29,927 after physical optimization.
+M10Ks remain497/553 andDSPs38. All memory/dual inference guards pass,
+and the new return state is retained. [Reports](perf/dual_memory_20261023/33mhz/fit-s38/artifact.json).
+The exact RBF is preserved under test-builds/pipelined-040-dual-memory-20261023.
+Mac hardware qualification remains pending.

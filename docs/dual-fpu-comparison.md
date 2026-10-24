@@ -8,8 +8,9 @@ dual-issue R3 bitstreams from checkpoint43a5280, not the new memory port.
 | Build/run | CPU MHz | KWhetstones/s | Matrix seconds | FFT seconds | FPU average |
 |---|---:|---:|---:|---:|---:|
 | Real Quadra800 photograph | 33 | 5456.609 | 0.713 | 0.288 | 1.011 |
-| Older shipping20260930, first | 33 | — | — | — | 0.953 |
-| Older shipping20260930, warm | 33 | — | — | — | 0.961–0.968 |
+| Older shipping20260930, first | 33 | 4589.450 | 0.690 | 0.301 | 0.953 |
+| Older shipping20260930, after Mix | 33 | 4600.260 | 0.723 | 0.281 | 0.961 |
+| Older shipping20260930, extra warm | 33 | 4621.136 | 0.711 | 0.280 | 0.968 |
 | Dual R3, first | 33 | 3504.934 | 0.836 | 0.406 | 0.741 |
 | Dual R3, after Mix | 33 | 3503.977 | 0.828 | 0.406 | 0.744 |
 | Dual R3, first | 66 | 7060.650 | 0.422 | 0.202 | 1.484 |
