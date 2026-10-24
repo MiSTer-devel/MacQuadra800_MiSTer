@@ -238,6 +238,26 @@ needs Ethernet (the SONIC snoop, cost unknown) is still open.
 | **2. Small core at 33** (second branch from `6bfd9c0`, concurrent with 1; the two do not share files) | Only what Phase 0 points at, one change per fit, hardware medians after each: the FP fix (divider steps and/or the FP store path), uncached-read ordering (Graphics), then the ROM next-line prefetch (platform side, helps both cores). | Hard cap 36,000 ALMs. No FPU_PIPE / LOOP_PRED / EARLY_RES / second-slot loads: all measured as area for nothing. |
 | **3. VRAM to DDR3 and the video modes** | After a core meets its target. First a DDR3 bridge model with randomised latency for the sim (the full-machine sim instantiates `quadra800`, not `emu`), then write FIFO + read line cache + scanline buffer, then the DAFB timing generator and monitor-sense codes (the video PLL is already reconfigurable). | Discussed with the user before it starts. |
 
+**60/30/90 time-base audit (2026-10-24, before Phase 1's first fit).** The
+66/33/99 experiments kept the bus at 33 MHz; 60/30/90 is the first time
+`clk_sys` itself changes, and everything divided from it would otherwise
+run 10 % slow -- including the VIA timers Speedometer times itself with,
+which would inflate every score by ~11 %. The PLL is
+`rtl/pll/pll_0002.v:34-41` (strings "33.000000 MHz" / "99.000000 MHz" /
+"66.000000 MHz"; the `.sdc` uses `derive_pll_clocks`, so no constraint
+edit). The constants to re-derive from one `SYS_HZ` parameter plumbed from
+the top: `rtl/iosb.sv:18` `E_HALF = 21` (VIA E clock, 783 kHz), `:19`
+`TICK_HALF = 274314` (60.15 Hz tick), `:300-301` `SHIFT_DELAY` /
+`IDLE_DELAY` (ADB ms), `:639` `DBG_BAUD_DIV`, `:1048` `scc
+#(.SYS_CLK_HZ(33_000_000))`; `rtl/easc.sv:69` `SAMPLE_DIV = 1483` (22.257
+kHz); `rtl/ncr53c96.sv:1849` `cd_audio #(.CLK_HZ(33_000_000))`;
+`rtl/rtc3430042.sv:17` `SEC_DIV = 33000000`. The SDRAM controller's
+refresh count in `rtl/sdram.sv` must be checked for the 99 -> 90 MHz
+`clk_ram` as well. The CPU clock enters as PLL `outclk_2` under
+`CPU_AP68040_2X` (`MacQuadra800.sv:382`, `rtl/quadra_cpu040.sv:106-115`,
+`cpu_bclk_en` on the falling edge); the 2:1 ratio is what that adapter
+assumes, so 60/30 stays paired.
+
 Housekeeping for the first RTL commit on either branch: the header of
 `MacQuadra800.sv` still says RAM and ROM live in DDR3; RAM is in SDRAM
 (`MacQuadra800.sv:1007`).
