@@ -65,7 +65,7 @@ final fits use 497 of 553 M10Ks; area and timing are recorded below.
 
 The upstream README's published out-of-context numbers describe the
 earlier scalar core, and the dual-issue design notes report Xilinx LUTs
-and slices. Neither establishes the quoted approximately26k ALM result
+and slices. Neither establishes the quoted approximately 26k ALM result
 for a complete Quadra build. The comparison here keeps our peripherals,
 VRAM, bus adapter and default feature selection, and reports whole-core
 ALMs as well as actual Mac benchmark results.
@@ -80,7 +80,7 @@ hardware despite passing RTL simulations. No fit or hardware test used
 these netlists.
 
 Separately, synthesis reported 102,891/102,895 total registers and an
-estimated78,207 ALMs: the two framework OSD buffers (32,768 data bits
+estimated 78,207 ALMs: the two framework OSD buffers (32,768 data bits
 each) and MT32 LCD buffer (8,192 data bits) mapped into registers. CPU
 cache slices, tag RAMs, predecoder ROM and BTIC word RAMs did infer as
 block RAM. The compiler probe and mapping investigation precede any
@@ -97,62 +97,66 @@ automatic resource selection. The next A&S must verify those memories,
 36 RF MLAB banks, and nonconstant companion-valid state before fitting.
 No VRAM storage or guest-visible pipeline behavior is changed.
 
-All225 CPU cases pass again after the predicate representation change,
-with identical cycle counts in every case. Both1x and2x adapter variants
+All 225 CPU cases pass again after the predicate representation change,
+with identical cycle counts in every case. Both 1x and 2x adapter variants
 also retain identical cycles and beat counts under normal and fast
 acknowledgements. The exact R2 inputs and mapping checks are pinned before
 restarting full synthesis.
 
 ## Compiler RAM-budget comparison
 
-After the pairing fix, R2 preserves all36 RF banks and nonconstant
+After the pairing fix, R2 preserves all 36 RF banks and nonconstant
 companion-valid state. Its forced OSD/LCD memories infer correctly, but
 the automatic RAM-budget heuristic instead puts both scaler polyphase
 coefficient memories (10,240 bits each) into registers. The 33 MHz fitter
-reports needing4,429 LABs where the device provides4,191.
+reports needing 4,429 LABs where the device provides 4,191.
 
 R3 keeps every RTL file identical and disables
 SYNTH_RESOURCE_AWARE_INFERENCE_FOR_BLOCK_RAM in its isolated QSF. This
-setting name was obtained from the installed17.0 project API. The
+setting name was obtained from the installed 17.0 project API. The
 [Standard Edition guide](https://docs.altera.com/r/docs/683283/18.1/design-compilation-user-guide-quartus-prime-standard-edition/resource-aware-ram-rom-and-shift-register-inference?contentId=qyeeXMpVNhjBnX13_IsAxQ)
 describes this budget-driven RAM-to-logic fallback; the actual fit still
 must verify physical RAM availability.
 
-The 33 MHz R3 synthesis has29,315 registers and3,722,339 block-memory bits,
-compared with49,811 registers and3,701,859 bits in R2. The20,496-register reduction closely matches the20,480 coefficient
-memory bits restored to RAM. This is a compiler mapping comparison;
+The 33 MHz R3 synthesis has 29,315 registers and 3,722,339 block-memory bits,
+compared with 49,811 registers and 3,701,859 bits in R2. The 20,496-register
+reduction closely matches the 20,480 coefficient memory bits restored to RAM. This is a compiler mapping comparison;
 CPU behavior, clocks and video architecture are unchanged. A matching
 66 MHz R3 build is pinned separately. Main's recipe is frozen while the
 isolated flows run.
 
-## First timing-passing33 MHz result
+## First timing-passing 33 MHz result
 
-R3 seed38 fits successfully at34,643ALMs (82.66%),29,927registers,
-497/553M10Ks and38DSPs. All setup and hold checks pass: CPU/bus+1.374ns,
-SDRAM+0.099ns,HDMI+0.407ns andminimumhold+0.167ns. All8 additional path
-reports are preserved under33mhz/r3/fit-s38. The exact experimental RBF
+R3 seed 38 fits successfully at 34,643 ALMs (82.66%), 29,927 registers,
+497/553 M10Ks and 38 DSPs. All setup and hold checks pass: CPU/bus +1.374 ns,
+SDRAM +0.099 ns, HDMI +0.407 ns and minimum hold +0.167 ns. All 8 additional
+path reports are preserved under 33mhz/r3/fit-s38. The exact experimental RBF
 is preserved under test-builds/pipelined-040-dual-20261023/33mhz before
-hardware qualification; MD5467a90ca4793e68cf39981a7fea9f8ea.
+hardware qualification; MD5 467a90ca4793e68cf39981a7fea9f8ea.
 
-The whole-core area exceeds the minimal33MHz checkpoint by1,443ALMs
-(4.35% relative). The quoted26kALM context was not established by this
+The whole-core area exceeds the minimal 33 MHz checkpoint by 1,443 ALMs
+(4.35% relative). The quoted 26k ALM context was not established by this
 measurement. The matching 66 MHz result is recorded in the final comparison below.
 
 ## 33 MHz hardware qualification
 
-The exact timing-passing RBF boots Mac OS8.1 on`.192` with32 MB and
+The exact timing-passing RBF boots Mac OS 8.1 on `.192` with 32 MB and
 Ethernet Off using the separately copied and readback-verified Mac image.
-Finder, keyboard/mouse input and the menu-bar clock pass. Speedometer4.02
-finishes Mix **1.800** and full Performance Rating **1.569**: CPU1.806,
-graphics0.937,disk2.269,math13.309,all one iteration. Compared with the
-minimal branch's Mix1.611, this single-run result is11.7% higher for4.35%
+Finder, keyboard/mouse input and the menu-bar clock pass. Speedometer 4.02
+finishes Mix **1.800** and full Performance Rating **1.569**: CPU 1.806,
+graphics 0.937, disk 2.269, math 13.309, all one iteration. Compared with the
+minimal branch's Mix 1.611, this single-run result is 11.7% higher for 4.35%
 more whole-core ALMs. Disk results remain sensitive to host/storage load.
 
 After the tests, Speedometer was quit without saving, Finder Shut Down
 was selected with a verified continuous mouse gesture, and the safe-to-
-switch-off screen was observed. The source recipe now matches this exact
-candidate at19d9fc3; all190 build-source files were checked, with identical
-active QSF assignments. [Evidence](perf/dual_20261023/33mhz/mac/result.json).
+switch-off screen was observed. (The "Shut Down hang" reported against the
+2026-10-22 minimal build was not a core fault: the tester script sent the
+mouse button down and up in the same event, so the Finder never saw a
+click on the menu item. The continuous-gesture check is the fix; no CPU
+change was involved -- user, 2026-10-24.) The source recipe now matches
+this exact candidate at 19d9fc3; all 190 build-source files were checked,
+with identical active QSF assignments. [Evidence](perf/dual_20261023/33mhz/mac/result.json).
 A/UX and CD audio are not qualified on this new CPU.
 
 ## 66 MHz result and comparison

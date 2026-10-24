@@ -18,6 +18,8 @@ for earlier CPU66 trials. Baseline PRAM was restored before each new run.
 | New dual issue R3 | 33 | **1.800** | **1.806** | **0.937** | **2.269** | **13.309** | **1.569** |
 | New dual issue R3 | 66 | **3.614** | **3.637** | **1.579** | **2.807** | **26.824** | **2.667** |
 | New VRAM retirement | 33 | **1.801** | **1.807** | **0.982** | **2.381** | **13.313** | **1.617** |
+| Memory, matched FPU baseline | 33 | 1.802 | 1.807 | 0.985 | 2.228 | 13.313 | 1.604 |
+| Memory + FPU_PIPE trial | 33 | 1.806 | 1.806 | 0.985 | 2.417 | 13.313 | 1.623 |
 
 The new 33 MHz Mix improves 11.7% over the previous minimal build and
 reaches 94.8% of the photographed real machine. At 66 MHz, Mix improves
@@ -38,6 +40,8 @@ The real machine had 120 MB RAM, and its disk/cache setup is unknown.
 | Previous timing24-small | 66 | 33,328 | 79.52% | −1.539 ns | −147.124 ns |
 | New dual issue R3 | 33 | 34,643 | 82.66% | +1.374 ns | 0 ns |
 | New dual issue R3 | 66 | 35,346 | 84.34% | **−3.308 ns** | **−2114.552 ns** |
+| Memory | 33 | 34,554 | 82.45% | +1.245 ns | 0 ns |
+| Memory + FPU_PIPE trial | 33 | 35,631 | 85.02% | +0.964 ns | 0 ns |
 
 The new 66 MHz CPU timing is 1.769 ns worse than the last tested version.
 It is also 0.917 ns worse than the original CPU66 fit. Other domains and
@@ -45,7 +49,7 @@ hold checks pass in both new fits. The new 33 MHz fit passes all clocks;
 the previous minimal artifact had a separate −0.043 ns HDMI miss.
 Both new fits use 497/553 M10Ks. The 66 MHz build adds 2,018 whole-core
 ALMs (6.1%) over timing24-small; the 33 MHz build adds 1,443 (4.3%) over
-minimal. The quoted approximately26k ALMs was not reproduced for the
+minimal. The quoted approximately 26k ALMs was not reproduced for the
 complete Quadra core.
 
 The [66 MHz path analysis](perf/dual_20261023/66mhz/r3/path-analysis.json)
@@ -77,3 +81,9 @@ The subsequent [memory-performance port](dual-memory-performance.md)
 measures 4.8% higher graphics at 33 MHz with timing closed and 89 fewer
 fitted ALMs. This is a single comparison, with disk/load variation noted
 in that report.
+
+The [FPU_PIPE trial](fpu-pipe-experiment.md) passes all timing checks but
+adds 1,077 ALMs for a 0.22% Mix change and essentially unchanged PR
+CPU/graphics/Math.
+Its higher overall PR accompanies disk variation. The recommendation is
+to retain FPU_PIPE=0 for the smaller default.

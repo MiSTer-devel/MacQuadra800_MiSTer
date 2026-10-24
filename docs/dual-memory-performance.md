@@ -75,15 +75,15 @@ All 12 adapter/control cases and the corrected queue unit test pass.
 
 With next-clock platform writes, the 33 MHz VRAM write loop takes 281 versus
 343 bus clocks (18.1% fewer); at 66 MHz it takes 187 versus 218 (14.2% fewer).
-Including readback: 855 versus918 at 33 MHz and 554 versus582 at 66 MHz.
+Including readback: 855 versus 918 at 33 MHz and 554 versus 582 at 66 MHz.
 [Validation and raw logs](perf/dual_memory_20261023/validation.json).
 
 Simulation loop gains are not Speedometer results or a release
 qualification; fitted and hardware results follow below.
 
 The first 33 MHz fit from source `8e3e0b9` passes all timing checks: CPU/bus
-+1.245 ns,SDRAM+0.511 ns,HDMI+0.668 ns,minimumhold+0.194 ns. It uses 34,554
-ALMs (82.45%),89 fewer than the baseline fit; placement differences also
++1.245 ns, SDRAM +0.511 ns, HDMI +0.668 ns, minimum hold +0.194 ns. It uses
+34,554 ALMs (82.45%), 89 fewer than the baseline fit; placement differences also
 affect whole-core area. Synthesis adds only 3 registers (29,318 versus
 29,315); fitted registers are 30,052 versus 29,927 after physical optimization.
 M10Ks remain 497/553 and DSPs 38. All memory/dual inference guards pass,
