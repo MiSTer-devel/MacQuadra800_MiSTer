@@ -44,24 +44,26 @@ it for a future comparison rather than assuming it is still current.
 All pushes in this work went to **`alanswx`**, the user's repository.
 `origin` points to MiSTer-devel: do not push there.
 
-The FPU report, new matched baseline measurements, candidate screenshots,
-source manifests, timing reports and RBF live on the **FPU experiment
-branch/tag**, not in the current baseline checkout:
+The FPU report and the two comparison documents (with the matched
+memory/FPU trial rows) were carried onto this branch on 2026-10-24. The
+candidate screenshots, source manifests, timing reports and RBF stay on
+the **FPU experiment branch/tag** only:
 
-- [FPU experiment report](https://github.com/alanswx/MacQuadra800_MiSTer/blob/pipelined-040-dual-fpu-pipe-20261024/docs/fpu-pipe-experiment.md).
 - [FPU evidence and manifests](https://github.com/alanswx/MacQuadra800_MiSTer/tree/pipelined-040-dual-fpu-pipe-20261024/docs/perf/fpu_pipe_20261024).
 - [Exact FPU candidate RBF](https://github.com/alanswx/MacQuadra800_MiSTer/tree/pipelined-040-dual-fpu-pipe-20261024/test-builds/pipelined-040-dual-fpu-pipe-20261024/33mhz).
 
 Current-checkout references:
 
+- **[One-table comparison: real Quadra 800, shipping core, every pipelined/dual experiment](docs/core-comparison-20261024.md)** -- start here.
+- [FPU_PIPE experiment report](docs/fpu-pipe-experiment.md).
 - [Memory port and qualification](docs/dual-memory-performance.md).
 - [Dual integration and compiler fixes](docs/pipelined-040-dual.md), [upstream/local provenance](rtl/ap68040_faster/UPSTREAM_QUADRA.md).
 - [Speedometer, timing and real Quadra comparison](docs/dual-speedometer-comparison.md).
 - [Separate FPU comparison and older shipping reference](docs/dual-fpu-comparison.md).
 - [Exact memory RBF and manifest](test-builds/pipelined-040-dual-memory-20261023/33mhz/).
-
-The comparison documents on the FPU tag additionally contain the latest
-matched memory/FPU trial rows; their versions on this branch predate that trial.
+- The old-vs-pipelined analysis (cycle costs per structure, the write
+  buffer, the `?`-disk bug) is `docs/pipelined-040-compare.md` on branch
+  `pipelined-040` only: `git show pipelined-040:docs/pipelined-040-compare.md`.
 
 ## Current hardware recipe and retained memory change
 
@@ -194,11 +196,34 @@ then target the measured decode/MMU path families one change at a time.
 Track whole-core ALMs, setup/hold and matched graphics/FPU/Mix results;
 avoid accumulating optional features without demonstrated benefit.
 
+**Owed: the full hardware matrix on the actual MiSTer.** Every dual-issue
+number so far is one Speedometer iteration of Mac OS 8.1 on one box; the
+shipping core's figures are medians of five on a different box. Before any
+decision between the cores, run on the real MiSTer, per candidate RBF
+(memory 33 `500c3661`, dual R3 33/66, the 20261002 release as control):
+Mac OS 8.1 gate, A/UX 3.1 at 32 MB, CD audio, Speedometer Mix / PR / FPU
+suite as **medians of 3-5**, plus the DOTT / DOOM II / Dracula hang
+checks from `docs/perf/fix_hw_20261001/`. The user wants this mechanical
+run driven by a **Sonnet or Opus session**, not hand-stepped from the
+design session (user, 2026-10-24); its recipe is in the memory
+`test-hosts-2026-10` (kvms on mister192) and `scratch/hw/k.sh`.
+
+Open decisions as of 2026-10-24 (the comparison table is
+[docs/core-comparison-20261024.md](docs/core-comparison-20261024.md)):
+fix up the 33 MHz dual core (FPU divider, uncached reads, A-line/JSR cost)
+and whether that bloats away the ~4,500-ALM saving; chase 66 MHz closure
+alone; a hybrid; or port the shipping core's memory-path ideas (store
+buffer, retained-line sideband) into the dual core. The user asked to
+discuss these before any RTL is changed.
+
 Read [CLAUDE.md](CLAUDE.md) and [BUILD.md](BUILD.md) before hardware work.
 Never deploy/reset a running guest, and never hash/copy a mounted image.
 A prior recovery-reset exception applied to a failed disposable A/UX boot,
 not blanket authorization to reset a live Mac. Look first; use a verified
-clean halt or Menu. Send explicit mouse-up after every menu operation.
+clean halt or Menu. Send explicit mouse-up after every menu operation, and
+make every click a continuous down -> hold -> up gesture: the "Shut Down
+hang" reported on 2026-10-22 was the tester script sending button down and
+up in the same event, not a core fault (user, 2026-10-24).
 No Main/mrext restart under a guest. Use disposable clones for testing.
 
 No git worktrees. Commit and pin build inputs, use isolated Quartus
