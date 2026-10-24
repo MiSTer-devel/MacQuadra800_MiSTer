@@ -299,8 +299,26 @@ build: CPU-clock miss). Summaries under
 endpoints, so **seeds 39-42 were launched at once** in isolated copies
 (`~/mister/q800_fast60_s39..42_20261024`, units `q800-fast60-s39..42-20261024`,
 all four running in parallel beside another session's `clock_fit` flow)
-before any RTL change; the decode-stage change is next only if no seed
-closes.
+before any RTL change.
+
+**Where the 60 MHz miss is (control fit, `docs/perf/fast60_20261024/ctrl-s38/dual_cpu_top100.txt`):
+not the D1 attribute-ROM family.** Of the 100 negative endpoints, 43 are
+the register file's live-value table (`ap68040_rf:rff|lvt[..]`), 23 other
+backend registers (`agx_q`, address generation), 19 the DMU and 15 the
+data ATC's LUTRAM; start points are `ex_u.op` (44), `fpsr` (13),
+`ex_u.cond` (11), `ex_a` (9), `ag_u.upd2_reg` (9). The worst path (-0.729,
+10 levels, 16.773 ns data delay) is the EX stall chain: `ex_u.op[4]` ->
+opcode compare `Equal97` -> `stall_ex~10..12` -> `stall_dc2` -> the RF
+write-enable into `lvt[29]`; **12.27 ns of it (73 %) is interconnect**
+(hops of 1.65 / 1.35 / 1.90 ns between LABs at X43 / X63 / X57), the
+cells total 4.5 ns. Clock-domain Fmax: CPU 57.49 MHz, SDRAM 98.21 MHz;
+the clk_sys<->clk_ram crossings are +2.762 / +1.228 ns. So the planned
+"one decode-stage change" is aimed at a path that is no longer critical
+at 60 MHz: if no seed closes, the RTL change to make is in the backend --
+decide the EX stall (the opcode compare that feeds `stall_ex`) a stage
+earlier so the RF write-enable and `stall_dc2` do not wait for it, or
+register the LVT write-select -- and the routing share says a seed walk
+has a fair chance first.
 
 **60/30/90 time-base audit (2026-10-24, before Phase 1's first fit).** The
 66/33/99 experiments kept the bus at 33 MHz; 60/30/90 is the first time
