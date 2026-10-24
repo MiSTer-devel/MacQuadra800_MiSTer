@@ -540,12 +540,19 @@ set_global_assignment -name ALM_REGISTER_PACKING_EFFORT MEDIUM
 #   29-combined: 33,921 ALMs CPU -1.929/-495.152; RAM 0.494, HDMI 0.170, hold +0.158; not retained.
 #   30-global-off: 33,079 ALMs CPU -1.793/-341.996; RAM +0.399, HDMI +0.033, hold +0.172; not retained.
 #   30-dout: 33,351 ALMs CPU -1.696/-299.476; RAM -0.052, HDMI +0.331, hold +0.113; not retained.
-# Main RTL now matches the exact hardware-tested24-small CPU files; later experiments stay in scratch.
+# The prior66 timing branch matched the hardware-tested24-small CPU files; this dual branch imports fresh upstream.
 # Mac OS8.1 Mix3.159/fullPR2.420/clean halt and matchedAUX32MB Off shell/clock/clean halt pass.
 # The earlierAUXclone2startupfailure remains unexplained. CD audio pending. CPUsetupstill-1.539ns.
 # 2026-10-23 dual issue initial33/66 seed38 A&S rejected before fit:
 #   102891/102895 regs; auto-mapped OSD/LCD into FFs, RF30 not36; companion valids stuck0.
 #   No RBF/HW trial. See docs/pipelined-040-dual.md for compiler probe and fixes.
+# 2026-10-23 dual issue R2 seed38 with automatic RAM spill: both NO FIT.
+#   33:43861ALMs,66:44672ALMs; 20480 scaler coefficient bits became FFs.
+# Dual issue R3 (RAM-budget inferenceOFF), seed38:
+#   33:34643ALMs/29927regs/497M10Ks; CPUbus+1.374 RAM+.099 HDMI+.407 hold+.167ns; alltimingPASS.
+#   66:35346ALMs/31088regs/497M10Ks; CPU-3.308/TNS-2114.552 RAM+.335 bus+1.040 HDMI+.269 hold+.180ns.
+#   CPU66timingFAILS; Mac33Mix1.800 completed; hardwarequalificationsongoing.
+#   Source88a3b0b +QSF RAMbudgetOFF, plus2xmacrofor66. See docs/pipelined-040-dual.md.
 set_global_assignment -name SEED 38
 # 2026-09-24: NEVER grew the full BRF fit by398 ALMs; retain the better ALWAYS setting.
 set_global_assignment -name FITTER_AGGRESSIVE_ROUTABILITY_OPTIMIZATION ALWAYS
@@ -1044,3 +1051,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram_beat32.sv
 
 # P106 seed23 (70debea):39617ALMs,CPU+.117ns,HDMI+.029ns,RAM+.371ns;
 # alltimingmet. P108b qualified d16 destination acknowledgement; retainseed23.
+
+# The dual issue import exceeds the conservative pre-mapping RAM budget.
+# Keep framework buffers in RAM; actual fitted demand is497/553 M10Ks.
+set_global_assignment -name SYNTH_RESOURCE_AWARE_INFERENCE_FOR_BLOCK_RAM OFF
