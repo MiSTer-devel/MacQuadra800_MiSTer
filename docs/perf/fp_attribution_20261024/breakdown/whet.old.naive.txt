@@ -1,0 +1,70 @@
+# whet/old/naive  core=old view=naive  iterations 2 and 4
+# cycles/iteration: 446507 by the per-PC sum, 446508 by the stamps; 85678 instructions/iteration (5.21 clk/instr)
+class                                           cycles/iter      %   instr/iter  clk/ins
+FDIV / FSQRT                                          17884    4.0         1896     9.43
+FADD/FSUB/FMUL/FCMP and other FP arithmetic          167972   37.6        24564     6.84
+FMOVE register -> memory (FP store)                   33095    7.4         3000    11.03
+FMOVE memory -> register (FP load)                    34643    7.8         4127     8.39
+FBcc / FScc / FDBcc                                    1768    0.4          634     2.79
+other FPU (FMOVEM, FMOVE control, FNOP)               23378    5.2         3586     6.52
+integer loads / stores (any memory operand)          101738   22.8        22058     4.61
+integer ALU (register-only)                           45064   10.1        18050     2.50
+branches, JSR/JMP, RTS, DBcc, TRAP/RTE                20965    4.7         7762     2.70
+total                                                446507  100.0        85678     5.21
+# sub-classes
+  ildst/load                            57644   12.9         9812     5.87
+  farith/reg                            53535   12.0        11576     4.62
+  farith/imm                            53383   12.0         5586     9.56
+  farith/mem                            50326   11.3         5842     8.61
+  ialu                                  40444    9.1        17630     2.29
+  fstore                                33095    7.4         3000    11.03
+  ildst/store                           30600    6.9         8131     3.76
+  fother                                23378    5.2         3586     6.52
+  fload/mem                             21540    4.8         2484     8.67
+  fload/imm                             13103    2.9         1643     7.98
+  fdiv/mem                              12115    2.7         1076    11.26
+  ildst/move m,m                        12076    2.7         3882     3.11
+  branch/bsr                             8954    2.0         2640     3.39
+  branch/rts                             7920    1.8         2640     3.00
+  farith/dn                              6034    1.4          862     7.00
+  farith/todn                            4694    1.1          698     6.72
+  ialu/mul.l                             4620    1.0          420    11.00
+  fdiv/imm                               4071    0.9          442     9.21
+  branch/bcc                             3579    0.8         2290     1.56
+  fbcc/fbcc                              1768    0.4          634     2.79
+  fdiv/reg                               1698    0.4          378     4.49
+  ildst/rmw                              1053    0.2          177     5.95
+  branch/bra                              512    0.1          192     2.67
+  ildst/movem                             266    0.1           28     9.50
+  ildst/pea                                98    0.0           28     3.50
+# top 30 addresses by cycles/iteration
+  00000ca0 fload    fmove.d d16(a7),fp1                       899       9889   11.00
+  00000cac farith   fmul.d abs.l,fp1                          899       9889   11.00
+  00000cbe farith   fmul.d abs.l,fp0                          899       9889   11.00
+  00000cca fdiv     fdiv.d abs.l,fp0                          899       9889   11.00
+  00000ca6 farith   fadd.d d16(a7),fp1                        899       6293    7.00
+  00000cb8 farith   fadd.d d16(a7),fp0                        899       6293    7.00
+  00000cd2 fstore   fmove.d fp0,(a0)                          899       6293    7.00
+  000006b8 fstore   fmove.d fp0,-(a7)                         192       5760   30.00
+  0000116c ildst    move.l a2,-(a7)                          1798       4495    2.50
+  0000047c fload    fmove.d d16(a7),fp0                       349       3839   11.00
+  00000ea4 ildst    cmpi abs.l                                518       3622    7.00
+  0000117e branch   bsr                                       899       3596    4.00
+  00000c9c ildst    movea.l d16(a7),a0                        899       3596    4.00
+  00000cc6 farith   fadd.x fp1,fp0                            899       3596    4.00
+  000006a0 fother   fmovem.x -> -(a7)                         192       3456   18.00
+  00000f44 ildst    mul.l abs.l                               210       3150   15.00
+  00000f68 ildst    mul.l abs.l                               210       3150   15.00
+  00000f7c ildst    mul.l abs.l                               210       3150   15.00
+  00000fd4 ildst    mul.l abs.l                               210       3150   15.00
+  00000fdc ildst    mul.l abs.l                               210       3150   15.00
+  00000ec6 ildst    cmpi abs.l                                518       3105    6.00
+  00000ee4 ildst    tst abs.l                                 518       3105    6.00
+  000011f2 branch   bsr                                       616       3080    5.00
+  00000c4e ildst    move.w abs.l,d0                           616       3080    5.00
+  00000c56 ialu     lea abs.l                                 616       3080    5.00
+  00000c5e ildst    move.w abs.l,d0                           616       3080    5.00
+  00000c66 ialu     lea abs.l                                 616       3080    5.00
+  00000c76 ildst    move.w abs.l,d0                           616       3080    5.00
+  00000c7e ialu     lea abs.l                                 616       3080    5.00
+  00000c86 ildst    move.l d16(a1),d16(a2)                    616       3080    5.00

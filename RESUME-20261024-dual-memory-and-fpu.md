@@ -235,7 +235,7 @@ needs Ethernet (the SONIC snoop, cost unknown) is still open.
 |---|---|---|
 | **0. Measure** (started 2026-10-24, no RTL) | Hardware sweep on mister192 by a Sonnet/Opus session: memory33 `500c3661`, dual R3 66, the 20261002 release as same-box control -- 8.1 gate, A/UX 3.1 at 32 MB, CD audio transport, Speedometer Mix / PR / FPU as medians of 3-5 with the full Mix sub-tests transcribed, the DOTT / DOOM II / Dracula hang checks where the images exist. In parallel: a cycle attribution of the FP gap on the dual core (divider vs FP store path vs op latency) and a `--check` synthesis to read the dual FPU's entity size against the shipping FPU. | A/UX must boot and shut down on memory33; if not, the MMU comes before everything else. The attribution decides which FP fix Phase 2 makes. |
 | **1. Fast core, 60/30/90** (new branch from `6bfd9c0`) | Fit 1: the unchanged core at 60/30/90 as control. Fit 2: one change, a register stage on the D1 attribute-ROM address path (76 of the worst 100 paths). Fit 66/33/99 as well, for the record. | Closes at 60: sweep it, ship candidate. Slack improves by 1.5 ns or more but still open: one more iteration on the MMU / cache-hit family. Under 1 ns: **stop**, the fast core stays the shipping core. About four fits. |
-| **2. Small core at 33** (second branch from `6bfd9c0`, concurrent with 1; the two do not share files) | Only what Phase 0 points at, one change per fit, hardware medians after each: the FP fix (divider steps and/or the FP store path), uncached-read ordering (Graphics), then the ROM next-line prefetch (platform side, helps both cores). | Hard cap 36,000 ALMs. No FPU_PIPE / LOOP_PRED / EARLY_RES / second-slot loads: all measured as area for nothing. |
+| **2. Small core at 33** (second branch from `6bfd9c0`, concurrent with 1; the two do not share files) | Only what Phase 0 points at, one change per fit, hardware medians after each. The attribution ([docs/fp-gap-attribution.md](docs/fp-gap-attribution.md)) says the FP fix is **the FP register-to-memory path** (`fmove.d fpN,<ea>` 11 clk flat vs 7.0-7.5; FMOVEM 8-13 clk per long word, 4-5x) and the sequential FPU's per-op latency -- **not the divider** (1.9 % of Whetstone, 0 elsewhere) and not FBcc (0 %). Then uncached-read ordering (Graphics), then the ROM next-line prefetch (platform side, helps both cores). | Hard cap 36,000 ALMs. No FPU_PIPE / LOOP_PRED / EARLY_RES / second-slot loads: all measured as area for nothing (FPU_PIPE also makes every FP store 3 clk slower). |
 | **3. VRAM to DDR3 and the video modes** | After a core meets its target. First a DDR3 bridge model with randomised latency for the sim (the full-machine sim instantiates `quadra800`, not `emu`), then write FIFO + read line cache + scanline buffer, then the DAFB timing generator and monitor-sense codes (the video PLL is already reconfigurable). | Discussed with the user before it starts. |
 
 **Phase 0 status (2026-10-24 09:30 PDT).** The two `--check` syntheses are
@@ -243,14 +243,27 @@ done ([docs/perf/fpu_entity_20261024/](docs/perf/fpu_entity_20261024/README.md))
 the dual core's `ap040_fpu` is 6,336 ALUTs / 2,249 regs / 12 DSP against
 the shipping FPU's 6,800 / 1,387 / 9, so porting the compacted shipping
 FPU gains no area and the divider-steps port costs some. The FP cycle
-attribution (standalone Whetstone + matrix + FFT kernels with a retired-
-instruction trace, on misterubuntu) and the mister192 hardware sweep
-(memory33 -> 20261002 control -> dual66; Speedometer medians of 3 with
-full sub-tests; A/UX on memory33 as the gate; CD audio skipped, no image
-on the board) were running as separate agent sessions when this was
-written; their results land under `docs/perf/fp_attribution_20261024/`,
-`docs/fp-gap-attribution.md` and `docs/perf/sweep_20261024/`, uncommitted
-until reviewed.
+attribution is done ([docs/fp-gap-attribution.md](docs/fp-gap-attribution.md),
+evidence `docs/perf/fp_attribution_20261024/`): both cores' standalone
+benches on the same vbcc images (Whetstone, a doubles-in-memory 20x20
+matmul, a 256-point FFT), cycle-stamped completion profiles with FPU
+background waits charged to the producer. Dual/shipping cycles 1.155 /
+1.144 / 1.309, the same order as the hardware (KWhet 0.76, Matrix 0.83, FFT
+0.69) with gaps about two thirds the size. Recoverable share by class:
+FP arithmetic latency 9-11 % on every kernel, FP store path 2-11 % (equal
+to arithmetic in the FFT), FP loads 0.5-6 %, FMOVEM 15 % of Whetstone
+(vbcc saves FP registers in every prologue; 79 vs 18 clk for two
+registers), **divider 1.9 % of Whetstone and 0 elsewhere, FBcc 0**.
+FPU_PIPE=1 recovers the arithmetic share in sim (-11 % on all three) but
+bought 1 % on hardware and makes every FP store 3 clk slower (11 -> 14).
+Next attribution steps, not yet done: a per-stage trace of one FP store
+(how the 11 clocks split between the FPU's conversion/GET uops and the
+DMU store engine), and a full-machine trace of Speedometer's real binary.
+The mister192 hardware sweep (memory33 -> 20261002 control -> dual66;
+Speedometer medians of 3 with full sub-tests; A/UX on memory33 as the
+gate; CD audio skipped, no image on the board) was still running as an
+agent session when this was written; its results land under
+`docs/perf/sweep_20261024/`, uncommitted until reviewed.
 
 **60/30/90 time-base audit (2026-10-24, before Phase 1's first fit).** The
 66/33/99 experiments kept the bus at 33 MHz; 60/30/90 is the first time

@@ -95,6 +95,7 @@ relying on an exact figure.
 | SONIC D-cache snoop (Ethernet) | Yes | No -- Ethernet must stay Off |
 | MMU table walker port into quadra800 | Yes | Walks through its own bus |
 | CPU entity | 25,773 fitted ALMs, 13 DSP; at synthesis 37,826 ALUTs / 8,296 regs / 297 kbit | ~20,090 fitted ALMs + 82 M10K, 15 DSP (scalar); dual issue about +1,400; at synthesis 29,778 ALUTs / 12,562 regs / 626 kbit |
+| Where the FP cycles go (2026-10-24, [attribution](fp-gap-attribution.md)) | -- | On Speedometer-shaped kernels, matching the shipping core's per-class cost would recover: FP arithmetic latency 9-11 %, FP store path 2-11 % (`fmove.d fpN,<ea>` 11 clk flat vs 7.0-7.5), FP loads 0.5-6 %, FMOVEM 15 % of Whetstone (79 vs 18 clk for two registers), **divider 1.9 % / 0 / 0, FBcc 0**. The divider and FBcc are not the levers; the FP register-to-memory path is the untried one |
 | FPU entity at synthesis (2026-10-24, [report](perf/fpu_entity_20261024/README.md)) | `ap040_fpu` **6,800 ALUTs / 1,387 regs / 9 DSP** | `ap040_fpu` **6,336 ALUTs / 2,249 regs / 12 DSP**, plus 617 / 464 in the `ap68040_fpif` wrapper. The dual FPU is already the smaller one in logic: porting the compacted shipping FPU gains no area, and a 2 -> 3 steps/clock divider port adds logic |
 
 ## What the tables say

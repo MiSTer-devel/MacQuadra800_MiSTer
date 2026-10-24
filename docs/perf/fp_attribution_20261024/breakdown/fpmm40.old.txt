@@ -1,0 +1,52 @@
+# fpmm40/old/adjusted  core=old view=adjusted  iterations 2 and 4
+# cycles/iteration: 4114782 by the per-PC sum, 4114782 by the stamps; 974771 instructions/iteration (4.22 clk/instr)
+class                                           cycles/iter      %   instr/iter  clk/ins
+FADD/FSUB/FMUL/FCMP and other FP arithmetic          936812   22.8       128000     7.32
+FMOVE register -> memory (FP store)                  470720   11.4        64000     7.36
+FMOVE memory -> register (FP load)                   946035   23.0       128000     7.39
+integer loads / stores (any memory operand)           11265    0.3         3202     3.52
+integer ALU (register-only)                         1749938   42.5       651566     2.69
+branches, JSR/JMP, RTS, DBcc, TRAP/RTE                   12    0.0            3     4.00
+total                                               4114782  100.0       974771     4.22
+# sub-classes
+  ialu                                1749938   42.5       651566     2.69
+  fload/mem                            946035   23.0       128000     7.39
+  farith/mem                           680412   16.5        64000    10.63
+  fstore                               470720   11.4        64000     7.36
+  farith/reg                           256400    6.2        64000     4.01
+  ildst/store                           11200    0.3         3200     3.50
+  ildst/movem                              65    0.0            2    32.50
+  branch/bsr                                7    0.0            1     7.00
+  branch/rts                                3    0.0            1     3.00
+  branch/bcc                                2    0.0            1     2.00
+# top 30 addresses by cycles/iteration
+  000004c8 farith   fmul.d (a1),fp0                         64000     680412   10.63
+  000004c4 fload    fmove.d (a0),fp0                        64000     545463    8.52
+  000004d4 fstore   fmove.d fp1,(a2)                        64000     470720    7.36
+  000004b6 ialu     mulu/muls.w #imm,rn                     64000     448000    7.00
+  000004cc fload    fmove.d (a2),fp1                        64000     400572    6.26
+  000004b2 ialu     lea d8(a3,Xn)                           64000     320000    5.00
+  000004ba ialu     lea abs.l                               64000     320000    5.00
+  000004d0 farith   fadd.x fp0,fp1                          64000     256400    4.01
+  000004c0 ialu     add d0,rn                               64000     128000    2.00
+  000004d8 ialu     addq d2                                 64000     128000    2.00
+  000004da ialu     cmp/eor #imm,rn                         64000     128000    2.00
+  000004ac ialu     move.w d2,d0                            64001      64002    1.00
+  000004b0 ialu     shift/rot                               64000      64002    1.00
+  000004ae ialu     move.w d0,d1                            64000      64001    1.00
+  000004c2 ialu     add d5,rn                               64000      64000    1.00
+  000004a0 ialu     lea d8(a4,Xn)                            1600       8000    5.00
+  000004a4 ildst    clr (a2)                                 1600       6400    4.00
+  000004a6 ildst    clr d16(a2)                              1600       4800    3.00
+  000004e2 ialu     addq d3                                  1600       3200    2.00
+  000004e4 ialu     cmp/eor #imm,rn                          1600       3200    2.00
+  0000049a ialu     move.w d3,d0                             1601       1603    1.00
+  0000049c ialu     move.w d0,d5                             1600       1601    1.00
+  0000049e ialu     shift/rot                                1600       1600    1.00
+  000004aa ialu     moveq                                    1600       1600    1.00
+  00000486 ialu     mulu/muls.w #imm,rn                        40        280    7.00
+  0000048a ialu     ext                                        40        200    5.00
+  00000492 ialu     lea abs.l                                  40        200    5.00
+  00000484 ialu     move.w d4,d0                               40         80    2.00
+  00000490 ialu     add d0,rn                                  40         80    2.00
+  00000498 ialu     add d0,rn                                  40         80    2.00

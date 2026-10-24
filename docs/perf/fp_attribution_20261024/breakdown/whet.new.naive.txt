@@ -1,0 +1,71 @@
+# whet/new/naive  core=new view=naive  iterations 2 and 4
+# cycles/iteration: 515900 by the per-PC sum, 515906 by the stamps; 83740 instructions/iteration (6.16 clk/instr)
+class                                           cycles/iter      %   instr/iter  clk/ins
+FDIV / FSQRT                                          16907    3.3         1896     8.92
+FADD/FSUB/FMUL/FCMP and other FP arithmetic          221398   42.9        24564     9.01
+FMOVE register -> memory (FP store)                   50194    9.7         2907    17.27
+FMOVE memory -> register (FP load)                    38893    7.5         4127     9.42
+FBcc / FScc / FDBcc                                    1902    0.4          634     3.00
+other FPU (FMOVEM, FMOVE control, FNOP)              102467   19.9         3362    30.48
+integer loads / stores (any memory operand)           45136    8.7        20564     2.19
+integer ALU (register-only)                           27706    5.4        15620     1.77
+branches, JSR/JMP, RTS, DBcc, TRAP/RTE                11297    2.2        10066     1.12
+total                                                515900  100.0        83740     6.16
+# sub-classes
+  fother                               102467   19.9         3362    30.48
+  farith/reg                            76641   14.9        11576     6.62
+  farith/imm                            73220   14.2         5586    13.11
+  farith/mem                            56596   11.0         5842     9.69
+  fstore                                50194    9.7         2907    17.27
+  ialu                                  26026    5.0        15200     1.71
+  fload/mem                             21763    4.2         2484     8.76
+  ildst/load                            19032    3.7         9231     2.06
+  ildst/store                           17842    3.5         7232     2.47
+  fload/imm                             17130    3.3         1643    10.43
+  fdiv/mem                              10667    2.1         1076     9.91
+  farith/dn                              8154    1.6          862     9.46
+  ildst/move m,m                         7764    1.5         3882     2.00
+  farith/todn                            6788    1.3          698     9.72
+  fdiv/imm                               4164    0.8          442     9.42
+  branch/bsr                             3872    0.8         2640     1.47
+  branch/bcc                             3788    0.7         3788     1.00
+  branch/rts                             2640    0.5         2640     1.00
+  fdiv/reg                               2076    0.4          378     5.49
+  fbcc/fbcc                              1902    0.4          634     3.00
+  ialu/mul.l                             1680    0.3          420     4.00
+  branch/bra                              998    0.2          998     1.00
+  ildst/movem                             266    0.1           28     9.50
+  ildst/rmw                               177    0.0          177     1.00
+  ildst/pea                                56    0.0           14     4.00
+  branch/trap                              -0   -0.0            0     0.00
+# top 30 addresses by cycles/iteration
+  000006a0 fother   fmovem.x -> -(a7)                         192      15168   79.00
+  00000764 fother   fmovem.x <- (a7)+                         192      10304   53.67
+  000004c0 fother   fmovem.x -> -(a7)                         128      10112   79.00
+  00000cd2 fstore   fmove.d fp0,(a0)                          899       9889   11.00
+  00000ca0 fload    fmove.d d16(a7),fp1                       899       8990   10.00
+  00000cac farith   fmul.d abs.l,fp1                          899       8990   10.00
+  00000cbe farith   fmul.d abs.l,fp0                          899       8990   10.00
+  00000cca fdiv     fdiv.d abs.l,fp0                          899       8990   10.00
+  000006b8 fstore   fmove.d fp0,-(a7)                         192       8640   45.00
+  00000ca6 farith   fadd.d d16(a7),fp1                        899       8091    9.00
+  00000cb8 farith   fadd.d d16(a7),fp0                        899       8091    9.00
+  000008f6 fother   fmovem.x -> -(a7)                          93       7347   79.00
+  00000a3e fother   fmovem.x -> -(a7)                          93       7347   79.00
+  0000054e fother   fmovem.x <- (a7)+                         128       6912   54.00
+  00000cc6 farith   fadd.x fp1,fp0                            899       6293    7.00
+  000005d4 fother   fmovem.x -> -(a7)                          64       5056   79.00
+  0000076c fother   fmovem.x -> -(a7)                          64       5056   79.00
+  00000a32 fother   fmovem.x <- (a7)+                          93       4836   52.00
+  00000b9c fother   fmovem.x <- (a7)+                          93       4743   51.00
+  0000090c fstore   fmove.d fp0,-(a7)                          93       4185   45.00
+  00001246 fstore   fmove.d fp0,-(a7)                          93       4185   45.00
+  00000ad8 farith   fadd.d #imm,fp2                            93       3999   43.00
+  000004ac fother   fmove.l fpcr from d0                      349       3839   11.00
+  00000cb4 farith   fmove.x fp1,fp0                           899       3596    4.00
+  00000ac0 farith   fmove.x fp0,fp1                            93       3534   38.00
+  00000698 fother   fmovem.x <- (a7)+                          64       3520   55.00
+  000004b0 farith   fmove.l fp1,d0                            349       3490   10.00
+  00001254 farith   fmove.x fp0,fp4                            93       3441   37.00
+  000004a0 fother   fmove.l fpcr to d1                        349       3266    9.36
+  000008ee fother   fmovem.x <- (a7)+                          64       3264   51.00

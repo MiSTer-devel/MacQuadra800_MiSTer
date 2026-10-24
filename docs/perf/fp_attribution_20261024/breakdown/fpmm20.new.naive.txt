@@ -1,0 +1,56 @@
+# fpmm20/new/naive  core=new view=naive  iterations 2 and 4
+# cycles/iteration: 540788 by the per-PC sum, 541278 by the stamps; 123788 instructions/iteration (4.37 clk/instr)
+class                                           cycles/iter      %   instr/iter  clk/ins
+FADD/FSUB/FMUL/FCMP and other FP arithmetic          114540   21.2        16000     7.16
+FMOVE register -> memory (FP store)                  100553   18.6         8000    12.57
+FMOVE memory -> register (FP load)                   143016   26.4        16000     8.94
+other FPU (FMOVEM, FMOVE control, FNOP)                  10    0.0            0     0.00
+integer loads / stores (any memory operand)            3602    0.7          802     4.49
+integer ALU (register-only)                          170629   31.6        74564     2.29
+branches, JSR/JMP, RTS, DBcc, TRAP/RTE                 8438    1.6         8423     1.00
+total                                                540788  100.0       123788     4.37
+# sub-classes
+  ialu                                 170629   31.6        74564     2.29
+  fload/mem                            142976   26.4        16000     8.94
+  fstore                               100553   18.6         8000    12.57
+  farith/mem                            74542   13.8         8000     9.32
+  farith/reg                            40000    7.4         8000     5.00
+  branch/bcc                             8421    1.6         8421     1.00
+  ildst/store                            3530    0.7          800     4.41
+  ildst/movem                              72    0.0            2    35.75
+  fload/imm                                41    0.0            0     0.00
+  branch/bsr                               16    0.0            1    16.50
+  fother                                   10    0.0            0     0.00
+  branch/rts                                1    0.0            1     1.00
+  farith/imm                               -2   -0.0            0     0.00
+# top 30 addresses by cycles/iteration
+  000004d4 fstore   fmove.d fp1,(a2)                         8000     100540   12.57
+  000004cc fload    fmove.d (a2),fp1                         8000      76374    9.55
+  000004c8 farith   fmul.d (a1),fp0                          8000      75064    9.38
+  000004c4 fload    fmove.d (a0),fp0                         8000      66648    8.33
+  000004b2 ialu     lea d8(a3,Xn)                            8000      40000    5.00
+  000004d0 farith   fadd.x fp0,fp1                           8000      40000    5.00
+  000004b6 ialu     mulu/muls.w #imm,rn                      8000      32000    4.00
+  000004c0 ialu     add d0,rn                                8000      32000    4.00
+  000004b0 ialu     shift/rot                                8000      16000    2.00
+  000004ae ialu     move.w d0,d1                             8000       8000    1.00
+  000004ba ialu     lea abs.l                                8000       8000    1.00
+  000004c2 ialu     add d5,rn                                8000       8000    1.00
+  000004d8 ialu     addq d2                                  8000       8000    1.00
+  000004da ialu     cmp/eor #imm,rn                          8000       8000    1.00
+  000004e0 branch   bcc                                      8000       8000    1.00
+  000004e2 ialu     addq d3                                   400       5200   13.00
+  000004a6 ildst    clr d16(a2)                               400       3130    7.83
+  000004a0 ialu     lea d8(a4,Xn)                             400       2000    5.00
+  0000049e ialu     shift/rot                                 400        800    2.00
+  000004e4 ialu     cmp/eor #imm,rn                           400        800    2.00
+  0000049c ialu     move.w d0,d5                              400        780    1.95
+  000004ac ialu     move.w d2,d0                              400        486    1.21
+  000004a4 ildst    clr (a2)                                  400        400    1.00
+  000004ea branch   bcc                                       400        400    1.00
+  000004ec ialu     addq d4                                    20        260   13.00
+  00000486 ialu     mulu/muls.w #imm,rn                        20         99    4.95
+  00000490 ialu     add d0,rn                                  20         80    4.00
+  000004f6 ildst    movem <-mem                                 1         64   64.00
+  000005ec fload    fmove.w #imm,fp1                            0         41    0.00
+  00000484 ialu     move.w d4,d0                               20         40    1.98
