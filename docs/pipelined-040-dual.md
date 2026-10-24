@@ -138,3 +138,20 @@ The whole-core area exceeds the minimal33MHz checkpoint by1,443ALMs
 (4.35% relative). The quoted26kALM context was not established by this
 measurement. Mac boot/Speedometer and the matching66MHz result remain
 pending at this checkpoint.
+
+## 33 MHz hardware qualification
+
+The exact timing-passing RBF boots Mac OS8.1 on`.192` with32 MB and
+Ethernet Off using the separately copied and readback-verified Mac image.
+Finder, keyboard/mouse input and the menu-bar clock pass. Speedometer4.02
+finishes Mix **1.800** and full Performance Rating **1.569**: CPU1.806,
+graphics0.937,disk2.269,math13.309,all one iteration. Compared with the
+minimal branch's Mix1.611, this single-run result is11.7% higher for4.35%
+more whole-core ALMs. Disk results remain sensitive to host/storage load.
+
+After the tests, Speedometer was quit without saving, Finder Shut Down
+was selected with a verified continuous mouse gesture, and the safe-to-
+switch-off screen was observed. The source recipe now matches this exact
+candidate at19d9fc3; all190 build-source files were checked, with identical
+active QSF assignments. [Evidence](perf/dual_20261023/33mhz/mac/result.json).
+A/UX and CD audio are not qualified on this new CPU.
