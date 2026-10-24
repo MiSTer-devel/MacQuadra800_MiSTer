@@ -14,3 +14,8 @@ DUAL1 and BTIC1, S1_CLASSES011 (second-slot loads disabled),8KB each
 I/D cache, other optionalCPU features off. Hardware boot/Speedometer
 are pending; A/UX and CD audio are unqualified. Artifact hashes are in
 artifact.json. The original disk images and previous checkpoints are preserved.
+
+The saved baseline RBF also completed the separate FPU suite: see the
+[FPU comparison](../../../docs/dual-fpu-comparison.md). These results refer
+to checkpoint43a5280; the memory-performance branch adds a subsequent
+VRAM retirement experiment.

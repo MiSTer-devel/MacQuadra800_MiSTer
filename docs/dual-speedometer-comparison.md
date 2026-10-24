@@ -67,3 +67,7 @@ corners. No timing exception was introduced to hide these paths.
 
 This branch remains an experiment. A/UX and CD audio have not been
 qualified on the new CPU, and 66 MHz CPU timing remains open.
+
+The [separate FPU suite comparison](dual-fpu-comparison.md) now includes
+first and after-Mix runs at both clocks, plus the older shipping and real
+Quadra references.

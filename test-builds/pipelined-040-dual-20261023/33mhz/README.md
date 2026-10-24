@@ -22,3 +22,8 @@ commit19d9fc3. Artifact hashes, the original source88a3b0b plus its pinned
 compiler setting, and verification are recorded in artifact.json and
 [the fit manifest](../../../docs/perf/dual_20261023/33mhz/r3/source-manifest.json).
 See [hardware evidence](../../../docs/perf/dual_20261023/33mhz/mac/result.json).
+
+The saved baseline RBF also completed the separate FPU suite: see the
+[FPU comparison](../../../docs/dual-fpu-comparison.md). These results refer
+to checkpoint43a5280; the memory-performance branch adds a subsequent
+VRAM retirement experiment.
