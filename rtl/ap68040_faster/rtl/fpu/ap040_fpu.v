@@ -1939,6 +1939,36 @@ always @(posedge clk) begin
 						cap_unimp <= 0; cap_t <= 0; cap_e1 <= 1; cap_pk <= 0;   // packed -> E1, stag 7
 						begin fst <= F_CAP; wb_r <= (F_CAP == F_WB); acc_r <= 1'b0; end
 					end
+					else if ((src_fmt == 3'd5 || src_fmt == 3'd1) && din_nice &&
+					         ((src_fmt == 3'd5) ? (din[94:84] != 11'd0) : (din[94:87] != 8'd0)) &&
+					         (bin_op(opmode) || opmode == 7'h00 || opmode == 7'h40 || opmode == 7'h44)) begin : disp_mem_fast
+						// a normal (nice, non-zero) single or double source for
+						// a binary operation or a move: F_SRC's unpack here, at
+						// dispatch, as for a register source (disp_rr) -- one
+						// clock off every such memory-source operation
+						a_s    <= din[95];
+						a_t    <= T_NUM;
+						r_stag <= 3'd0;
+						grs    <= 3'd0;
+						if (src_fmt == 3'd5) begin
+							a_e <= {6'd0, din[94:84]} + 17'd15360;          // -1023+16383
+							a_m <= {1'b1, din[83:32], 11'd0};
+							e_w <= $signed({7'd0, din[94:84]}) + 18'sd15360;
+						end
+						else begin
+							a_e <= {9'd0, din[94:87]} + 17'd16256;          // -127+16383
+							a_m <= {1'b1, din[86:64], 40'd0};
+							e_w <= $signed({10'd0, din[94:87]}) + 18'sd16256;
+						end
+						if (bin_op(opmode)) begin
+							op_kind <= bin_kind(opmode);
+							begin fst <= F_BIN; wb_r <= (F_BIN == F_WB); acc_r <= 1'b0; end
+						end
+						else begin
+							mv_st <= 1'b1;
+							begin fst <= F_ROUND; wb_r <= (F_ROUND == F_WB); acc_r <= 1'b1; end
+						end
+					end
 					else begin
 						a_t <= T_NUM;   // provisional; F_SRC classifies
 						begin fst <= F_SRC; wb_r <= (F_SRC == F_WB); acc_r <= 1'b0; end
