@@ -49,7 +49,10 @@ def open_title(gray):
 
 
 if __name__ == "__main__":
-    t = open_title(np.array(Image.open(sys.argv[1]).convert("L")).astype(int))
+    im = Image.open(sys.argv[1])
+    if im.size != (640, 480):
+        im = im.resize((640, 480), Image.NEAREST)
+    t = open_title(np.array(im.convert("L")).astype(int))
     if t is None:
         print("NONE")
     else:

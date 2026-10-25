@@ -93,6 +93,8 @@ def load(path):
     means to menubar_probe.py and the template: the 8.1 highlight blue is
     94.8 in luma but 115.7 as a mean."""
     im = Image.open(path)
+    if im.size != (640, 480):
+        im = im.resize((640, 480), Image.NEAREST)
     return (np.asarray(im.convert("RGB")).astype(int),
             np.asarray(im.convert("L")).astype(int))
 

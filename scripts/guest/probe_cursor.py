@@ -45,8 +45,14 @@ def main():
     if len(args) < 2:
         print("usage: probe_cursor.py bg.png cur.png [--min-y N]", file=sys.stderr)
         return 2
-    bg = np.asarray(Image.open(args[0]).convert("RGB")).astype(np.int16)
-    cur = np.asarray(Image.open(args[1]).convert("RGB")).astype(np.int16)
+    im_bg = Image.open(args[0])
+    if im_bg.size != (640, 480):
+        im_bg = im_bg.resize((640, 480), Image.NEAREST)
+    im_cur = Image.open(args[1])
+    if im_cur.size != (640, 480):
+        im_cur = im_cur.resize((640, 480), Image.NEAREST)
+    bg = np.asarray(im_bg.convert("RGB")).astype(np.int16)
+    cur = np.asarray(im_cur.convert("RGB")).astype(np.int16)
     if bg.shape != cur.shape:
         print("NOCURSOR")
         return 0
