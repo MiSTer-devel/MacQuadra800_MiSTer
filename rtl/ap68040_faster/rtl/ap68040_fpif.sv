@@ -72,6 +72,7 @@ module ap68040_fpif
 	input  logic        safe,           // no older uop is in flight
 	input  logic        adv,            // the uop leaves EX this cycle
 	input  logic        kill,
+	input  logic  [2:0] dynk,
 
 	output logic        hold,
 	output logic [31:0] res,
@@ -88,7 +89,9 @@ module ap68040_fpif
 	output logic  [7:0] mv_slots,       // FMOVEM slots that hold a register
 	output logic  [2:0] cr_slots,       // FMOVEM control slots FPCR FPSR FPIAR
 	output logic  [4:0] sv_words,       // FSAVE frame long words
-	output logic  [4:0] rs_words        // FRESTORE frame long words
+		output logic  [4:0] rs_words,        // FRESTORE frame long words
+	output logic [31:0] get_w1,
+	output logic [31:0] get_w2
 );
 
 localparam logic [3:0] FC_CHK = 4'd0, FC_DISP = 4'd1, FC_GET = 4'd2, FC_END = 4'd3,
@@ -418,7 +421,8 @@ endfunction
 // mv_slots: list in slot order, a register of its own (set with list and
 // mv_lsb, so the same value a cycle earlier than a decode of them: it feeds
 // AG's dynamic cancel, and so the register file's write enable)
-wire [2:0] cur_bit = slot_bit(slot, mv_lsb);
+wire [2:0] cur_slot = (sub == FC_MVR || sub == FC_MVW) ? dynk : slot;
+wire [2:0] cur_bit = slot_bit(cur_slot, mv_lsb);
 wire [2:0] cur_reg = (!mv_st || mv_m1) ? (3'd7 - cur_bit) : cur_bit;  // loads: bit 7 = FP0
 wire       cur_on  = list[cur_bit];
 assign cr_slots = {crl[0], crl[1], crl[2]};       // bit 0 = FPCR slot
@@ -524,6 +528,11 @@ wire chk_pend = pend && !chk_fs;     // (CHK's) FSAVE/FRESTORE: their own rules
 // pending and not FSAVE/FRESTORE does nothing (a fault of an older uop
 // discards it with the rest)
 // (END's instruction is the latched one: fsr_q, not the opcode decode)
+assign get_w1 = get_q[63:32];
+assign get_w2 = get_q[31:0];
+wire live_done = go && f_done && !f_excreq && !f_unimp && !f_unsupp;
+wire [95:0] store_dout = done_q ? get_q : f_dout;
+
 wire nosafe = (sub == FC_GET) || (sub == FC_END && !sx_v && !fsr_q);
 // synthesis translate_off
 always_ff @(posedge clk)
@@ -587,19 +596,19 @@ always_comb begin
 			FC_DISP: begin
 				if (ocl == 3'b011) begin
 					// a store: its outcome first; its exception comes from END
-					if (!done_q) hold = 1'b1;
+					if (!(done_q || live_done)) hold = 1'b1;
 					if (ea_dn) begin
 						case (fmt)
-							3'd4:    res_g = {bv[31:16], f_dout[95:80]};
-							3'd6:    res_g = {bv[31:8], f_dout[95:88]};
-							default: res_g = f_dout[95:64];
+							3'd4:    res_g = {bv[31:16], store_dout[95:80]};
+							3'd6:    res_g = {bv[31:8], store_dout[95:88]};
+							default: res_g = store_dout[95:64];
 						endcase
 						dkill = sx_kill;
 					end
 					else case (fmt)
-						3'd4:    res_g = {16'd0, f_dout[95:80]};
-						3'd6:    res_g = {24'd0, f_dout[95:88]};
-						default: res_g = f_dout[95:64];
+						3'd4:    res_g = {16'd0, store_dout[95:80]};
+						3'd6:    res_g = {24'd0, store_dout[95:88]};
+						default: res_g = store_dout[95:64];
 					endcase
 				end
 				else if (go && f_unimp) begin
@@ -628,7 +637,7 @@ always_comb begin
 			FC_LIST: res_g = (ea_pd) ? -{25'd0, l_bytes} : {25'd0, l_bytes};
 			FC_MVR: begin
 				res_g = mv_rev ? f_fmrd[31:0] : f_fmrd[95:64];
-				if (!mvr_wait) hold = 1'b1;
+				if (cur_on && !mvr_wait) hold = 1'b1;
 			end
 			FC_COND, FC_DBCC: begin
 				logic [5:0] pred;
@@ -680,14 +689,14 @@ always_comb begin
 	case (sub)
 		FC_DISP: if (ocl == 3'b011) begin
 			if (ea_dn) case (fmt)
-				3'd4:    res = {bv[31:16], f_dout[95:80]};
-				3'd6:    res = {bv[31:8], f_dout[95:88]};
-				default: res = f_dout[95:64];
+				3'd4:    res = {bv[31:16], store_dout[95:80]};
+				3'd6:    res = {bv[31:8], store_dout[95:88]};
+				default: res = store_dout[95:64];
 			endcase
 			else case (fmt)
-				3'd4:    res = {16'd0, f_dout[95:80]};
-				3'd6:    res = {24'd0, f_dout[95:88]};
-				default: res = f_dout[95:64];
+				3'd4:    res = {16'd0, store_dout[95:80]};
+				3'd6:    res = {24'd0, store_dout[95:88]};
+				default: res = store_dout[95:64];
 			endcase
 		end
 		FC_GET:  res = (imm[1:0] == 2'd1) ? get_q[63:32] : get_q[31:0];
@@ -918,14 +927,17 @@ always_ff @(posedge clk) begin
 				slot   <= 3'd0;
 			end
 			FC_MVR: begin
-				if (!mvr_wait) begin
+				if (!cur_on) begin
+					if (adv) slot <= dynk + 3'd1;
+				end
+				else if (!mvr_wait) begin
 					// the raw image comes through the source-register port
 					mvr_wait <= 1'b1;
 				end
 				else if (adv) begin
 					get_q    <= mv_rev ? {f_fmrd[31:0], f_fmrd[63:32], f_fmrd[95:64]} : f_fmrd;
 					mvr_wait <= 1'b0;
-					slot     <= slot + 3'd1;
+					slot     <= dynk + 3'd1;
 				end
 			end
 			FC_MVW: if (adv) begin
@@ -934,7 +946,7 @@ always_ff @(posedge clk) begin
 					f_fmwe  <= 1'b1;
 					f_din   <= {av, bv, latch};
 				end
-				slot <= slot + 3'd1;
+				slot <= dynk + 3'd1;
 			end
 			FC_COND, FC_DBCC: if (adv) begin
 				logic [5:0] pred;

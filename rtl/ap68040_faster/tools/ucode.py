@@ -596,10 +596,10 @@ R('FPU_OUT',
   F('END', ag='FUPD', last=1))
 R('FPU_OUT1', _fst('T0', 0, msz='B'), F('END', ag='FUPD', last=1))
 R('FPU_OUT2', _fst('T0', 0, msz='W'), F('END', ag='FUPD', last=1))
-R('FPU_OUT8', F('GET', a='CONST', const=1, d='T1'), _fst('T0', 0), _fst('T1', 4),
+R('FPU_OUT8', _fst('T0', 0), _fst('ZERO', 4, cond=1),
   F('END', ag='FUPD', last=1))
-R('FPU_OUT12', F('GET', a='CONST', const=1, d='T1'), F('GET', a='CONST', const=2, d='T2'),
-  _fst('T0', 0), _fst('T1', 4), _fst('T2', 8), F('END', ag='FUPD', last=1))
+R('FPU_OUT12', _fst('T0', 0), _fst('ZERO', 4, cond=1), _fst('ZERO', 8, cond=2),
+  F('END', ag='FUPD', last=1))
 R('FPU_OUTD', F('DISP', b='EA0', d='EA0'), F('END', last=1))
 R('FPU_K_OUTD', FCHK(), F('DISP', b='EA0', d='EA0'), F('END', last=1))
 R('FPU_K_OUT4', FCHKEA(), F('DISP', d='T0'),
@@ -609,11 +609,11 @@ R('FPU_K_OUT1', FCHKEA(), F('DISP', d='T0'),
 R('FPU_K_OUT2', FCHKEA(), F('DISP', d='T0'),
   _fst('T0', 0, msz='W'), F('END', ag='FUPD', last=1))
 R('FPU_K_OUT8', FCHKEA(), F('DISP', d='T0'),
-  F('GET', a='CONST', const=1, d='T1'), _fst('T0', 0), _fst('T1', 4),
+  _fst('T0', 0), _fst('ZERO', 4, cond=1),
   F('END', ag='FUPD', last=1))
 R('FPU_K_OUT12', FCHKEA(), F('DISP', d='T0'),
-  F('GET', a='CONST', const=1, d='T1'), F('GET', a='CONST', const=2, d='T2'),
-  _fst('T0', 0), _fst('T1', 4), _fst('T2', 8), F('END', ag='FUPD', last=1))
+  _fst('T0', 0), _fst('ZERO', 4, cond=1), _fst('ZERO', 8, cond=2),
+  F('END', ag='FUPD', last=1))
 # FMOVE(M) control registers: one slot each for FPCR, FPSR, FPIAR, the
 # absent ones cancelled; Dn / An hold the single register
 R('FPU_CR',
@@ -653,17 +653,18 @@ R('FPU_MVL',
   *[u for k in range(8) for u in (
       _fld('T2', 0, dyn=1, dynk=k), _fld('T3', 4, dyn=1, dynk=k),
       _fld('LATCH', 8, dyn=1, dynk=k),
-      F('MVW', a='T2', b='T3'),
-      U(ag='ADDC', agb='T11', agw='T11', const=12, dyn=1, dynk=k))],
+      F('MVW', a='T2', b='T3', dyn=1, dynk=k),
+      U(ag='ADDC', agb='T11', agw='T11', const=12, dyn=1, dynk=k))])
+R('FPU_MVL_EXIT',
   U(jc='EA0_AIP', jt='FPU_MVE.0'),
   F('END', last=1))
 R('FPU_MVS',
   *[u for k in range(8) for u in (
-      F('MVR', d='T2'), F('GET', a='CONST', const=1, d='T3'),
-      F('GET', a='CONST', const=2, d='T4'),
-      _fst('T2', 0, dyn=1, dynk=k), _fst('T3', 4, dyn=1, dynk=k),
-      _fst('T4', 8, dyn=1, dynk=k),
-      U(ag='ADDC', agb='T11', agw='T11', const=12, dyn=1, dynk=k))],
+      F('MVR', d='T2', dyn=1, dynk=k),
+      _fst('T2', 0, dyn=1, dynk=k), _fst('ZERO', 4, dyn=1, dynk=k, cond=1),
+      _fst('ZERO', 8, dyn=1, dynk=k, cond=2),
+      U(ag='ADDC', agb='T11', agw='T11', const=12, dyn=1, dynk=k))])
+R('FPU_MVS_EXIT',
   U(jc='EA0_APD', jt='FPU_MVE.0'),
   F('END', last=1))
 R('FPU_MVE', F('END', ag='ADDT0', agb='AY', agw='AY', last=1))
@@ -897,7 +898,8 @@ def emit():
                   'MOVEC_RD', 'MOVEC_WR', 'JSR', 'JSR_K', 'JMP', 'RTS',
                   'FPU_K_IND', 'FPU_K_IN1', 'FPU_K_IN2', 'FPU_K_IN4', 'FPU_K_IN8',
                   'FPU_K_IN12', 'FPU_K_OUTD', 'FPU_K_OUT1', 'FPU_K_OUT2',
-                  'FPU_K_OUT4', 'FPU_K_OUT8', 'FPU_K_OUT12']:
+                  'FPU_K_OUT4', 'FPU_K_OUT8', 'FPU_K_OUT12',
+                  'FPU_MVS', 'FPU_MVL', 'FPU_MVS_EXIT', 'FPU_MVL_EXIT']:
             f.write('localparam logic [9:0] UA_%s = 10\'d%d;\n' % (n, ENTRY[n]))
         f.write('// the predecoder table word (tools/ucode.py emit_pdrom)\n')
         f.write('typedef struct packed {\n\tlogic [1:0] kind;\n\tlogic [4:0] alt;\n\tlogic [8:0] ent;\n'

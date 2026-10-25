@@ -71,4 +71,12 @@ ended at the D1 attribute-ROM address). Targeting 16.67 ns instead of
 
 ## Seeds 39-42
 
-(filled in as each fit finishes)
+| Seed | CPU setup (60 MHz) | CPU TNS | CPU hold | CPU Fmax | SDRAM (90 MHz) | Bus (30 MHz) | HDMI | ALMs | Regs | RBF md5 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| **38 (ctrl)** | **-0.729 ns** | **-30.713 ns** | +0.107 ns | **57.49 MHz** | +0.653 ns | +1.228 ns | +0.257 ns | 35,483 (85 %) | 31,110 | `9bcfd99e80df5ef3ce01aae425dade3a` |
+| 39 | -0.780 ns | -43.422 ns | +0.245 ns | 57.32 MHz | +0.969 ns | +1.034 ns | +0.395 ns | 35,431 (85 %) | 31,125 | `00223d395619a3c24226579e3bc3b17e` |
+| 40 | -1.497 ns | -48.013 ns | +0.241 ns | 55.06 MHz | +1.023 ns | +0.971 ns | +0.310 ns | 35,476 (85 %) | 31,054 | `a217584e1158a9f4148107f0a917884a` |
+| 41 | -1.271 ns | -95.719 ns | +0.241 ns | 55.75 MHz | +1.122 ns | +1.582 ns | +0.550 ns | 35,403 (84 %) | 31,074 | `5d23815700a62143af716575b45e6a6b` |
+| 42 | -1.587 ns | -112.670 ns | +0.211 ns | 54.79 MHz | +1.106 ns | +1.439 ns | +0.160 ns | 35,480 (85 %) | 30,959 | `1c3c42163094f7eab3365d47a997c8f6` |
+
+None of seeds 38-42 closed the 60 MHz CPU clock on the unchanged RTL; seed 38 remains best at -0.729 ns (57.49 MHz Fmax).

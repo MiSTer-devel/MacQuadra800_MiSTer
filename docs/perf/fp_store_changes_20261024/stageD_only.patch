@@ -1,0 +1,214 @@
+--- stageC/rtl/ap68040_faster/tools/ucode.py	2026-10-24 21:56:29.894991955 -0700
++++ stageD/rtl/ap68040_faster/tools/ucode.py	2026-10-25 07:07:16.588886995 -0700
+@@ -653,16 +653,18 @@
+   *[u for k in range(8) for u in (
+       _fld('T2', 0, dyn=1, dynk=k), _fld('T3', 4, dyn=1, dynk=k),
+       _fld('LATCH', 8, dyn=1, dynk=k),
+-      F('MVW', a='T2', b='T3'),
+-      U(ag='ADDC', agb='T11', agw='T11', const=12, dyn=1, dynk=k))],
++      F('MVW', a='T2', b='T3', dyn=1, dynk=k),
++      U(ag='ADDC', agb='T11', agw='T11', const=12, dyn=1, dynk=k))])
++R('FPU_MVL_EXIT',
+   U(jc='EA0_AIP', jt='FPU_MVE.0'),
+   F('END', last=1))
+ R('FPU_MVS',
+   *[u for k in range(8) for u in (
+-      F('MVR', d='T2'),
++      F('MVR', d='T2', dyn=1, dynk=k),
+       _fst('T2', 0, dyn=1, dynk=k), _fst('ZERO', 4, dyn=1, dynk=k, cond=1),
+       _fst('ZERO', 8, dyn=1, dynk=k, cond=2),
+-      U(ag='ADDC', agb='T11', agw='T11', const=12, dyn=1, dynk=k))],
++      U(ag='ADDC', agb='T11', agw='T11', const=12, dyn=1, dynk=k))])
++R('FPU_MVS_EXIT',
+   U(jc='EA0_APD', jt='FPU_MVE.0'),
+   F('END', last=1))
+ R('FPU_MVE', F('END', ag='ADDT0', agb='AY', agw='AY', last=1))
+@@ -896,7 +898,8 @@
+                   'MOVEC_RD', 'MOVEC_WR', 'JSR', 'JSR_K', 'JMP', 'RTS',
+                   'FPU_K_IND', 'FPU_K_IN1', 'FPU_K_IN2', 'FPU_K_IN4', 'FPU_K_IN8',
+                   'FPU_K_IN12', 'FPU_K_OUTD', 'FPU_K_OUT1', 'FPU_K_OUT2',
+-                  'FPU_K_OUT4', 'FPU_K_OUT8', 'FPU_K_OUT12']:
++                  'FPU_K_OUT4', 'FPU_K_OUT8', 'FPU_K_OUT12',
++                  'FPU_MVS', 'FPU_MVL', 'FPU_MVS_EXIT', 'FPU_MVL_EXIT']:
+             f.write('localparam logic [9:0] UA_%s = 10\'d%d;\n' % (n, ENTRY[n]))
+         f.write('// the predecoder table word (tools/ucode.py emit_pdrom)\n')
+         f.write('typedef struct packed {\n\tlogic [1:0] kind;\n\tlogic [4:0] alt;\n\tlogic [8:0] ent;\n'
+--- stageC/rtl/ap68040_faster/rtl/ap68040_fpif.sv	2026-10-24 22:31:04.450332588 -0700
++++ stageD/rtl/ap68040_faster/rtl/ap68040_fpif.sv	2026-10-25 07:07:16.588886995 -0700
+@@ -72,6 +72,7 @@
+ 	input  logic        safe,           // no older uop is in flight
+ 	input  logic        adv,            // the uop leaves EX this cycle
+ 	input  logic        kill,
++	input  logic  [2:0] dynk,
+ 
+ 	output logic        hold,
+ 	output logic [31:0] res,
+@@ -420,7 +421,8 @@
+ // mv_slots: list in slot order, a register of its own (set with list and
+ // mv_lsb, so the same value a cycle earlier than a decode of them: it feeds
+ // AG's dynamic cancel, and so the register file's write enable)
+-wire [2:0] cur_bit = slot_bit(slot, mv_lsb);
++wire [2:0] cur_slot = (sub == FC_MVR || sub == FC_MVW) ? dynk : slot;
++wire [2:0] cur_bit = slot_bit(cur_slot, mv_lsb);
+ wire [2:0] cur_reg = (!mv_st || mv_m1) ? (3'd7 - cur_bit) : cur_bit;  // loads: bit 7 = FP0
+ wire       cur_on  = list[cur_bit];
+ assign cr_slots = {crl[0], crl[1], crl[2]};       // bit 0 = FPCR slot
+@@ -926,7 +928,7 @@
+ 			end
+ 			FC_MVR: begin
+ 				if (!cur_on) begin
+-					if (adv) slot <= slot + 3'd1;
++					if (adv) slot <= dynk + 3'd1;
+ 				end
+ 				else if (!mvr_wait) begin
+ 					// the raw image comes through the source-register port
+@@ -935,7 +937,7 @@
+ 				else if (adv) begin
+ 					get_q    <= mv_rev ? {f_fmrd[31:0], f_fmrd[63:32], f_fmrd[95:64]} : f_fmrd;
+ 					mvr_wait <= 1'b0;
+-					slot     <= slot + 3'd1;
++					slot     <= dynk + 3'd1;
+ 				end
+ 			end
+ 			FC_MVW: if (adv) begin
+@@ -944,7 +946,7 @@
+ 					f_fmwe  <= 1'b1;
+ 					f_din   <= {av, bv, latch};
+ 				end
+-				slot <= slot + 3'd1;
++				slot <= dynk + 3'd1;
+ 			end
+ 			FC_COND, FC_DBCC: if (adv) begin
+ 				logic [5:0] pred;
+--- stageC/rtl/ap68040_faster/rtl/ap68040_backend.sv	2026-10-24 21:56:29.894991955 -0700
++++ stageD/rtl/ap68040_faster/rtl/ap68040_backend.sv	2026-10-25 07:07:16.588886995 -0700
+@@ -151,8 +151,9 @@
+ 	output logic        dbg_retire,
+ 	output logic        dbg_retire2,    // ... and a second instruction (the second slot)
+ 	output logic        halted,
+-	output logic        fetch_stop      // no new instruction fetches: stopped
++	output logic        fetch_stop,     // no new instruction fetches: stopped
+                                         // (STOP) or halted
++	output logic  [7:0] fp_mvslots
+ );
+ 
+ // the SR bits the 68040 keeps: T1 T0 S M I2-I0 X N Z V C
+@@ -249,7 +250,7 @@
+ logic [31:0] fp_res, fp_xaddr;
+ logic  [7:0] fp_xvec;
+ logic  [3:0] fp_xfmt;
+-logic  [7:0] fp_mvslots;
++// logic  [7:0] fp_mvslots; (now output port)
+ logic  [2:0] fp_crslots;
+ logic  [4:0] fp_svwords, fp_rswords;
+ logic [31:0] fp_get1, fp_get2;
+@@ -732,7 +733,7 @@
+ 	.imm(ex_u.imm[7:0]), .immb(ex_u.imm_b[7:0]),
+ 	.av(ex_av), .bv(ex_bv), .aw(ex_a[15:0]), .bw(ex_b[15:0]),
+ 	.dw_a(dc2_a[15:0]), .dw_b(dc2_b[15:0]), .dw_ld(!stall_ex), .latch(ex_latch), .ea(ex_ea), .pc(ex_u.pc),
+-	.safe(!wb_v || wb_fpchk), .adv(adv_ex), .kill(kill_now),
++	.safe(!wb_v || wb_fpchk), .adv(adv_ex), .kill(kill_now), .dynk(ex_u.dynk[2:0]),
+ 	.hold(fp_hold), .res(fp_res), .dkill(fp_dkill), .taken(fp_taken),
+ 	.xvec(fp_xvec), .xfmt(fp_xfmt), .xnext(fp_xnext), .xaddr(fp_xaddr),
+ 	.xcommit(fp_xcommit), .st_kill(fp_stkill),
+--- stageC/rtl/ap68040_faster/rtl/ap68040.sv	2026-10-24 16:18:50.000000000 -0700
++++ stageD/rtl/ap68040_faster/rtl/ap68040.sv	2026-10-25 07:07:16.589887008 -0700
+@@ -308,7 +308,8 @@
+ 	.ipl(ipl_v), .dbcc_floor(dbcc_floor), .iack_lvl(iack_lvl), .rsto_req(rsto_req), .rsto_busy(rsto_busy),
+ 	.kill_now(kill_now), .lk_abandon(lk_abandon), .adv_ag(adv_ag),
+ 	.dtt0(dtt0), .dtt1(dtt1), .itt0(itt0), .itt1(itt1), .tc(tc),
+-	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_retire2(dbg_retire2), .halted(dbg_halted), .fetch_stop(be_fstop)
++	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_retire2(dbg_retire2), .halted(dbg_halted), .fetch_stop(be_fstop),
++	.fp_mvslots(fp_mvslots)
+ );
+ 
+ ap68040_dmu #(.DC1_ATC(DC1_ATC), .PA_IO_SERIAL(PA_IO_SERIAL), .PA_VRAM_POST(PA_VRAM_POST),
+@@ -432,8 +433,9 @@
+ 	.ras_o(d_ras), .ras_tp_o(d_ras_tp), .ras_n_o(d_ras_n)
+ );
+ 
++logic [7:0] fp_mvslots;
+ ap68040_useq #(.DUAL(DUAL)) useq (
+-	.clk(clk), .nreset(nreset), .flush(fe_flush),
++	.clk(clk), .nreset(nreset), .flush(fe_flush), .fp_mvslots(fp_mvslots),
+ 	.rq_n(rq_n), .rq0(rq0), .rq1(rq1), .rq_pop(rq_pop), .rq_pop_e(rq_pop_e),
+ 	.smode(sr[13]), .master(sr[12]), .trace(sr[15] || sr[14]),
+ 	.exc_go(exc_go), .exc_pend(exc_pend), .exc_kind(exc_kind), .exc_ssp(exc_ssp),
+--- stageC/rtl/ap68040_faster/rtl/ap68040_useq.sv	2026-10-24 16:18:50.000000000 -0700
++++ stageD/rtl/ap68040_faster/rtl/ap68040_useq.sv	2026-10-25 07:17:09.984663016 -0700
+@@ -35,6 +35,7 @@
+ 	input  logic        smode,
+ 	input  logic        master,     // M bit
+ 	input  logic        trace,      // T1 or T0: every instruction alone
++	input  logic  [7:0] fp_mvslots,
+ 
+ 	input  logic        exc_go,
+ 	input  logic        exc_pend,   // the back end prepares an exception entry: issue nothing
+@@ -910,7 +911,52 @@
+ wire   c_emit = cq_v && room_out && !flush && !exc_go && !exc_pend;
+ 
+ wire step = uw_v && room_out && !flush && !exc_go && !exc_pend && !cq_v;
+-wire emit = step && !n_jump;
++
++// FMOVEM slot optimization
++logic [7:0] mv_mask_static;
++always_comb begin
++	logic lsb;
++	lsb = src.ext1[13] && (src.ea0.m == EM_APD);
++	for (int k = 0; k < 8; k++)
++		mv_mask_static[k] = src.ext1[lsb ? k : (7 - k)];
++end
++wire [7:0] mv_active = (!src.ext1[11]) ? mv_mask_static : fp_mvslots;
++
++wire        is_fpmv      = (uw.dyn == 3'd1) && (!src.ext1[11]);
++wire  [2:0] fpmv_k       = uw.dynk[2:0];
++wire  [9:0] fpmv_base    = src.ext1[13] ? UA_FPU_MVS : UA_FPU_MVL;
++wire  [9:0] fpmv_exit    = src.ext1[13] ? UA_FPU_MVS_EXIT : UA_FPU_MVL_EXIT;
++wire        fpmv_slot_on = mv_active[fpmv_k];
++
++logic [7:0] fpmv_rem_mask;
++always_comb begin
++	fpmv_rem_mask = '0;
++	for (int i = 0; i < 8; i++) begin
++		if (i > fpmv_k && mv_active[i]) fpmv_rem_mask[i] = 1'b1;
++	end
++end
++wire        fpmv_no_more = (fpmv_rem_mask == 8'd0);
++
++logic [2:0] fpmv_next_k;
++always_comb begin
++	fpmv_next_k = 3'd7;
++	for (int i = 7; i >= 0; i--) begin
++		if (fpmv_rem_mask[i]) fpmv_next_k = 3'(i);
++	end
++end
++
++wire [9:0] fpmv_k5      = {5'd0, fpmv_k, 2'b00} + {7'd0, fpmv_k};
++wire [9:0] fpmv_next_k5 = {5'd0, fpmv_next_k, 2'b00} + {7'd0, fpmv_next_k};
++wire       fpmv_slot_last = (upc == fpmv_base + fpmv_k5 + 10'd4);
++
++wire fpmv_skip = is_fpmv && !fpmv_slot_on;
++wire fpmv_jump = is_fpmv && (fpmv_skip || (fpmv_slot_last && (fpmv_no_more || !mv_active[fpmv_k + 3'd1])));
++wire [9:0] fpmv_target = (fpmv_skip && fpmv_no_more) ? fpmv_exit :
++                         (fpmv_skip)                 ? (fpmv_base + fpmv_next_k5) :
++                         (fpmv_no_more)              ? fpmv_exit :
++                                                       (fpmv_base + fpmv_next_k5);
++
++wire emit = step && !n_jump && !fpmv_skip;
+ wire stay = n_ptr || n_mv_pre || (uw.loop && !nu.last);   // same word again
+ wire done = emit && !stay && uw.last;                       // instruction ends
+ // the companion issues beside the uop that ends the instruction
+@@ -965,9 +1011,10 @@
+ 		nv = 1'b0;
+ 	end
+ 	else if (step) begin
+-		if (n_jump)      na = jc_now ? uw.jt : upc + 10'd1;
+-		else if (stay)   na = upc;
+-		else if (!uw.last) na = upc + 10'd1;
++		if (n_jump)         na = jc_now ? uw.jt : upc + 10'd1;
++		else if (stay)      na = upc;
++		else if (fpmv_jump) na = fpmv_target;
++		else if (!uw.last)  na = upc + 10'd1;
+ 		else if (!exc_mode && rq_n[1]) na = rq1.rt;        // next instruction
+ 		else nv = 1'b0;
+ 	end

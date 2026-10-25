@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""fp_store_changes 2026-10-24: random FP register-to-memory programs for the
+core-level differential test (the same image on the unpatched and the patched
+dual core, the memory image compared after the run).
+
+  fpdiff_gen.py <seed> <out.s> [commands]
+
+User mode, copyback data (as the bench's crt0.s: DTT0 user copyback, DTT1
+supervisor noncachable), both caches on.  The program sets FP0-FP7 from a
+table of random extended-format bit patterns (raw, through FMOVEM, so
+denormals, unnormals, NaNs and infinities land in the registers unchanged),
+then runs <commands> commands: FMOVE FPn,<ea> in every format (.x .d .s .l
+.w .b) to (a0)+, (a0), d16(a0), -(a3) and Dn; FMOVEM.X stores and loads of
+static and dynamic lists, postincrement, predecrement and control; FPCR
+writes with random rounding mode, precision and exception enables; and
+register reloads from the table.  After every command FPSR and FPIAR are
+appended to the buffer.  FP exceptions (vectors 48-55) and the F-line /
+unsupported-data-type traps (11, 55) are logged (vector, stacked PC) and
+returned from.  The program ends with TRAP #1, whose handler CPUSHAs the
+caches and writes the pass word; the bench dumps $40000-$7E000.
+
+Layout: buffer (a0) from $40000; predecrement area (a3) down from $7C000;
+exception log (a2) from $7C000; table after the code; USP $7E000; SSP $7F000.
+"""
+import random
+import sys
+
+seed = int(sys.argv[1])
+out = sys.argv[2]
+ncmd = int(sys.argv[3]) if len(sys.argv) > 3 else 1500
+rnd = random.Random(seed)
+
+FMTS = [("d", 30), ("s", 20), ("x", 20), ("l", 15), ("w", 8), ("b", 7)]
+FMT_BYTES = dict(d=8, s=4, x=12, l=4, w=2, b=1)
+
+
+def pick(weighted):
+    t = sum(w for _, w in weighted)
+    r = rnd.randrange(t)
+    for v, w in weighted:
+        r -= w
+        if r < 0:
+            return v
+    return weighted[-1][0]
+
+
+def rnd_x():
+    """an extended-format bit pattern as a 96-bit memory image (3 long words)"""
+    s = rnd.randrange(2)
+    m = rnd.getrandbits(64)
+    k = rnd.randrange(100)
+    if k < 40:                               # ordinary, within single range
+        e = 16383 + rnd.randrange(-60, 61)
+        m |= 1 << 63
+        if rnd.randrange(4) == 0: m &= ~((1 << 40) - 1)       # short significands
+        if rnd.randrange(8) == 0: m &= (1 << 63)              # powers of two
+        if rnd.randrange(8) == 0: m = (1 << 63) | (1 << 39)   # a single's tie
+        if rnd.randrange(8) == 0: m = (1 << 63) | (1 << 10)   # a double's tie
+    elif k < 52:                             # integer-sized: 2^-2 .. 2^40
+        e = 16383 + rnd.randrange(-2, 41)
+        m |= 1 << 63
+        if rnd.randrange(3) == 0: m &= ~((1 << 32) - 1)
+    elif k < 62:                             # double range, past single
+        e = 16383 + rnd.choice([1, -1]) * rnd.randrange(100, 1000)
+        m |= 1 << 63
+    elif k < 70:                             # tiny: single/double denormal results
+        e = 16383 - rnd.randrange(120, 1080)
+        m |= 1 << 63
+    elif k < 76:                             # near the extended range ends
+        e = rnd.choice([rnd.randrange(32700, 32767), rnd.randrange(1, 60)])
+        m |= 1 << 63
+    elif k < 82:                             # zero
+        e = 0; m = 0
+    elif k < 86:                             # infinity
+        e = 0x7FFF; m = 0
+    elif k < 91:                             # NaN, quiet or signaling
+        e = 0x7FFF; m |= 1 << 63
+        if rnd.randrange(2): m |= 1 << 62
+        else: m &= ~(1 << 62)
+        if (m & ((1 << 63) - 1)) == 0: m |= 1
+    elif k < 95:                             # denormal (integer bit clear)
+        e = 0; m &= ~(1 << 63)
+        if m == 0: m = 1
+    elif k < 98:                             # unnormal
+        e = rnd.randrange(1, 0x7FFF); m &= ~(1 << 63)
+        if m == 0: m = 1
+    else:                                    # pseudo-denormal
+        e = 0; m |= 1 << 63
+    w0 = (s << 31) | (e << 16)
+    return w0, (m >> 32) & 0xFFFFFFFF, m & 0xFFFFFFFF
+
+
+def fpcr_value():
+    k = rnd.randrange(100)
+    en = 0
+    if k < 35: en = rnd.randrange(256)                     # any enables
+    elif k < 50: en = 1 << rnd.randrange(8, 16) >> 8       # one enable
+    rm = rnd.randrange(4)
+    pr = rnd.randrange(4)
+    return (en << 8) | (pr << 6) | (rm << 4)
+
+
+def reglist(n=None):
+    if n is None:
+        n = pick([(1, 30), (2, 35), (3, 15), (4, 10), (8, 5), (5, 5)])
+    regs = sorted(rnd.sample(range(8), n))
+    return regs
+
+
+def static_list(regs):
+    return "/".join("fp%d" % r for r in regs)
+
+
+def mask_predec(regs):     # -(An): bit 7-n = FPn... the 68040's static list is bit 7 = FP0 for postinc/control, reversed for predecrement
+    m = 0
+    for r in regs:
+        m |= 1 << r
+    return m
+
+
+def mask_postinc(regs):
+    m = 0
+    for r in regs:
+        m |= 1 << (7 - r)
+    return m
+
+
+lines = []
+A = lines.append
+A("; fp_store_changes 2026-10-24: random FP store program, seed %d, %d commands" % (seed, ncmd))
+A("; generated by fpdiff_gen.py -- see its docstring")
+A("STAMP\tequ\t$F108")
+A("DONEREG\tequ\t$F102")
+A("BUF\tequ\t$40000")
+A("PDAREA\tequ\t$7C000")
+A("XLOG\tequ\t$7C000")
+A("\torg\t0")
+A("\tdc.l\t$7F000\t\t; SSP")
+A("\tdc.l\tstart")
+# vectors 2..255
+for v in range(2, 256):
+    if v == 11:
+        A("\tdc.l\tv11")
+    elif 48 <= v <= 55:
+        A("\tdc.l\tv%d" % v)
+    elif v == 32:
+        A("\tdc.l\ttstamp")
+    elif v == 33:
+        A("\tdc.l\ttdone")
+    else:
+        A("\tdc.l\tunexp")
+A("start:")
+A("\tmove.l\t#$80008000,d0\t; both caches on")
+A("\tmovec\td0,cacr")
+A("\tmove.l\t#$00008020,d0\t; DTT0: user data, copyback")
+A("\tmovec\td0,dtt0")
+A("\tmove.l\t#$0000A040,d0\t; DTT1: supervisor data, noncachable serialized")
+A("\tmovec\td0,dtt1")
+A("\tlea\t($7E000).l,a0")
+A("\tmove.l\ta0,usp")
+A("\tandi.w\t#$DFFF,sr\t; user mode")
+A("\tlea\t(BUF).l,a0")
+A("\tlea\t(XLOG).l,a2")
+A("\tlea\t(PDAREA).l,a3")
+A("\tlea\ttable(pc),a4")
+A("\tmoveq\t#0,d1")
+A("\tmoveq\t#0,d2")
+A("\tfmove.l\t#0,fpcr")
+A("\tfmovem.x\t(a4)+,fp0-fp7")
+
+table_sets = 1          # extended values consumed from the table (in registers)
+nexc_paths = 0
+for i in range(ncmd):
+    if i % 64 == 0:
+        A("\tmove.l\t#$%08x,(a0)+\t; marker" % (0xC0DE0000 | i))
+    k = rnd.randrange(100)
+    if k < 10:                                   # reload FP0-FP7 from the table
+        A("\tfmovem.x\t(a4)+,fp0-fp7")
+        table_sets += 8
+    elif k < 20:                                 # FPCR
+        A("\tfmove.l\t#$%08x,fpcr" % fpcr_value())
+    elif k < 72:                                 # FMOVE FPn,<ea>
+        fmt = pick(FMTS)
+        reg = rnd.randrange(8)
+        ea = pick([("(a0)+", 50), ("(a0)", 10), ("disp", 10), ("-(a3)", 15), ("dn", 15)])
+        if ea == "dn" and fmt in ("d", "x"):
+            ea = "(a0)+"
+        if ea == "(a0)+":
+            A("\tfmove.%s\tfp%d,(a0)+" % (fmt, reg))
+        elif ea == "(a0)":
+            A("\tfmove.%s\tfp%d,(a0)" % (fmt, reg))
+            A("\tlea\t%d(a0),a0" % FMT_BYTES[fmt])
+        elif ea == "disp":
+            d = rnd.choice([2, 4, 6, 8, 12, 16])
+            A("\tfmove.%s\tfp%d,%d(a0)" % (fmt, reg, d))
+            A("\tlea\t%d(a0),a0" % (d + FMT_BYTES[fmt]))
+        elif ea == "-(a3)":
+            A("\tfmove.%s\tfp%d,-(a3)" % (fmt, reg))
+        else:
+            A("\tfmove.%s\tfp%d,d1" % (fmt, reg))
+            A("\tmove.l\td1,(a0)+")
+    elif k < 84:                                 # FMOVEM.X store
+        regs = reglist()
+        dyn = rnd.randrange(10) < 3
+        dst = pick([("(a0)", 55), ("-(a3)", 35), ("disp", 10)])
+        if dyn:
+            m = mask_predec(regs) if dst == "-(a3)" else mask_postinc(regs)
+            A("\tmove.b\t#$%02x,d2" % m)
+            src = "d2"
+        else:
+            src = static_list(regs)
+        if dst == "(a0)":
+            A("\tfmovem.x\t%s,(a0)" % src)
+            A("\tlea\t%d(a0),a0" % (12 * len(regs)))
+        elif dst == "disp":
+            A("\tfmovem.x\t%s,4(a0)" % src)
+            A("\tlea\t%d(a0),a0" % (4 + 12 * len(regs)))
+        else:
+            A("\tfmovem.x\t%s,-(a3)" % src)
+    elif k < 92:                                 # FMOVEM.X load from the table
+        regs = reglist()
+        dyn = rnd.randrange(10) < 3
+        if dyn:
+            A("\tmove.b\t#$%02x,d2" % mask_postinc(regs))
+            A("\tfmovem.x\t(a4)+,d2")
+        else:
+            A("\tfmovem.x\t(a4)+,%s" % static_list(regs))
+        table_sets += len(regs)
+    else:                                        # FMOVEM.X load back what -(a3) holds (raw images of the stores)
+        regs = reglist(rnd.choice([1, 2]))
+        A("\tfmovem.x\t(a3)+,%s" % static_list(regs))
+        A("\tlea\t-%d(a3),a3" % (12 * len(regs)))
+    A("\tfmove.l\tfpsr,(a0)+")
+    A("\tfmove.l\tfpiar,(a0)+")
+
+A("\tmoveq\t#0,d0")
+A("\ttrap\t#1")
+A("\tbra.s\t*")
+# handlers
+A("tstamp:")
+A("\tmove.w\td0,(STAMP).l")
+A("\trte")
+A("tdone:\t\t\t\t; TRAP #1: flush the data cache to memory, then the pass word")
+A("\tcpusha\tbc")
+A("\ttst.l\td0")
+A("\tbne.s\ttfail")
+A("\tmove.w\t#$600D,(DONEREG).l")
+A("\tbra.s\t*")
+A("tfail:")
+A("\tmove.w\td0,($F100).l")
+A("\tmove.w\t#$BAD0,(DONEREG).l")
+A("\tbra.s\t*")
+A("unexp:")
+A("\tmoveq\t#99,d0")
+A("\tbra.s\ttfail")
+for v in [11] + list(range(48, 56)):
+    A("v%d:\tmove.w\t#%d,d0" % (v, v))
+    A("\tbra.s\txlog")
+A("xlog:\t\t\t\t; the exception log: vector, stacked PC")
+A("\tmove.w\td0,(a2)+")
+A("\tmove.l\t2(sp),(a2)+")
+A("\trte")
+A("\teven")
+A("table:")
+for _ in range(table_sets + 16):
+    w0, w1, w2 = rnd_x()
+    A("\tdc.l\t$%08x,$%08x,$%08x" % (w0, w1, w2))
+open(out, "w").write("\n".join(lines) + "\n")
+print("%s: %d commands, %d table values" % (out, ncmd, table_sets + 16))

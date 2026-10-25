@@ -308,7 +308,8 @@ ap68040_backend #(.FPU_REVISION(FPU_REVISION), .FPU_PIPE(FPU_PIPE), .EARLY_RES(E
 	.ipl(ipl_v), .dbcc_floor(dbcc_floor), .iack_lvl(iack_lvl), .rsto_req(rsto_req), .rsto_busy(rsto_busy),
 	.kill_now(kill_now), .lk_abandon(lk_abandon), .adv_ag(adv_ag),
 	.dtt0(dtt0), .dtt1(dtt1), .itt0(itt0), .itt1(itt1), .tc(tc),
-	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_retire2(dbg_retire2), .halted(dbg_halted), .fetch_stop(be_fstop)
+	.dbg_pc(dbg_pc), .dbg_retire(dbg_retire), .dbg_retire2(dbg_retire2), .halted(dbg_halted), .fetch_stop(be_fstop),
+	.fp_mvslots(fp_mvslots)
 );
 
 ap68040_dmu #(.DC1_ATC(DC1_ATC), .PA_IO_SERIAL(PA_IO_SERIAL), .PA_VRAM_POST(PA_VRAM_POST),
@@ -432,8 +433,9 @@ ap68040_decode #(.LOOP_PRED(LOOP_PRED), .DUAL(DUAL), .S1_LDTK(S1_LDTK)) dec (
 	.ras_o(d_ras), .ras_tp_o(d_ras_tp), .ras_n_o(d_ras_n)
 );
 
+logic [7:0] fp_mvslots;
 ap68040_useq #(.DUAL(DUAL)) useq (
-	.clk(clk), .nreset(nreset), .flush(fe_flush),
+	.clk(clk), .nreset(nreset), .flush(fe_flush), .fp_mvslots(fp_mvslots),
 	.rq_n(rq_n), .rq0(rq0), .rq1(rq1), .rq_pop(rq_pop), .rq_pop_e(rq_pop_e),
 	.smode(sr[13]), .master(sr[12]), .trace(sr[15] || sr[14]),
 	.exc_go(exc_go), .exc_pend(exc_pend), .exc_kind(exc_kind), .exc_ssp(exc_ssp),

@@ -35,6 +35,7 @@ module ap68040_useq
 	input  logic        smode,
 	input  logic        master,     // M bit
 	input  logic        trace,      // T1 or T0: every instruction alone
+	input  logic  [7:0] fp_mvslots,
 
 	input  logic        exc_go,
 	input  logic        exc_pend,   // the back end prepares an exception entry: issue nothing
@@ -910,7 +911,52 @@ uop_t  cq_u;
 wire   c_emit = cq_v && room_out && !flush && !exc_go && !exc_pend;
 
 wire step = uw_v && room_out && !flush && !exc_go && !exc_pend && !cq_v;
-wire emit = step && !n_jump;
+
+// FMOVEM slot optimization
+logic [7:0] mv_mask_static;
+always_comb begin
+	logic lsb;
+	lsb = src.ext1[13] && (src.ea0.m == EM_APD);
+	for (int k = 0; k < 8; k++)
+		mv_mask_static[k] = src.ext1[lsb ? k : (7 - k)];
+end
+wire [7:0] mv_active = (!src.ext1[11]) ? mv_mask_static : fp_mvslots;
+
+wire        is_fpmv      = (uw.dyn == 3'd1) && (!src.ext1[11]);
+wire  [2:0] fpmv_k       = uw.dynk[2:0];
+wire  [9:0] fpmv_base    = src.ext1[13] ? UA_FPU_MVS : UA_FPU_MVL;
+wire  [9:0] fpmv_exit    = src.ext1[13] ? UA_FPU_MVS_EXIT : UA_FPU_MVL_EXIT;
+wire        fpmv_slot_on = mv_active[fpmv_k];
+
+logic [7:0] fpmv_rem_mask;
+always_comb begin
+	fpmv_rem_mask = '0;
+	for (int i = 0; i < 8; i++) begin
+		if (i > fpmv_k && mv_active[i]) fpmv_rem_mask[i] = 1'b1;
+	end
+end
+wire        fpmv_no_more = (fpmv_rem_mask == 8'd0);
+
+logic [2:0] fpmv_next_k;
+always_comb begin
+	fpmv_next_k = 3'd7;
+	for (int i = 7; i >= 0; i--) begin
+		if (fpmv_rem_mask[i]) fpmv_next_k = 3'(i);
+	end
+end
+
+wire [9:0] fpmv_k5      = {5'd0, fpmv_k, 2'b00} + {7'd0, fpmv_k};
+wire [9:0] fpmv_next_k5 = {5'd0, fpmv_next_k, 2'b00} + {7'd0, fpmv_next_k};
+wire       fpmv_slot_last = (upc == fpmv_base + fpmv_k5 + 10'd4);
+
+wire fpmv_skip = is_fpmv && !fpmv_slot_on;
+wire fpmv_jump = is_fpmv && (fpmv_skip || (fpmv_slot_last && (fpmv_no_more || !mv_active[fpmv_k + 3'd1])));
+wire [9:0] fpmv_target = (fpmv_skip && fpmv_no_more) ? fpmv_exit :
+                         (fpmv_skip)                 ? (fpmv_base + fpmv_next_k5) :
+                         (fpmv_no_more)              ? fpmv_exit :
+                                                       (fpmv_base + fpmv_next_k5);
+
+wire emit = step && !n_jump && !fpmv_skip;
 wire stay = n_ptr || n_mv_pre || (uw.loop && !nu.last);   // same word again
 wire done = emit && !stay && uw.last;                       // instruction ends
 // the companion issues beside the uop that ends the instruction
@@ -965,9 +1011,10 @@ always_comb begin
 		nv = 1'b0;
 	end
 	else if (step) begin
-		if (n_jump)      na = jc_now ? uw.jt : upc + 10'd1;
-		else if (stay)   na = upc;
-		else if (!uw.last) na = upc + 10'd1;
+		if (n_jump)         na = jc_now ? uw.jt : upc + 10'd1;
+		else if (stay)      na = upc;
+		else if (fpmv_jump) na = fpmv_target;
+		else if (!uw.last)  na = upc + 10'd1;
 		else if (!exc_mode && rq_n[1]) na = rq1.rt;        // next instruction
 		else nv = 1'b0;
 	end

@@ -151,8 +151,9 @@ module ap68040_backend
 	output logic        dbg_retire,
 	output logic        dbg_retire2,    // ... and a second instruction (the second slot)
 	output logic        halted,
-	output logic        fetch_stop      // no new instruction fetches: stopped
+	output logic        fetch_stop,     // no new instruction fetches: stopped
                                         // (STOP) or halted
+	output logic  [7:0] fp_mvslots
 );
 
 // the SR bits the 68040 keeps: T1 T0 S M I2-I0 X N Z V C
@@ -249,9 +250,10 @@ logic        fp_hold, fp_dkill, fp_taken, fp_xnext, fp_xcommit, fp_stkill;
 logic [31:0] fp_res, fp_xaddr;
 logic  [7:0] fp_xvec;
 logic  [3:0] fp_xfmt;
-logic  [7:0] fp_mvslots;
+// logic  [7:0] fp_mvslots; (now output port)
 logic  [2:0] fp_crslots;
 logic  [4:0] fp_svwords, fp_rswords;
+logic [31:0] fp_get1, fp_get2;
 logic  [2:0] fwe, bwe;
 logic  [1:0] fwe_ag;           // fwe[0..1] without the advance (AG holds an update)
 logic  [4:0] fwa [3], bwa [3];
@@ -731,12 +733,13 @@ ap68040_fpif #(.FPU_REVISION(FPU_REVISION), .FPU_PIPE(FPU_PIPE)) fpif (
 	.imm(ex_u.imm[7:0]), .immb(ex_u.imm_b[7:0]),
 	.av(ex_av), .bv(ex_bv), .aw(ex_a[15:0]), .bw(ex_b[15:0]),
 	.dw_a(dc2_a[15:0]), .dw_b(dc2_b[15:0]), .dw_ld(!stall_ex), .latch(ex_latch), .ea(ex_ea), .pc(ex_u.pc),
-	.safe(!wb_v || wb_fpchk), .adv(adv_ex), .kill(kill_now),
+	.safe(!wb_v || wb_fpchk), .adv(adv_ex), .kill(kill_now), .dynk(ex_u.dynk[2:0]),
 	.hold(fp_hold), .res(fp_res), .dkill(fp_dkill), .taken(fp_taken),
 	.xvec(fp_xvec), .xfmt(fp_xfmt), .xnext(fp_xnext), .xaddr(fp_xaddr),
 	.xcommit(fp_xcommit), .st_kill(fp_stkill),
 	.mv_slots(fp_mvslots), .cr_slots(fp_crslots),
-	.sv_words(fp_svwords), .rs_words(fp_rswords)
+	.sv_words(fp_svwords), .rs_words(fp_rswords),
+	.get_w1(fp_get1), .get_w2(fp_get2)
 );
 
 // EX holds while the unit runs, until the cycle its result is presented
@@ -1341,6 +1344,11 @@ always_comb begin
 		OP_CAS2W: begin
 			ex_st     = (ex_u.cond[0] && !cas2_eq) ? ex_bv : ex_av;
 			ex_stkill = !ex_u.cond[0] && !cas2_eq;
+		end
+		OP_MOV: begin
+			if (ex_u.mem == M_ST && ex_u.cond == 4'd1) ex_st = fp_get1;
+			else if (ex_u.mem == M_ST && ex_u.cond == 4'd2) ex_st = fp_get2;
+			else ex_st = ex_res;
 		end
 		default: ex_st = ex_res;
 	endcase

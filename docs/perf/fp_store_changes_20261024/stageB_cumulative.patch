@@ -1,0 +1,2009 @@
+Only in stageB: jtag.cdf
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/MacQuadra800.qsf stageB/MacQuadra800.qsf
+--- base/MacQuadra800.qsf	2026-10-24 16:18:50.000000000 -0700
++++ stageB/MacQuadra800.qsf	2026-10-24 22:03:32.320694909 -0700
+@@ -13,7 +13,7 @@
+ set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
+ set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
+ 
+-set_global_assignment -name LAST_QUARTUS_VERSION "17.0.2 Lite Edition"
++set_global_assignment -name LAST_QUARTUS_VERSION "17.0.0 Lite Edition"
+ 
+ set_global_assignment -name GENERATE_RBF_FILE ON
+ set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/rtl/ap68040_backend.sv stageB/rtl/ap68040_faster/rtl/ap68040_backend.sv
+--- base/rtl/ap68040_faster/rtl/ap68040_backend.sv	2026-10-24 16:18:50.000000000 -0700
++++ stageB/rtl/ap68040_faster/rtl/ap68040_backend.sv	2026-10-24 21:56:29.894991955 -0700
+@@ -252,6 +252,7 @@
+ logic  [7:0] fp_mvslots;
+ logic  [2:0] fp_crslots;
+ logic  [4:0] fp_svwords, fp_rswords;
++logic [31:0] fp_get1, fp_get2;
+ logic  [2:0] fwe, bwe;
+ logic  [1:0] fwe_ag;           // fwe[0..1] without the advance (AG holds an update)
+ logic  [4:0] fwa [3], bwa [3];
+@@ -736,7 +737,8 @@
+ 	.xvec(fp_xvec), .xfmt(fp_xfmt), .xnext(fp_xnext), .xaddr(fp_xaddr),
+ 	.xcommit(fp_xcommit), .st_kill(fp_stkill),
+ 	.mv_slots(fp_mvslots), .cr_slots(fp_crslots),
+-	.sv_words(fp_svwords), .rs_words(fp_rswords)
++	.sv_words(fp_svwords), .rs_words(fp_rswords),
++	.get_w1(fp_get1), .get_w2(fp_get2)
+ );
+ 
+ // EX holds while the unit runs, until the cycle its result is presented
+@@ -1342,6 +1344,11 @@
+ 			ex_st     = (ex_u.cond[0] && !cas2_eq) ? ex_bv : ex_av;
+ 			ex_stkill = !ex_u.cond[0] && !cas2_eq;
+ 		end
++		OP_MOV: begin
++			if (ex_u.mem == M_ST && ex_u.cond == 4'd1) ex_st = fp_get1;
++			else if (ex_u.mem == M_ST && ex_u.cond == 4'd2) ex_st = fp_get2;
++			else ex_st = ex_res;
++		end
+ 		default: ex_st = ex_res;
+ 	endcase
+ 	// an FPU store whose result is not written (an enabled integer
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/rtl/ap68040_fpif.sv stageB/rtl/ap68040_faster/rtl/ap68040_fpif.sv
+--- base/rtl/ap68040_faster/rtl/ap68040_fpif.sv	2026-10-24 16:18:50.000000000 -0700
++++ stageB/rtl/ap68040_faster/rtl/ap68040_fpif.sv	2026-10-24 21:56:29.893991942 -0700
+@@ -88,7 +88,9 @@
+ 	output logic  [7:0] mv_slots,       // FMOVEM slots that hold a register
+ 	output logic  [2:0] cr_slots,       // FMOVEM control slots FPCR FPSR FPIAR
+ 	output logic  [4:0] sv_words,       // FSAVE frame long words
+-	output logic  [4:0] rs_words        // FRESTORE frame long words
++		output logic  [4:0] rs_words,        // FRESTORE frame long words
++	output logic [31:0] get_w1,
++	output logic [31:0] get_w2
+ );
+ 
+ localparam logic [3:0] FC_CHK = 4'd0, FC_DISP = 4'd1, FC_GET = 4'd2, FC_END = 4'd3,
+@@ -524,6 +526,11 @@
+ // pending and not FSAVE/FRESTORE does nothing (a fault of an older uop
+ // discards it with the rest)
+ // (END's instruction is the latched one: fsr_q, not the opcode decode)
++assign get_w1 = get_q[63:32];
++assign get_w2 = get_q[31:0];
++wire live_done = go && f_done && !f_excreq && !f_unimp && !f_unsupp;
++wire [95:0] store_dout = done_q ? get_q : f_dout;
++
+ wire nosafe = (sub == FC_GET) || (sub == FC_END && !sx_v && !fsr_q);
+ // synthesis translate_off
+ always_ff @(posedge clk)
+@@ -587,19 +594,19 @@
+ 			FC_DISP: begin
+ 				if (ocl == 3'b011) begin
+ 					// a store: its outcome first; its exception comes from END
+-					if (!done_q) hold = 1'b1;
++					if (!(done_q || live_done)) hold = 1'b1;
+ 					if (ea_dn) begin
+ 						case (fmt)
+-							3'd4:    res_g = {bv[31:16], f_dout[95:80]};
+-							3'd6:    res_g = {bv[31:8], f_dout[95:88]};
+-							default: res_g = f_dout[95:64];
++							3'd4:    res_g = {bv[31:16], store_dout[95:80]};
++							3'd6:    res_g = {bv[31:8], store_dout[95:88]};
++							default: res_g = store_dout[95:64];
+ 						endcase
+ 						dkill = sx_kill;
+ 					end
+ 					else case (fmt)
+-						3'd4:    res_g = {16'd0, f_dout[95:80]};
+-						3'd6:    res_g = {24'd0, f_dout[95:88]};
+-						default: res_g = f_dout[95:64];
++						3'd4:    res_g = {16'd0, store_dout[95:80]};
++						3'd6:    res_g = {24'd0, store_dout[95:88]};
++						default: res_g = store_dout[95:64];
+ 					endcase
+ 				end
+ 				else if (go && f_unimp) begin
+@@ -680,14 +687,14 @@
+ 	case (sub)
+ 		FC_DISP: if (ocl == 3'b011) begin
+ 			if (ea_dn) case (fmt)
+-				3'd4:    res = {bv[31:16], f_dout[95:80]};
+-				3'd6:    res = {bv[31:8], f_dout[95:88]};
+-				default: res = f_dout[95:64];
++				3'd4:    res = {bv[31:16], store_dout[95:80]};
++				3'd6:    res = {bv[31:8], store_dout[95:88]};
++				default: res = store_dout[95:64];
+ 			endcase
+ 			else case (fmt)
+-				3'd4:    res = {16'd0, f_dout[95:80]};
+-				3'd6:    res = {24'd0, f_dout[95:88]};
+-				default: res = f_dout[95:64];
++				3'd4:    res = {16'd0, store_dout[95:80]};
++				3'd6:    res = {24'd0, store_dout[95:88]};
++				default: res = store_dout[95:64];
+ 			endcase
+ 		end
+ 		FC_GET:  res = (imm[1:0] == 2'd1) ? get_q[63:32] : get_q[31:0];
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/rtl/fpu/ap040_fpu.v stageB/rtl/ap68040_faster/rtl/fpu/ap040_fpu.v
+--- base/rtl/ap68040_faster/rtl/fpu/ap040_fpu.v	2026-10-24 16:18:50.000000000 -0700
++++ stageB/rtl/ap68040_faster/rtl/fpu/ap040_fpu.v	2026-10-24 22:21:08.525671300 -0700
+@@ -529,6 +529,10 @@
+ 	end
+ endfunction
+ 
++// P255: normal register store in dispatch clock
++wire        st_norm = fr_src_m[63] && (fr_src_e != 15'h7FFF);
++wire signed [17:0] st_sE = $signed({3'd0, fr_src_e}) - 18'sd16383;
++
+ // IEEE round-up decision from {lsb, G, R|S} and sign
+ function round_up;
+ 	input       lsb, g, rs;
+@@ -713,20 +717,26 @@
+ wire [127:0] mul_out = {mul_hh, mul_ll} + {31'd0, mul_cross, 32'd0};
+ 
+ // One incrementer for the roundings of a_m at a precision's last kept bit:
+-// F_ROUND's (the operation's precision) and a single or double register
+-// store's (F_SRC, by the store format), in states of their own.
+-wire  [1:0] rd_pr   = (fst == F_SRC) ? ((r_fmt == 3'd1) ? 2'd1 : 2'd2) : prec_of(r_op);
++// F_ROUND's (the operation's precision), single/double register stores
++// (F_SRC, by the store format), and P255 dispatch-clock stores (F_IDLE).
++wire        sd_idle = (fst == F_IDLE);
++wire  [2:0] eff_fmt = sd_idle ? src_fmt : r_fmt;
++wire        eff_s   = sd_idle ? fr_src_s : a_s;
++wire [16:0] eff_e   = sd_idle ? {2'd0, fr_src_e} : a_e;
++wire [63:0] eff_m   = sd_idle ? fr_src_m : a_m;
++
++wire  [1:0] rd_pr   = ((fst == F_SRC) || sd_idle) ? ((eff_fmt == 3'd1) ? 2'd1 : 2'd2) : prec_of(r_op);
+ wire [63:0] rd_mask = (rd_pr == 2'd1) ? 64'hFFFF_FF00_0000_0000 :
+                       (rd_pr == 2'd2) ? 64'hFFFF_FFFF_FFFF_F800 : 64'hFFFF_FFFF_FFFF_FFFF;
+-wire [64:0] rd_mi   = {1'b0, a_m & rd_mask} +
++wire [64:0] rd_mi   = {1'b0, eff_m & rd_mask} +
+                       ((rd_pr == 2'd1) ? 65'h100_0000_0000 : (rd_pr == 2'd2) ? 65'h800 : 65'd1);
+ 
+ // The single and double stores, in one form (F_SRC: a register's value
+ // rounded to the format, or its special value; F_PACKS: a denormal after
+-// the staged shift): the exponent field sd_E and the fraction sd_F as a
+-// double's, the single's being their upper bits -- one exponent subtract,
+-// one overflow test, one output multiplexer for both formats.  The
+-// rounding takes the shared incrementer (rd_mi: rd_pr is the format's).
++// the staged shift; F_IDLE: P255 dispatch-clock store): the exponent field sd_E
++// and the fraction sd_F as a double's, the single's being their upper bits --
++// one exponent subtract, one overflow test, one output multiplexer for both formats.
++// The rounding takes the shared incrementer (rd_mi: rd_pr is the format's).
+ reg        sd_isS, sd_den, sd_up, sd_inx, sd_ov, sd_tomax, sd_pr;
+ reg signed [17:0] sd_sE;
+ reg [17:0] sd_eun;
+@@ -736,19 +746,19 @@
+ reg [51:0] sd_F;
+ reg [95:0] sd_out;
+ always @* begin
+-	sd_isS = (r_fmt == 3'd1);
+-	sd_sE  = $signed({a_e[16], a_e}) - 18'sd16383;
++	sd_isS = (eff_fmt == 3'd1);
++	sd_sE  = $signed({eff_e[16], eff_e}) - 18'sd16383;
+ 	sd_den = sd_isS ? (sd_sE < -18'sd126) : (sd_sE < -18'sd1022);
+-	sd_up  = sd_isS ? round_up(a_m[40], a_m[39], (a_m[38:0] != 0), a_s) :
+-	                  round_up(a_m[11], a_m[10], (a_m[9:0] != 0), a_s);
+-	sd_inx = sd_isS ? (a_m[39:0] != 0) : (a_m[10:0] != 0);
++	sd_up  = sd_isS ? round_up(eff_m[40], eff_m[39], (eff_m[38:0] != 0), eff_s) :
++	                  round_up(eff_m[11], eff_m[10], (eff_m[9:0] != 0), eff_s);
++	sd_inx = sd_isS ? (eff_m[39:0] != 0) : (eff_m[10:0] != 0);
+ 	// (a rounding carry out of the significand leaves sd_m zero: the
+ 	// minimum of the next exponent)
+-	sd_m   = sd_up ? rd_mi[63:0] : (a_m & rd_mask);
+-	sd_eun = {1'b0, a_e} + {17'd0, sd_up && rd_mi[64]};
++	sd_m   = sd_up ? rd_mi[63:0] : (eff_m & rd_mask);
++	sd_eun = {1'b0, eff_e} + {17'd0, sd_up && rd_mi[64]};
+ 	sd_ov  = sd_eun > (sd_isS ? 18'd16510 : 18'd17406);
+ 	sd_enc = sd_eun[16:0] - (sd_isS ? 17'd16256 : 17'd15360);
+-	sd_tomax = (rnd_mode == 2'b01) || (rnd_mode == 2'b10 && !a_s) || (rnd_mode == 2'b11 && a_s);
++	sd_tomax = (rnd_mode == 2'b01) || (rnd_mode == 2'b10 && !eff_s) || (rnd_mode == 2'b11 && eff_s);
+ 	// F_PACKS: the denormal's rounding at the format's last bit
+ 	sd_pr  = sd_isS ? round_up(sh_v[43], sh_v[42], sh_v[41:0] != 0, a_s) :
+ 	                  round_up(sh_v[14], sh_v[13], sh_v[12:0] != 0, a_s);
+@@ -756,7 +766,7 @@
+ 		sd_E = {10'd0, sd_pr ? shk_i[63] : shk[63]};
+ 		sd_F = sd_pr ? shk_i[62:11] : shk[62:11];
+ 	end
+-	else if (a_t != T_NUM) begin
++	else if (!sd_idle && a_t != T_NUM) begin
+ 		sd_E = (a_t == T_ZERO) ? 11'd0 : 11'h7FF;
+ 		sd_F = (a_t == T_NAN) ? (a_m[62:11] | 52'h8_0000_0000_0000) : 52'd0;
+ 	end
+@@ -768,7 +778,7 @@
+ 		sd_E = sd_enc[10:0];
+ 		sd_F = sd_m[62:11];
+ 	end
+-	sd_out = sd_isS ? {a_s, sd_E[7:0], sd_F[51:29], 64'd0} : {a_s, sd_E, sd_F, 32'd0};
++	sd_out = sd_isS ? {eff_s, sd_E[7:0], sd_F[51:29], 64'd0} : {eff_s, sd_E, sd_F, 32'd0};
+ end
+ 
+ // The arithmetic results into F_ROUND -- the add's sum, the product, the
+@@ -1826,6 +1836,28 @@
+ 						cap_unimp <= 0; cap_t <= 1; cap_e1 <= 0; cap_pk <= 0;   // T, not packed
+ 						begin fst <= F_CAP; wb_r <= (F_CAP == F_WB); acc_r <= 1'b0; end
+ 					end
++					else if (src_fmt == 3'd2) begin
++						// P222: raw extended store dispatch-clock pass-through
++						dout <= {fr_src_s, fr_src_e, 16'd0, fr_src_m};
++						done <= 1; fpu_used <= 1;
++						r_op <= 7'h7F;
++					end
++					else if (src_fmt == 3'd1 && st_norm && (st_sE >= -18'sd126) &&
++					         !sd_ov && !(sd_inx && fpcr[9])) begin
++						// P255: normal single store dispatch-clock
++						dout <= sd_out;
++						if (sd_inx) begin fpsr[9] <= 1; fpsr[3] <= 1; end
++						done <= 1; fpu_used <= 1;
++						r_op <= 7'h7F;
++					end
++					else if (src_fmt == 3'd5 && st_norm && (st_sE >= -18'sd1022) &&
++					         !sd_ov && !(sd_inx && fpcr[9])) begin
++						// P255: normal double store dispatch-clock
++						dout <= sd_out;
++						if (sd_inx) begin fpsr[9] <= 1; fpsr[3] <= 1; end
++						done <= 1; fpu_used <= 1;
++						r_op <= 7'h7F;
++					end
+ 					else begin
+ 						{a_s, a_e, a_m, a_t} <=
+ 							unpack_x(fr_src_s, fr_src_e, fr_src_m);
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/rtl/gen/ap68040_attr_rom.svh stageB/rtl/ap68040_faster/rtl/gen/ap68040_attr_rom.svh
+--- base/rtl/ap68040_faster/rtl/gen/ap68040_attr_rom.svh	2026-10-24 21:53:47.734801372 -0700
++++ stageB/rtl/ap68040_faster/rtl/gen/ap68040_attr_rom.svh	2026-10-24 22:24:54.670071443 -0700
+@@ -233,15 +233,15 @@
+ attr_rom[229] = {1'b1, 9'd229, 10'd174, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1e5, 12'h000, 2'd1, 3'd0, 1'b0, 6'd5, 10'd185, 1'b1, 1'b0, 2'd0, 1'b0};  // BFSET BF_MOD
+ attr_rom[230] = {1'b1, 9'd230, 10'd174, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1e5, 12'h000, 2'd1, 3'd0, 1'b0, 6'd5, 10'd185, 1'b1, 1'b0, 2'd0, 1'b0};  // BFINS BF_MOD
+ attr_rom[231] = {1'b1, 9'd231, 10'd227, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'hfff, 12'h000, 2'd1, 3'd0, 1'b0, 6'd19, 10'd236, 1'b1, 1'b0, 2'd0, 1'b0};  // FPP FPU_GEN
+-attr_rom[232] = {1'b1, 9'd232, 10'd481, 7'd0, 4'd0, 1'b0, 5'h0, 2'd0, 12'h1fd, 12'h000, 2'd1, 3'd0, 1'b0, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b0};  // FScc FSCC
+-attr_rom[233] = {1'b1, 9'd233, 10'd483, 7'd0, 4'd0, 1'b0, 5'h0, 2'd1, 12'h000, 12'h000, 2'd1, 3'd3, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // FDBcc FDBCC
+-attr_rom[234] = {1'b1, 9'd234, 10'd485, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
+-attr_rom[235] = {1'b1, 9'd235, 10'd485, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
+-attr_rom[236] = {1'b1, 9'd236, 10'd485, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
+-attr_rom[237] = {1'b1, 9'd237, 10'd479, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
+-attr_rom[238] = {1'b1, 9'd238, 10'd479, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
+-attr_rom[239] = {1'b1, 9'd239, 10'd487, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1f4, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FSAVE FSAVE
+-attr_rom[240] = {1'b1, 9'd240, 10'd545, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h7ec, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FRESTORE FRESTORE
++attr_rom[232] = {1'b1, 9'd232, 10'd459, 7'd0, 4'd0, 1'b0, 5'h0, 2'd0, 12'h1fd, 12'h000, 2'd1, 3'd0, 1'b0, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b0};  // FScc FSCC
++attr_rom[233] = {1'b1, 9'd233, 10'd461, 7'd0, 4'd0, 1'b0, 5'h0, 2'd1, 12'h000, 12'h000, 2'd1, 3'd3, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // FDBcc FDBCC
++attr_rom[234] = {1'b1, 9'd234, 10'd463, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
++attr_rom[235] = {1'b1, 9'd235, 10'd463, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
++attr_rom[236] = {1'b1, 9'd236, 10'd463, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
++attr_rom[237] = {1'b1, 9'd237, 10'd457, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
++attr_rom[238] = {1'b1, 9'd238, 10'd457, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
++attr_rom[239] = {1'b1, 9'd239, 10'd465, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1f4, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FSAVE FSAVE
++attr_rom[240] = {1'b1, 9'd240, 10'd523, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h7ec, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FRESTORE FRESTORE
+ attr_rom[241] = {1'b1, 9'd241, 10'd224, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // CINVL CACHE_OP
+ attr_rom[242] = {1'b1, 9'd242, 10'd224, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // CINVP CACHE_OP
+ attr_rom[243] = {1'b1, 9'd243, 10'd224, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // CINVA CACHE_OP
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/rtl/gen/ap68040_dec_pla.svh stageB/rtl/ap68040_faster/rtl/gen/ap68040_dec_pla.svh
+--- base/rtl/ap68040_faster/rtl/gen/ap68040_dec_pla.svh	2026-10-24 21:53:47.734801372 -0700
++++ stageB/rtl/ap68040_faster/rtl/gen/ap68040_dec_pla.svh	2026-10-24 22:24:54.670071443 -0700
+@@ -816,15 +816,15 @@
+ 		9'd229: ent_attr = '{1'b1, 9'd229, 10'd174, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1e5, 12'h000, 2'd1, 3'd0, 1'b0, 6'd5, 10'd185, 1'b1, 1'b0, 2'd0, 1'b0};  // BFSET BF_MOD
+ 		9'd230: ent_attr = '{1'b1, 9'd230, 10'd174, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1e5, 12'h000, 2'd1, 3'd0, 1'b0, 6'd5, 10'd185, 1'b1, 1'b0, 2'd0, 1'b0};  // BFINS BF_MOD
+ 		9'd231: ent_attr = '{1'b1, 9'd231, 10'd227, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'hfff, 12'h000, 2'd1, 3'd0, 1'b0, 6'd19, 10'd236, 1'b1, 1'b0, 2'd0, 1'b0};  // FPP FPU_GEN
+-		9'd232: ent_attr = '{1'b1, 9'd232, 10'd481, 7'd0, 4'd0, 1'b0, 5'h0, 2'd0, 12'h1fd, 12'h000, 2'd1, 3'd0, 1'b0, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b0};  // FScc FSCC
+-		9'd233: ent_attr = '{1'b1, 9'd233, 10'd483, 7'd0, 4'd0, 1'b0, 5'h0, 2'd1, 12'h000, 12'h000, 2'd1, 3'd3, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // FDBcc FDBCC
+-		9'd234: ent_attr = '{1'b1, 9'd234, 10'd485, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
+-		9'd235: ent_attr = '{1'b1, 9'd235, 10'd485, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
+-		9'd236: ent_attr = '{1'b1, 9'd236, 10'd485, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
+-		9'd237: ent_attr = '{1'b1, 9'd237, 10'd479, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
+-		9'd238: ent_attr = '{1'b1, 9'd238, 10'd479, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
+-		9'd239: ent_attr = '{1'b1, 9'd239, 10'd487, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1f4, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FSAVE FSAVE
+-		9'd240: ent_attr = '{1'b1, 9'd240, 10'd545, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h7ec, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FRESTORE FRESTORE
++		9'd232: ent_attr = '{1'b1, 9'd232, 10'd459, 7'd0, 4'd0, 1'b0, 5'h0, 2'd0, 12'h1fd, 12'h000, 2'd1, 3'd0, 1'b0, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b0};  // FScc FSCC
++		9'd233: ent_attr = '{1'b1, 9'd233, 10'd461, 7'd0, 4'd0, 1'b0, 5'h0, 2'd1, 12'h000, 12'h000, 2'd1, 3'd3, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // FDBcc FDBCC
++		9'd234: ent_attr = '{1'b1, 9'd234, 10'd463, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
++		9'd235: ent_attr = '{1'b1, 9'd235, 10'd463, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
++		9'd236: ent_attr = '{1'b1, 9'd236, 10'd463, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
++		9'd237: ent_attr = '{1'b1, 9'd237, 10'd457, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
++		9'd238: ent_attr = '{1'b1, 9'd238, 10'd457, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
++		9'd239: ent_attr = '{1'b1, 9'd239, 10'd465, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1f4, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FSAVE FSAVE
++		9'd240: ent_attr = '{1'b1, 9'd240, 10'd523, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h7ec, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FRESTORE FRESTORE
+ 		9'd241: ent_attr = '{1'b1, 9'd241, 10'd224, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // CINVL CACHE_OP
+ 		9'd242: ent_attr = '{1'b1, 9'd242, 10'd224, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // CINVP CACHE_OP
+ 		9'd243: ent_attr = '{1'b1, 9'd243, 10'd224, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // CINVA CACHE_OP
+@@ -1100,15 +1100,15 @@
+ 	if (s[229]) a = a | {1'b1, 9'd229, 10'd174, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1e5, 12'h000, 2'd1, 3'd0, 1'b0, 6'd5, 10'd185, 1'b1, 1'b0, 2'd0, 1'b0};  // BFSET BF_MOD
+ 	if (s[230]) a = a | {1'b1, 9'd230, 10'd174, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1e5, 12'h000, 2'd1, 3'd0, 1'b0, 6'd5, 10'd185, 1'b1, 1'b0, 2'd0, 1'b0};  // BFINS BF_MOD
+ 	if (s[231]) a = a | {1'b1, 9'd231, 10'd227, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'hfff, 12'h000, 2'd1, 3'd0, 1'b0, 6'd19, 10'd236, 1'b1, 1'b0, 2'd0, 1'b0};  // FPP FPU_GEN
+-	if (s[232]) a = a | {1'b1, 9'd232, 10'd481, 7'd0, 4'd0, 1'b0, 5'h0, 2'd0, 12'h1fd, 12'h000, 2'd1, 3'd0, 1'b0, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b0};  // FScc FSCC
+-	if (s[233]) a = a | {1'b1, 9'd233, 10'd483, 7'd0, 4'd0, 1'b0, 5'h0, 2'd1, 12'h000, 12'h000, 2'd1, 3'd3, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // FDBcc FDBCC
+-	if (s[234]) a = a | {1'b1, 9'd234, 10'd485, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
+-	if (s[235]) a = a | {1'b1, 9'd235, 10'd485, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
+-	if (s[236]) a = a | {1'b1, 9'd236, 10'd485, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
+-	if (s[237]) a = a | {1'b1, 9'd237, 10'd479, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
+-	if (s[238]) a = a | {1'b1, 9'd238, 10'd479, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
+-	if (s[239]) a = a | {1'b1, 9'd239, 10'd487, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1f4, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FSAVE FSAVE
+-	if (s[240]) a = a | {1'b1, 9'd240, 10'd545, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h7ec, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FRESTORE FRESTORE
++	if (s[232]) a = a | {1'b1, 9'd232, 10'd459, 7'd0, 4'd0, 1'b0, 5'h0, 2'd0, 12'h1fd, 12'h000, 2'd1, 3'd0, 1'b0, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b0};  // FScc FSCC
++	if (s[233]) a = a | {1'b1, 9'd233, 10'd461, 7'd0, 4'd0, 1'b0, 5'h0, 2'd1, 12'h000, 12'h000, 2'd1, 3'd3, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // FDBcc FDBCC
++	if (s[234]) a = a | {1'b1, 9'd234, 10'd463, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
++	if (s[235]) a = a | {1'b1, 9'd235, 10'd463, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
++	if (s[236]) a = a | {1'b1, 9'd236, 10'd463, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd1, 3'd6, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FTRAPcc FTRAPCC
++	if (s[237]) a = a | {1'b1, 9'd237, 10'd457, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
++	if (s[238]) a = a | {1'b1, 9'd238, 10'd457, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd7, 1'b0, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b0};  // FBcc FBCC
++	if (s[239]) a = a | {1'b1, 9'd239, 10'd465, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h1f4, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FSAVE FSAVE
++	if (s[240]) a = a | {1'b1, 9'd240, 10'd523, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h7ec, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b1, 1'b0, 2'd0, 1'b1};  // FRESTORE FRESTORE
+ 	if (s[241]) a = a | {1'b1, 9'd241, 10'd224, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // CINVL CACHE_OP
+ 	if (s[242]) a = a | {1'b1, 9'd242, 10'd224, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // CINVP CACHE_OP
+ 	if (s[243]) a = a | {1'b1, 9'd243, 10'd224, 7'd0, 4'd0, 1'b0, 5'h0, 2'd2, 12'h000, 12'h000, 2'd0, 3'd0, 1'b1, 6'd0, 10'd0, 1'b0, 1'b0, 2'd0, 1'b1};  // CINVA CACHE_OP
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/rtl/gen/ap68040_ucode_init.svh stageB/rtl/ap68040_faster/rtl/gen/ap68040_ucode_init.svh
+--- base/rtl/ap68040_faster/rtl/gen/ap68040_ucode_init.svh	2026-10-24 21:53:47.637800062 -0700
++++ stageB/rtl/ap68040_faster/rtl/gen/ap68040_ucode_init.svh	2026-10-24 22:24:54.587070826 -0700
+@@ -232,8 +232,8 @@
+ urom[229] = 120'h99d600;  // FPU_GEN.2
+ urom[230] = 120'ha1da00;  // FPU_GEN.3
+ urom[231] = 120'haa2c00;  // FPU_GEN.4
+-urom[232] = 120'hb29800;  // FPU_GEN.5
+-urom[233] = 120'hbade00;  // FPU_GEN.6
++urom[232] = 120'hb28c00;  // FPU_GEN.5
++urom[233] = 120'hbad200;  // FPU_GEN.6
+ urom[234] = 120'h37c010000000000000000010000000;  // FPU_GEN.7
+ urom[235] = 120'h37c010000000000000000010000000;  // FPU_RR.0
+ urom[236] = 120'h378000218000000000000010000000;  // FPU_RRF.0
+@@ -278,10 +278,10 @@
+ urom[275] = 120'hd8001b02c1760000023400000000;  // FPU_K_IN12.2
+ urom[276] = 120'h2ed8001b0001760000043400000000;  // FPU_K_IN12.3
+ urom[277] = 120'h37c0102bb003c00000000010000000;  // FPU_K_IN12.4
+-urom[278] = 120'h2a5a00;  // FPU_OUT.0
++urom[278] = 120'h2a5400;  // FPU_OUT.0
+ urom[279] = 120'h37c0f000000380d800000000000000;  // FPU_OUT.1
+ urom[280] = 120'h37c0100002b0000000000000000000;  // FPU_OUT.2
+-urom[281] = 120'hda4e00;  // FPU_OUT.3
++urom[281] = 120'hda4c00;  // FPU_OUT.3
+ urom[282] = 120'hd24600;  // FPU_OUT.4
+ urom[283] = 120'hca4200;  // FPU_OUT.5
+ urom[284] = 120'hc23e00;  // FPU_OUT.6
+@@ -291,364 +291,342 @@
+ urom[288] = 120'h37c030000003c00000000010000000;  // FPU_OUT1.1
+ urom[289] = 120'hd0002b0001760000004000000000;  // FPU_OUT2.0
+ urom[290] = 120'h37c030000003c00000000010000000;  // FPU_OUT2.1
+-urom[291] = 120'h37c0201102c0000000008000000000;  // FPU_OUT8.0
+-urom[292] = 120'hd8002b0001760000004000000000;  // FPU_OUT8.1
+-urom[293] = 120'hd8002c0001760000024000000000;  // FPU_OUT8.2
+-urom[294] = 120'h37c030000003c00000000010000000;  // FPU_OUT8.3
+-urom[295] = 120'h37c0201102c0000000008000000000;  // FPU_OUT12.0
+-urom[296] = 120'h37c0201102d0000000010000000000;  // FPU_OUT12.1
+-urom[297] = 120'hd8002b0001760000004000000000;  // FPU_OUT12.2
+-urom[298] = 120'hd8002c0001760000024000000000;  // FPU_OUT12.3
+-urom[299] = 120'hd8002d0001760000044000000000;  // FPU_OUT12.4
+-urom[300] = 120'h37c030000003c00000000010000000;  // FPU_OUT12.5
+-urom[301] = 120'h37c010000410000000000000000000;  // FPU_OUTD.0
+-urom[302] = 120'h37c030000000000000000010000000;  // FPU_OUTD.1
+-urom[303] = 120'h37c000218000000000000000000000;  // FPU_K_OUTD.0
+-urom[304] = 120'h37c010000410000000000000000000;  // FPU_K_OUTD.1
+-urom[305] = 120'h37c030000000000000000010000000;  // FPU_K_OUTD.2
+-urom[306] = 120'h37400021800380d800000000000000;  // FPU_K_OUT4.0
+-urom[307] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT4.1
+-urom[308] = 120'hd8002b0001760000004000000000;  // FPU_K_OUT4.2
+-urom[309] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT4.3
+-urom[310] = 120'h37400021800380d800000000000000;  // FPU_K_OUT1.0
+-urom[311] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT1.1
+-urom[312] = 120'hc8002b0001760000004000000000;  // FPU_K_OUT1.2
+-urom[313] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT1.3
+-urom[314] = 120'h37400021800380d800000000000000;  // FPU_K_OUT2.0
+-urom[315] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT2.1
+-urom[316] = 120'hd0002b0001760000004000000000;  // FPU_K_OUT2.2
+-urom[317] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT2.3
+-urom[318] = 120'h37400021800380d800000000000000;  // FPU_K_OUT8.0
+-urom[319] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT8.1
+-urom[320] = 120'h37c0201102c0000000008000000000;  // FPU_K_OUT8.2
+-urom[321] = 120'hd8002b0001760000004000000000;  // FPU_K_OUT8.3
+-urom[322] = 120'hd8002c0001760000024000000000;  // FPU_K_OUT8.4
+-urom[323] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT8.5
+-urom[324] = 120'h37400021800380d800000000000000;  // FPU_K_OUT12.0
+-urom[325] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT12.1
+-urom[326] = 120'h37c0201102c0000000008000000000;  // FPU_K_OUT12.2
+-urom[327] = 120'h37c0201102d0000000010000000000;  // FPU_K_OUT12.3
+-urom[328] = 120'hd8002b0001760000004000000000;  // FPU_K_OUT12.4
+-urom[329] = 120'hd8002c0001760000024000000000;  // FPU_K_OUT12.5
+-urom[330] = 120'hd8002d0001760000044000000000;  // FPU_K_OUT12.6
+-urom[331] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT12.7
+-urom[332] = 120'hfabc00;  // FPU_CR.0
+-urom[333] = 120'h2ab400;  // FPU_CR.1
+-urom[334] = 120'h32b400;  // FPU_CR.2
+-urom[335] = 120'h37c0f000000380d800000000000000;  // FPU_CR.3
+-urom[336] = 120'hd8001b02b1760000003400000080;  // FPU_CR.4
+-urom[337] = 120'h37c0502b4400000000000000000000;  // FPU_CR.5
+-urom[338] = 120'h276d800020000000080;  // FPU_CR.6
+-urom[339] = 120'hd8001b02b1760000003400000081;  // FPU_CR.7
+-urom[340] = 120'h37c0502b4400000000008000000000;  // FPU_CR.8
+-urom[341] = 120'h276d800020000000081;  // FPU_CR.9
+-urom[342] = 120'hd8001b02b1760000003400000082;  // FPU_CR.10
+-urom[343] = 120'h37c0502b4400000000010000000000;  // FPU_CR.11
+-urom[344] = 120'h276d800020000000082;  // FPU_CR.12
+-urom[345] = 120'h37c030000003c00000000010000000;  // FPU_CR.13
+-urom[346] = 120'h37c050014400000000000000000000;  // FPU_CRLR.0
+-urom[347] = 120'h37c050014400000000008000000000;  // FPU_CRLR.1
+-urom[348] = 120'h37c050014400000000010000000000;  // FPU_CRLR.2
+-urom[349] = 120'h37c030000000000000000010000000;  // FPU_CRLR.3
+-urom[350] = 120'h2ad600;  // FPU_CRS.0
+-urom[351] = 120'h32d600;  // FPU_CRS.1
+-urom[352] = 120'h37c0f000000380d800000000000000;  // FPU_CRS.2
+-urom[353] = 120'h37c0401102b0000000000000000000;  // FPU_CRS.3
+-urom[354] = 120'hd8002b0001760000004000000080;  // FPU_CRS.4
+-urom[355] = 120'h276d800020000000080;  // FPU_CRS.5
+-urom[356] = 120'h37c0401102b0000000008000000000;  // FPU_CRS.6
+-urom[357] = 120'hd8002b0001760000004000000081;  // FPU_CRS.7
+-urom[358] = 120'h276d800020000000081;  // FPU_CRS.8
+-urom[359] = 120'h37c0401102b0000000010000000000;  // FPU_CRS.9
+-urom[360] = 120'hd8002b0001760000004000000082;  // FPU_CRS.10
+-urom[361] = 120'h276d800020000000082;  // FPU_CRS.11
+-urom[362] = 120'h37c030000003c00000000010000000;  // FPU_CRS.12
+-urom[363] = 120'h37c040110010000000000000000000;  // FPU_CRSR.0
+-urom[364] = 120'h37c040110010000000008000000000;  // FPU_CRSR.1
+-urom[365] = 120'h37c040110010000000010000000000;  // FPU_CRSR.2
+-urom[366] = 120'h37c030000000000000000010000000;  // FPU_CRSR.3
+-urom[367] = 120'h37c0602202b0000000000000000000;  // FPU_MVM.0
+-urom[368] = 120'h26bd400000000000000;  // FPU_MVM.1
+-urom[369] = 120'heaec00;  // FPU_MVM.2
+-urom[370] = 120'hf2f000;  // FPU_MVM.3
+-urom[371] = 120'h37c0f000000380d800000000000000;  // FPU_MVM.4
+-urom[372] = 120'hfb4800;  // FPU_MVM.5
+-urom[373] = 120'haf400;  // FPU_MVM.6
+-urom[374] = 120'h347d800000000000000;  // FPU_MVPD.0
+-urom[375] = 120'hb4800;  // FPU_MVPD.1
+-urom[376] = 120'h247d800000000000000;  // FPU_MVPI.0
+-urom[377] = 120'haf400;  // FPU_MVPI.1
+-urom[378] = 120'hd8001b02d1760000003400000020;  // FPU_MVL.0
+-urom[379] = 120'hd8001b02e1760000023400000020;  // FPU_MVL.1
+-urom[380] = 120'h2ed8001b0001760000043400000020;  // FPU_MVL.2
+-urom[381] = 120'h37c0802db800000000000000000000;  // FPU_MVL.3
+-urom[382] = 120'h276d800060000000020;  // FPU_MVL.4
+-urom[383] = 120'hd8001b02d1760000003400000021;  // FPU_MVL.5
+-urom[384] = 120'hd8001b02e1760000023400000021;  // FPU_MVL.6
+-urom[385] = 120'h2ed8001b0001760000043400000021;  // FPU_MVL.7
+-urom[386] = 120'h37c0802db800000000000000000000;  // FPU_MVL.8
+-urom[387] = 120'h276d800060000000021;  // FPU_MVL.9
+-urom[388] = 120'hd8001b02d1760000003400000022;  // FPU_MVL.10
+-urom[389] = 120'hd8001b02e1760000023400000022;  // FPU_MVL.11
+-urom[390] = 120'h2ed8001b0001760000043400000022;  // FPU_MVL.12
+-urom[391] = 120'h37c0802db800000000000000000000;  // FPU_MVL.13
+-urom[392] = 120'h276d800060000000022;  // FPU_MVL.14
+-urom[393] = 120'hd8001b02d1760000003400000023;  // FPU_MVL.15
+-urom[394] = 120'hd8001b02e1760000023400000023;  // FPU_MVL.16
+-urom[395] = 120'h2ed8001b0001760000043400000023;  // FPU_MVL.17
+-urom[396] = 120'h37c0802db800000000000000000000;  // FPU_MVL.18
+-urom[397] = 120'h276d800060000000023;  // FPU_MVL.19
+-urom[398] = 120'hd8001b02d1760000003400000024;  // FPU_MVL.20
+-urom[399] = 120'hd8001b02e1760000023400000024;  // FPU_MVL.21
+-urom[400] = 120'h2ed8001b0001760000043400000024;  // FPU_MVL.22
+-urom[401] = 120'h37c0802db800000000000000000000;  // FPU_MVL.23
+-urom[402] = 120'h276d800060000000024;  // FPU_MVL.24
+-urom[403] = 120'hd8001b02d1760000003400000025;  // FPU_MVL.25
+-urom[404] = 120'hd8001b02e1760000023400000025;  // FPU_MVL.26
+-urom[405] = 120'h2ed8001b0001760000043400000025;  // FPU_MVL.27
+-urom[406] = 120'h37c0802db800000000000000000000;  // FPU_MVL.28
+-urom[407] = 120'h276d800060000000025;  // FPU_MVL.29
+-urom[408] = 120'hd8001b02d1760000003400000026;  // FPU_MVL.30
+-urom[409] = 120'hd8001b02e1760000023400000026;  // FPU_MVL.31
+-urom[410] = 120'h2ed8001b0001760000043400000026;  // FPU_MVL.32
+-urom[411] = 120'h37c0802db800000000000000000000;  // FPU_MVL.33
+-urom[412] = 120'h276d800060000000026;  // FPU_MVL.34
+-urom[413] = 120'hd8001b02d1760000003400000027;  // FPU_MVL.35
+-urom[414] = 120'hd8001b02e1760000023400000027;  // FPU_MVL.36
+-urom[415] = 120'h2ed8001b0001760000043400000027;  // FPU_MVL.37
+-urom[416] = 120'h37c0802db800000000000000000000;  // FPU_MVL.38
+-urom[417] = 120'h276d800060000000027;  // FPU_MVL.39
+-urom[418] = 120'hf3bc00;  // FPU_MVL.40
+-urom[419] = 120'h37c030000000000000000010000000;  // FPU_MVL.41
+-urom[420] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.0
+-urom[421] = 120'h37c0201102e0000000008000000000;  // FPU_MVS.1
+-urom[422] = 120'h37c0201102f0000000010000000000;  // FPU_MVS.2
+-urom[423] = 120'hd8002d0001760000004000000020;  // FPU_MVS.3
+-urom[424] = 120'hd8002e0001760000024000000020;  // FPU_MVS.4
+-urom[425] = 120'hd8002f0001760000044000000020;  // FPU_MVS.5
+-urom[426] = 120'h276d800060000000020;  // FPU_MVS.6
+-urom[427] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.7
+-urom[428] = 120'h37c0201102e0000000008000000000;  // FPU_MVS.8
+-urom[429] = 120'h37c0201102f0000000010000000000;  // FPU_MVS.9
+-urom[430] = 120'hd8002d0001760000004000000021;  // FPU_MVS.10
+-urom[431] = 120'hd8002e0001760000024000000021;  // FPU_MVS.11
+-urom[432] = 120'hd8002f0001760000044000000021;  // FPU_MVS.12
+-urom[433] = 120'h276d800060000000021;  // FPU_MVS.13
+-urom[434] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.14
+-urom[435] = 120'h37c0201102e0000000008000000000;  // FPU_MVS.15
+-urom[436] = 120'h37c0201102f0000000010000000000;  // FPU_MVS.16
+-urom[437] = 120'hd8002d0001760000004000000022;  // FPU_MVS.17
+-urom[438] = 120'hd8002e0001760000024000000022;  // FPU_MVS.18
+-urom[439] = 120'hd8002f0001760000044000000022;  // FPU_MVS.19
+-urom[440] = 120'h276d800060000000022;  // FPU_MVS.20
+-urom[441] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.21
+-urom[442] = 120'h37c0201102e0000000008000000000;  // FPU_MVS.22
+-urom[443] = 120'h37c0201102f0000000010000000000;  // FPU_MVS.23
+-urom[444] = 120'hd8002d0001760000004000000023;  // FPU_MVS.24
+-urom[445] = 120'hd8002e0001760000024000000023;  // FPU_MVS.25
+-urom[446] = 120'hd8002f0001760000044000000023;  // FPU_MVS.26
+-urom[447] = 120'h276d800060000000023;  // FPU_MVS.27
+-urom[448] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.28
+-urom[449] = 120'h37c0201102e0000000008000000000;  // FPU_MVS.29
+-urom[450] = 120'h37c0201102f0000000010000000000;  // FPU_MVS.30
+-urom[451] = 120'hd8002d0001760000004000000024;  // FPU_MVS.31
+-urom[452] = 120'hd8002e0001760000024000000024;  // FPU_MVS.32
+-urom[453] = 120'hd8002f0001760000044000000024;  // FPU_MVS.33
+-urom[454] = 120'h276d800060000000024;  // FPU_MVS.34
+-urom[455] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.35
+-urom[456] = 120'h37c0201102e0000000008000000000;  // FPU_MVS.36
+-urom[457] = 120'h37c0201102f0000000010000000000;  // FPU_MVS.37
+-urom[458] = 120'hd8002d0001760000004000000025;  // FPU_MVS.38
+-urom[459] = 120'hd8002e0001760000024000000025;  // FPU_MVS.39
+-urom[460] = 120'hd8002f0001760000044000000025;  // FPU_MVS.40
+-urom[461] = 120'h276d800060000000025;  // FPU_MVS.41
+-urom[462] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.42
+-urom[463] = 120'h37c0201102e0000000008000000000;  // FPU_MVS.43
+-urom[464] = 120'h37c0201102f0000000010000000000;  // FPU_MVS.44
+-urom[465] = 120'hd8002d0001760000004000000026;  // FPU_MVS.45
+-urom[466] = 120'hd8002e0001760000024000000026;  // FPU_MVS.46
+-urom[467] = 120'hd8002f0001760000044000000026;  // FPU_MVS.47
+-urom[468] = 120'h276d800060000000026;  // FPU_MVS.48
+-urom[469] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.49
+-urom[470] = 120'h37c0201102e0000000008000000000;  // FPU_MVS.50
+-urom[471] = 120'h37c0201102f0000000010000000000;  // FPU_MVS.51
+-urom[472] = 120'hd8002d0001760000004000000027;  // FPU_MVS.52
+-urom[473] = 120'hd8002e0001760000024000000027;  // FPU_MVS.53
+-urom[474] = 120'hd8002f0001760000044000000027;  // FPU_MVS.54
+-urom[475] = 120'h276d800060000000027;  // FPU_MVS.55
+-urom[476] = 120'hebbc00;  // FPU_MVS.56
+-urom[477] = 120'h37c030000000000000000010000000;  // FPU_MVS.57
+-urom[478] = 120'h37c030000003471c00000010000000;  // FPU_MVE.0
+-urom[479] = 120'h37c000218000000000000000000000;  // FBCC.0
+-urom[480] = 120'h37c090000000000000000030000000;  // FBCC.1
+-urom[481] = 120'h37c000218000000000000000000000;  // FSCC.0
+-urom[482] = 120'h374090006810000000000010000000;  // FSCC.1
+-urom[483] = 120'h37c000218000000000000000000000;  // FDBCC.0
+-urom[484] = 120'h37c0a0001450000000000030000000;  // FDBCC.1
+-urom[485] = 120'h37c000218000000000000000000000;  // FTRAPCC.0
+-urom[486] = 120'h37c090000000000000000010000000;  // FTRAPCC.1
+-urom[487] = 120'h37c000218000000000000000000000;  // FSAVE.0
+-urom[488] = 120'h37c0b00002b0000000000000000000;  // FSAVE.1
+-urom[489] = 120'h26bd400000000000000;  // FSAVE.2
+-urom[490] = 120'hec0c00;  // FSAVE.3
+-urom[491] = 120'h280d800000000000000;  // FSAVE.4
+-urom[492] = 120'h37d8c0110001760000004000000040;  // FSAVE.5
+-urom[493] = 120'h37d8c0110001760000024000000041;  // FSAVE.6
+-urom[494] = 120'h37d8c0110001760000044000000042;  // FSAVE.7
+-urom[495] = 120'h37d8c0110001760000064000000043;  // FSAVE.8
+-urom[496] = 120'h37d8c0110001760000084000000044;  // FSAVE.9
+-urom[497] = 120'h37d8c01100017600000a4000000045;  // FSAVE.10
+-urom[498] = 120'h37d8c01100017600000c4000000046;  // FSAVE.11
+-urom[499] = 120'h37d8c01100017600000e4000000047;  // FSAVE.12
+-urom[500] = 120'h37d8c0110001760000104000000048;  // FSAVE.13
+-urom[501] = 120'h37d8c0110001760000124000000049;  // FSAVE.14
+-urom[502] = 120'h37d8c011000176000014400000004a;  // FSAVE.15
+-urom[503] = 120'h37d8c011000176000016400000004b;  // FSAVE.16
+-urom[504] = 120'h37d8c011000176000018400000004c;  // FSAVE.17
+-urom[505] = 120'h37d8c01100017600001a400000004d;  // FSAVE.18
+-urom[506] = 120'h37d8c01100017600001c400000004e;  // FSAVE.19
+-urom[507] = 120'h37d8c01100017600001e400000004f;  // FSAVE.20
+-urom[508] = 120'h37d8c0110001760000204000000050;  // FSAVE.21
+-urom[509] = 120'h37d8c0110001760000224000000051;  // FSAVE.22
+-urom[510] = 120'h37d8c0110001760000244000000052;  // FSAVE.23
+-urom[511] = 120'h37d8c0110001760000264000000053;  // FSAVE.24
+-urom[512] = 120'h37d8c0110001760000284000000054;  // FSAVE.25
+-urom[513] = 120'h37d8c01100017600002a4000000055;  // FSAVE.26
+-urom[514] = 120'h37d8c01100017600002c4000000056;  // FSAVE.27
+-urom[515] = 120'h37d8c01100017600002e4000000057;  // FSAVE.28
+-urom[516] = 120'h37d8c0110001760000304000000058;  // FSAVE.29
+-urom[517] = 120'h37c030000000000000000010000000;  // FSAVE.30
+-urom[518] = 120'h347d800000000000000;  // FSAVE_PD.0
+-urom[519] = 120'h37d8c0110001760000004000000040;  // FSAVE_PD.1
+-urom[520] = 120'h37d8c0110001760000024000000041;  // FSAVE_PD.2
+-urom[521] = 120'h37d8c0110001760000044000000042;  // FSAVE_PD.3
+-urom[522] = 120'h37d8c0110001760000064000000043;  // FSAVE_PD.4
+-urom[523] = 120'h37d8c0110001760000084000000044;  // FSAVE_PD.5
+-urom[524] = 120'h37d8c01100017600000a4000000045;  // FSAVE_PD.6
+-urom[525] = 120'h37d8c01100017600000c4000000046;  // FSAVE_PD.7
+-urom[526] = 120'h37d8c01100017600000e4000000047;  // FSAVE_PD.8
+-urom[527] = 120'h37d8c0110001760000104000000048;  // FSAVE_PD.9
+-urom[528] = 120'h37d8c0110001760000124000000049;  // FSAVE_PD.10
+-urom[529] = 120'h37d8c011000176000014400000004a;  // FSAVE_PD.11
+-urom[530] = 120'h37d8c011000176000016400000004b;  // FSAVE_PD.12
+-urom[531] = 120'h37d8c011000176000018400000004c;  // FSAVE_PD.13
+-urom[532] = 120'h37d8c01100017600001a400000004d;  // FSAVE_PD.14
+-urom[533] = 120'h37d8c01100017600001c400000004e;  // FSAVE_PD.15
+-urom[534] = 120'h37d8c01100017600001e400000004f;  // FSAVE_PD.16
+-urom[535] = 120'h37d8c0110001760000204000000050;  // FSAVE_PD.17
+-urom[536] = 120'h37d8c0110001760000224000000051;  // FSAVE_PD.18
+-urom[537] = 120'h37d8c0110001760000244000000052;  // FSAVE_PD.19
+-urom[538] = 120'h37d8c0110001760000264000000053;  // FSAVE_PD.20
+-urom[539] = 120'h37d8c0110001760000284000000054;  // FSAVE_PD.21
+-urom[540] = 120'h37d8c01100017600002a4000000055;  // FSAVE_PD.22
+-urom[541] = 120'h37d8c01100017600002c4000000056;  // FSAVE_PD.23
+-urom[542] = 120'h37d8c01100017600002e4000000057;  // FSAVE_PD.24
+-urom[543] = 120'h37d8c0110001760000304000000058;  // FSAVE_PD.25
+-urom[544] = 120'h37c030000002761c00000010000000;  // FSAVE_PD.26
+-urom[545] = 120'h37c000218000000000000000000000;  // FRESTORE.0
+-urom[546] = 120'hf48000;  // FRESTORE.1
+-urom[547] = 120'h280d800000000000000;  // FRESTORE.2
+-urom[548] = 120'hd8001b02b1760000002000000000;  // FRESTORE.3
+-urom[549] = 120'h37c0d02b02b0000000000000000000;  // FRESTORE.4
+-urom[550] = 120'h26bd400000000000000;  // FRESTORE.5
+-urom[551] = 120'h37d8e01b4401760000022000000061;  // FRESTORE.6
+-urom[552] = 120'h37d8e01b4401760000042000000062;  // FRESTORE.7
+-urom[553] = 120'h37d8e01b4401760000062000000063;  // FRESTORE.8
+-urom[554] = 120'h37d8e01b4401760000082000000064;  // FRESTORE.9
+-urom[555] = 120'h37d8e01b44017600000a2000000065;  // FRESTORE.10
+-urom[556] = 120'h37d8e01b44017600000c2000000066;  // FRESTORE.11
+-urom[557] = 120'h37d8e01b44017600000e2000000067;  // FRESTORE.12
+-urom[558] = 120'h37d8e01b4401760000102000000068;  // FRESTORE.13
+-urom[559] = 120'h37d8e01b4401760000122000000069;  // FRESTORE.14
+-urom[560] = 120'h37d8e01b440176000014200000006a;  // FRESTORE.15
+-urom[561] = 120'h37d8e01b440176000016200000006b;  // FRESTORE.16
+-urom[562] = 120'h37d8e01b440176000018200000006c;  // FRESTORE.17
+-urom[563] = 120'h37d8e01b44017600001a200000006d;  // FRESTORE.18
+-urom[564] = 120'h37d8e01b44017600001c200000006e;  // FRESTORE.19
+-urom[565] = 120'h37d8e01b44017600001e200000006f;  // FRESTORE.20
+-urom[566] = 120'h37d8e01b4401760000202000000070;  // FRESTORE.21
+-urom[567] = 120'h37d8e01b4401760000222000000071;  // FRESTORE.22
+-urom[568] = 120'h37d8e01b4401760000242000000072;  // FRESTORE.23
+-urom[569] = 120'h37d8e01b4401760000262000000073;  // FRESTORE.24
+-urom[570] = 120'h37d8e01b4401760000282000000074;  // FRESTORE.25
+-urom[571] = 120'h37d8e01b44017600002a2000000075;  // FRESTORE.26
+-urom[572] = 120'h37d8e01b44017600002c2000000076;  // FRESTORE.27
+-urom[573] = 120'h37d8e01b44017600002e2000000077;  // FRESTORE.28
+-urom[574] = 120'h37d8e01b4401760000302000000078;  // FRESTORE.29
+-urom[575] = 120'h37c030000000000000000010000000;  // FRESTORE.30
+-urom[576] = 120'h247d800000000000000;  // FREST_PI.0
+-urom[577] = 120'hd8001b02b1760000002000000000;  // FREST_PI.1
+-urom[578] = 120'h37c0d02b02b0000000000000000000;  // FREST_PI.2
+-urom[579] = 120'h26bd400000000000000;  // FREST_PI.3
+-urom[580] = 120'h37d8e01b4401760000022000000061;  // FREST_PI.4
+-urom[581] = 120'h37d8e01b4401760000042000000062;  // FREST_PI.5
+-urom[582] = 120'h37d8e01b4401760000062000000063;  // FREST_PI.6
+-urom[583] = 120'h37d8e01b4401760000082000000064;  // FREST_PI.7
+-urom[584] = 120'h37d8e01b44017600000a2000000065;  // FREST_PI.8
+-urom[585] = 120'h37d8e01b44017600000c2000000066;  // FREST_PI.9
+-urom[586] = 120'h37d8e01b44017600000e2000000067;  // FREST_PI.10
+-urom[587] = 120'h37d8e01b4401760000102000000068;  // FREST_PI.11
+-urom[588] = 120'h37d8e01b4401760000122000000069;  // FREST_PI.12
+-urom[589] = 120'h37d8e01b440176000014200000006a;  // FREST_PI.13
+-urom[590] = 120'h37d8e01b440176000016200000006b;  // FREST_PI.14
+-urom[591] = 120'h37d8e01b440176000018200000006c;  // FREST_PI.15
+-urom[592] = 120'h37d8e01b44017600001a200000006d;  // FREST_PI.16
+-urom[593] = 120'h37d8e01b44017600001c200000006e;  // FREST_PI.17
+-urom[594] = 120'h37d8e01b44017600001e200000006f;  // FREST_PI.18
+-urom[595] = 120'h37d8e01b4401760000202000000070;  // FREST_PI.19
+-urom[596] = 120'h37d8e01b4401760000222000000071;  // FREST_PI.20
+-urom[597] = 120'h37d8e01b4401760000242000000072;  // FREST_PI.21
+-urom[598] = 120'h37d8e01b4401760000262000000073;  // FREST_PI.22
+-urom[599] = 120'h37d8e01b4401760000282000000074;  // FREST_PI.23
+-urom[600] = 120'h37d8e01b44017600002a2000000075;  // FREST_PI.24
+-urom[601] = 120'h37d8e01b44017600002c2000000076;  // FREST_PI.25
+-urom[602] = 120'h37d8e01b44017600002e2000000077;  // FREST_PI.26
+-urom[603] = 120'h37d8e01b4401760000302000000078;  // FREST_PI.27
+-urom[604] = 120'h37c030000003471c00000010000000;  // FREST_PI.28
+-urom[605] = 120'h90003700014d007fff4c00000000;  // EXC_FMT0.0
+-urom[606] = 120'hd8003400014d007ffd4c00000000;  // EXC_FMT0.1
+-urom[607] = 120'h90003500018d007ffc4c00000000;  // EXC_FMT0.2
+-urom[608] = 120'hd8f01b0001730000002c90000000;  // EXC_FMT0.3
+-urom[609] = 120'hd8003600014d007ffe4c00000000;  // EXC_FMT2.0
+-urom[610] = 120'h90003700014d007ffd4c00000000;  // EXC_FMT2.1
+-urom[611] = 120'hd8003400014d007ffb4c00000000;  // EXC_FMT2.2
+-urom[612] = 120'h90003500018d007ffa4c00000000;  // EXC_FMT2.3
+-urom[613] = 120'hd8f01b0001730000002c90000000;  // EXC_FMT2.4
+-urom[614] = 120'hd8001000014d007ffe4c00000000;  // EXC_FMT7.0
+-urom[615] = 120'hd8001000014d007ffc4c00000000;  // EXC_FMT7.1
+-urom[616] = 120'hd8001000014d007ffa4c00000000;  // EXC_FMT7.2
+-urom[617] = 120'hd8001000014d007ff84c00000000;  // EXC_FMT7.3
+-urom[618] = 120'hd8001000014d007ff64c00000000;  // EXC_FMT7.4
+-urom[619] = 120'hd8001000014d007ff44c00000000;  // EXC_FMT7.5
+-urom[620] = 120'hd8001000014d007ff24c00000000;  // EXC_FMT7.6
+-urom[621] = 120'hd8003200014d007ff04c00000000;  // EXC_FMT7.7
+-urom[622] = 120'hd8003100014d007fee4c00000000;  // EXC_FMT7.8
+-urom[623] = 120'hd8001000014d007fec4c00000000;  // EXC_FMT7.9
+-urom[624] = 120'hd8003600014d007fec4c00000000;  // EXC_FMT7.10
+-urom[625] = 120'hd8001000014d007fea4c00000000;  // EXC_FMT7.11
+-urom[626] = 120'h90001000014d007fe94c00000000;  // EXC_FMT7.12
+-urom[627] = 120'h90003800014d007fe84c00000000;  // EXC_FMT7.13
+-urom[628] = 120'hd8003000014d007fe64c00000000;  // EXC_FMT7.14
+-urom[629] = 120'h90003700014d007fe54c00000000;  // EXC_FMT7.15
+-urom[630] = 120'hd8003400014d007fe34c00000000;  // EXC_FMT7.16
+-urom[631] = 120'h90003500018d007fe24c00000000;  // EXC_FMT7.17
+-urom[632] = 120'hd8f01b0001730000002c90000000;  // EXC_FMT7.18
+-urom[633] = 120'hd8001b0291500000002c00000000;  // EXC_RESET.0
+-urom[634] = 120'hd8001b0001500000022c90000000;  // EXC_RESET.1
+-urom[635] = 120'h3ec8001b037150007fffb000000000;  // EXC_IRQ.0
+-urom[636] = 120'h3ec010000330000000000000000000;  // EXC_IRQ.1
+-urom[637] = 120'h900037000169007fff4c00000000;  // EXC_IRQ.2
+-urom[638] = 120'hd80034000169007ffd4c00000000;  // EXC_IRQ.3
+-urom[639] = 120'h9000350001a9007ffc4c00000000;  // EXC_IRQ.4
+-urom[640] = 120'hd8f01b0001730000002c90000000;  // EXC_IRQ.5
+-urom[641] = 120'h3ec8001b037150007fffb000000000;  // EXC_IRQM.0
+-urom[642] = 120'h3ec010000330000000000000000000;  // EXC_IRQM.1
+-urom[643] = 120'h90003700016a007fff4c00000000;  // EXC_IRQM.2
+-urom[644] = 120'hd8003400016a007ffd4c00000000;  // EXC_IRQM.3
+-urom[645] = 120'h9000350001aa007ffc4c00000000;  // EXC_IRQM.4
+-urom[646] = 120'h7800011df20000008000000000000;  // EXC_IRQM.5
+-urom[647] = 120'h7800011d710000010000000000000;  // EXC_IRQM.6
+-urom[648] = 120'h900032000169007fff4c00000000;  // EXC_IRQM.7
+-urom[649] = 120'hd80034000169007ffd4c00000000;  // EXC_IRQM.8
+-urom[650] = 120'h9000310001a9007ffc4c00000000;  // EXC_IRQM.9
+-urom[651] = 120'hd8f01b0001730000002c90000000;  // EXC_IRQM.10
++urom[291] = 120'hd8002b0001760000004000000000;  // FPU_OUT8.0
++urom[292] = 120'hd810100001760000024000000000;  // FPU_OUT8.1
++urom[293] = 120'h37c030000003c00000000010000000;  // FPU_OUT8.2
++urom[294] = 120'hd8002b0001760000004000000000;  // FPU_OUT12.0
++urom[295] = 120'hd810100001760000024000000000;  // FPU_OUT12.1
++urom[296] = 120'hd820100001760000044000000000;  // FPU_OUT12.2
++urom[297] = 120'h37c030000003c00000000010000000;  // FPU_OUT12.3
++urom[298] = 120'h37c010000410000000000000000000;  // FPU_OUTD.0
++urom[299] = 120'h37c030000000000000000010000000;  // FPU_OUTD.1
++urom[300] = 120'h37c000218000000000000000000000;  // FPU_K_OUTD.0
++urom[301] = 120'h37c010000410000000000000000000;  // FPU_K_OUTD.1
++urom[302] = 120'h37c030000000000000000010000000;  // FPU_K_OUTD.2
++urom[303] = 120'h37400021800380d800000000000000;  // FPU_K_OUT4.0
++urom[304] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT4.1
++urom[305] = 120'hd8002b0001760000004000000000;  // FPU_K_OUT4.2
++urom[306] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT4.3
++urom[307] = 120'h37400021800380d800000000000000;  // FPU_K_OUT1.0
++urom[308] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT1.1
++urom[309] = 120'hc8002b0001760000004000000000;  // FPU_K_OUT1.2
++urom[310] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT1.3
++urom[311] = 120'h37400021800380d800000000000000;  // FPU_K_OUT2.0
++urom[312] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT2.1
++urom[313] = 120'hd0002b0001760000004000000000;  // FPU_K_OUT2.2
++urom[314] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT2.3
++urom[315] = 120'h37400021800380d800000000000000;  // FPU_K_OUT8.0
++urom[316] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT8.1
++urom[317] = 120'hd8002b0001760000004000000000;  // FPU_K_OUT8.2
++urom[318] = 120'hd810100001760000024000000000;  // FPU_K_OUT8.3
++urom[319] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT8.4
++urom[320] = 120'h37400021800380d800000000000000;  // FPU_K_OUT12.0
++urom[321] = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT12.1
++urom[322] = 120'hd8002b0001760000004000000000;  // FPU_K_OUT12.2
++urom[323] = 120'hd810100001760000024000000000;  // FPU_K_OUT12.3
++urom[324] = 120'hd820100001760000044000000000;  // FPU_K_OUT12.4
++urom[325] = 120'h37c030000003c00000000010000000;  // FPU_K_OUT12.5
++urom[326] = 120'hfab000;  // FPU_CR.0
++urom[327] = 120'h2aa800;  // FPU_CR.1
++urom[328] = 120'h32a800;  // FPU_CR.2
++urom[329] = 120'h37c0f000000380d800000000000000;  // FPU_CR.3
++urom[330] = 120'hd8001b02b1760000003400000080;  // FPU_CR.4
++urom[331] = 120'h37c0502b4400000000000000000000;  // FPU_CR.5
++urom[332] = 120'h276d800020000000080;  // FPU_CR.6
++urom[333] = 120'hd8001b02b1760000003400000081;  // FPU_CR.7
++urom[334] = 120'h37c0502b4400000000008000000000;  // FPU_CR.8
++urom[335] = 120'h276d800020000000081;  // FPU_CR.9
++urom[336] = 120'hd8001b02b1760000003400000082;  // FPU_CR.10
++urom[337] = 120'h37c0502b4400000000010000000000;  // FPU_CR.11
++urom[338] = 120'h276d800020000000082;  // FPU_CR.12
++urom[339] = 120'h37c030000003c00000000010000000;  // FPU_CR.13
++urom[340] = 120'h37c050014400000000000000000000;  // FPU_CRLR.0
++urom[341] = 120'h37c050014400000000008000000000;  // FPU_CRLR.1
++urom[342] = 120'h37c050014400000000010000000000;  // FPU_CRLR.2
++urom[343] = 120'h37c030000000000000000010000000;  // FPU_CRLR.3
++urom[344] = 120'h2aca00;  // FPU_CRS.0
++urom[345] = 120'h32ca00;  // FPU_CRS.1
++urom[346] = 120'h37c0f000000380d800000000000000;  // FPU_CRS.2
++urom[347] = 120'h37c0401102b0000000000000000000;  // FPU_CRS.3
++urom[348] = 120'hd8002b0001760000004000000080;  // FPU_CRS.4
++urom[349] = 120'h276d800020000000080;  // FPU_CRS.5
++urom[350] = 120'h37c0401102b0000000008000000000;  // FPU_CRS.6
++urom[351] = 120'hd8002b0001760000004000000081;  // FPU_CRS.7
++urom[352] = 120'h276d800020000000081;  // FPU_CRS.8
++urom[353] = 120'h37c0401102b0000000010000000000;  // FPU_CRS.9
++urom[354] = 120'hd8002b0001760000004000000082;  // FPU_CRS.10
++urom[355] = 120'h276d800020000000082;  // FPU_CRS.11
++urom[356] = 120'h37c030000003c00000000010000000;  // FPU_CRS.12
++urom[357] = 120'h37c040110010000000000000000000;  // FPU_CRSR.0
++urom[358] = 120'h37c040110010000000008000000000;  // FPU_CRSR.1
++urom[359] = 120'h37c040110010000000010000000000;  // FPU_CRSR.2
++urom[360] = 120'h37c030000000000000000010000000;  // FPU_CRSR.3
++urom[361] = 120'h37c0602202b0000000000000000000;  // FPU_MVM.0
++urom[362] = 120'h26bd400000000000000;  // FPU_MVM.1
++urom[363] = 120'heae000;  // FPU_MVM.2
++urom[364] = 120'hf2e400;  // FPU_MVM.3
++urom[365] = 120'h37c0f000000380d800000000000000;  // FPU_MVM.4
++urom[366] = 120'hfb3c00;  // FPU_MVM.5
++urom[367] = 120'hae800;  // FPU_MVM.6
++urom[368] = 120'h347d800000000000000;  // FPU_MVPD.0
++urom[369] = 120'hb3c00;  // FPU_MVPD.1
++urom[370] = 120'h247d800000000000000;  // FPU_MVPI.0
++urom[371] = 120'hae800;  // FPU_MVPI.1
++urom[372] = 120'hd8001b02d1760000003400000020;  // FPU_MVL.0
++urom[373] = 120'hd8001b02e1760000023400000020;  // FPU_MVL.1
++urom[374] = 120'h2ed8001b0001760000043400000020;  // FPU_MVL.2
++urom[375] = 120'h37c0802db800000000000000000000;  // FPU_MVL.3
++urom[376] = 120'h276d800060000000020;  // FPU_MVL.4
++urom[377] = 120'hd8001b02d1760000003400000021;  // FPU_MVL.5
++urom[378] = 120'hd8001b02e1760000023400000021;  // FPU_MVL.6
++urom[379] = 120'h2ed8001b0001760000043400000021;  // FPU_MVL.7
++urom[380] = 120'h37c0802db800000000000000000000;  // FPU_MVL.8
++urom[381] = 120'h276d800060000000021;  // FPU_MVL.9
++urom[382] = 120'hd8001b02d1760000003400000022;  // FPU_MVL.10
++urom[383] = 120'hd8001b02e1760000023400000022;  // FPU_MVL.11
++urom[384] = 120'h2ed8001b0001760000043400000022;  // FPU_MVL.12
++urom[385] = 120'h37c0802db800000000000000000000;  // FPU_MVL.13
++urom[386] = 120'h276d800060000000022;  // FPU_MVL.14
++urom[387] = 120'hd8001b02d1760000003400000023;  // FPU_MVL.15
++urom[388] = 120'hd8001b02e1760000023400000023;  // FPU_MVL.16
++urom[389] = 120'h2ed8001b0001760000043400000023;  // FPU_MVL.17
++urom[390] = 120'h37c0802db800000000000000000000;  // FPU_MVL.18
++urom[391] = 120'h276d800060000000023;  // FPU_MVL.19
++urom[392] = 120'hd8001b02d1760000003400000024;  // FPU_MVL.20
++urom[393] = 120'hd8001b02e1760000023400000024;  // FPU_MVL.21
++urom[394] = 120'h2ed8001b0001760000043400000024;  // FPU_MVL.22
++urom[395] = 120'h37c0802db800000000000000000000;  // FPU_MVL.23
++urom[396] = 120'h276d800060000000024;  // FPU_MVL.24
++urom[397] = 120'hd8001b02d1760000003400000025;  // FPU_MVL.25
++urom[398] = 120'hd8001b02e1760000023400000025;  // FPU_MVL.26
++urom[399] = 120'h2ed8001b0001760000043400000025;  // FPU_MVL.27
++urom[400] = 120'h37c0802db800000000000000000000;  // FPU_MVL.28
++urom[401] = 120'h276d800060000000025;  // FPU_MVL.29
++urom[402] = 120'hd8001b02d1760000003400000026;  // FPU_MVL.30
++urom[403] = 120'hd8001b02e1760000023400000026;  // FPU_MVL.31
++urom[404] = 120'h2ed8001b0001760000043400000026;  // FPU_MVL.32
++urom[405] = 120'h37c0802db800000000000000000000;  // FPU_MVL.33
++urom[406] = 120'h276d800060000000026;  // FPU_MVL.34
++urom[407] = 120'hd8001b02d1760000003400000027;  // FPU_MVL.35
++urom[408] = 120'hd8001b02e1760000023400000027;  // FPU_MVL.36
++urom[409] = 120'h2ed8001b0001760000043400000027;  // FPU_MVL.37
++urom[410] = 120'h37c0802db800000000000000000000;  // FPU_MVL.38
++urom[411] = 120'h276d800060000000027;  // FPU_MVL.39
++urom[412] = 120'hf39000;  // FPU_MVL.40
++urom[413] = 120'h37c030000000000000000010000000;  // FPU_MVL.41
++urom[414] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.0
++urom[415] = 120'hd8002d0001760000004000000020;  // FPU_MVS.1
++urom[416] = 120'hd810100001760000024000000020;  // FPU_MVS.2
++urom[417] = 120'hd820100001760000044000000020;  // FPU_MVS.3
++urom[418] = 120'h276d800060000000020;  // FPU_MVS.4
++urom[419] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.5
++urom[420] = 120'hd8002d0001760000004000000021;  // FPU_MVS.6
++urom[421] = 120'hd810100001760000024000000021;  // FPU_MVS.7
++urom[422] = 120'hd820100001760000044000000021;  // FPU_MVS.8
++urom[423] = 120'h276d800060000000021;  // FPU_MVS.9
++urom[424] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.10
++urom[425] = 120'hd8002d0001760000004000000022;  // FPU_MVS.11
++urom[426] = 120'hd810100001760000024000000022;  // FPU_MVS.12
++urom[427] = 120'hd820100001760000044000000022;  // FPU_MVS.13
++urom[428] = 120'h276d800060000000022;  // FPU_MVS.14
++urom[429] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.15
++urom[430] = 120'hd8002d0001760000004000000023;  // FPU_MVS.16
++urom[431] = 120'hd810100001760000024000000023;  // FPU_MVS.17
++urom[432] = 120'hd820100001760000044000000023;  // FPU_MVS.18
++urom[433] = 120'h276d800060000000023;  // FPU_MVS.19
++urom[434] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.20
++urom[435] = 120'hd8002d0001760000004000000024;  // FPU_MVS.21
++urom[436] = 120'hd810100001760000024000000024;  // FPU_MVS.22
++urom[437] = 120'hd820100001760000044000000024;  // FPU_MVS.23
++urom[438] = 120'h276d800060000000024;  // FPU_MVS.24
++urom[439] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.25
++urom[440] = 120'hd8002d0001760000004000000025;  // FPU_MVS.26
++urom[441] = 120'hd810100001760000024000000025;  // FPU_MVS.27
++urom[442] = 120'hd820100001760000044000000025;  // FPU_MVS.28
++urom[443] = 120'h276d800060000000025;  // FPU_MVS.29
++urom[444] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.30
++urom[445] = 120'hd8002d0001760000004000000026;  // FPU_MVS.31
++urom[446] = 120'hd810100001760000024000000026;  // FPU_MVS.32
++urom[447] = 120'hd820100001760000044000000026;  // FPU_MVS.33
++urom[448] = 120'h276d800060000000026;  // FPU_MVS.34
++urom[449] = 120'h37c0700002d0000000000000000000;  // FPU_MVS.35
++urom[450] = 120'hd8002d0001760000004000000027;  // FPU_MVS.36
++urom[451] = 120'hd810100001760000024000000027;  // FPU_MVS.37
++urom[452] = 120'hd820100001760000044000000027;  // FPU_MVS.38
++urom[453] = 120'h276d800060000000027;  // FPU_MVS.39
++urom[454] = 120'heb9000;  // FPU_MVS.40
++urom[455] = 120'h37c030000000000000000010000000;  // FPU_MVS.41
++urom[456] = 120'h37c030000003471c00000010000000;  // FPU_MVE.0
++urom[457] = 120'h37c000218000000000000000000000;  // FBCC.0
++urom[458] = 120'h37c090000000000000000030000000;  // FBCC.1
++urom[459] = 120'h37c000218000000000000000000000;  // FSCC.0
++urom[460] = 120'h374090006810000000000010000000;  // FSCC.1
++urom[461] = 120'h37c000218000000000000000000000;  // FDBCC.0
++urom[462] = 120'h37c0a0001450000000000030000000;  // FDBCC.1
++urom[463] = 120'h37c000218000000000000000000000;  // FTRAPCC.0
++urom[464] = 120'h37c090000000000000000010000000;  // FTRAPCC.1
++urom[465] = 120'h37c000218000000000000000000000;  // FSAVE.0
++urom[466] = 120'h37c0b00002b0000000000000000000;  // FSAVE.1
++urom[467] = 120'h26bd400000000000000;  // FSAVE.2
++urom[468] = 120'hebe000;  // FSAVE.3
++urom[469] = 120'h280d800000000000000;  // FSAVE.4
++urom[470] = 120'h37d8c0110001760000004000000040;  // FSAVE.5
++urom[471] = 120'h37d8c0110001760000024000000041;  // FSAVE.6
++urom[472] = 120'h37d8c0110001760000044000000042;  // FSAVE.7
++urom[473] = 120'h37d8c0110001760000064000000043;  // FSAVE.8
++urom[474] = 120'h37d8c0110001760000084000000044;  // FSAVE.9
++urom[475] = 120'h37d8c01100017600000a4000000045;  // FSAVE.10
++urom[476] = 120'h37d8c01100017600000c4000000046;  // FSAVE.11
++urom[477] = 120'h37d8c01100017600000e4000000047;  // FSAVE.12
++urom[478] = 120'h37d8c0110001760000104000000048;  // FSAVE.13
++urom[479] = 120'h37d8c0110001760000124000000049;  // FSAVE.14
++urom[480] = 120'h37d8c011000176000014400000004a;  // FSAVE.15
++urom[481] = 120'h37d8c011000176000016400000004b;  // FSAVE.16
++urom[482] = 120'h37d8c011000176000018400000004c;  // FSAVE.17
++urom[483] = 120'h37d8c01100017600001a400000004d;  // FSAVE.18
++urom[484] = 120'h37d8c01100017600001c400000004e;  // FSAVE.19
++urom[485] = 120'h37d8c01100017600001e400000004f;  // FSAVE.20
++urom[486] = 120'h37d8c0110001760000204000000050;  // FSAVE.21
++urom[487] = 120'h37d8c0110001760000224000000051;  // FSAVE.22
++urom[488] = 120'h37d8c0110001760000244000000052;  // FSAVE.23
++urom[489] = 120'h37d8c0110001760000264000000053;  // FSAVE.24
++urom[490] = 120'h37d8c0110001760000284000000054;  // FSAVE.25
++urom[491] = 120'h37d8c01100017600002a4000000055;  // FSAVE.26
++urom[492] = 120'h37d8c01100017600002c4000000056;  // FSAVE.27
++urom[493] = 120'h37d8c01100017600002e4000000057;  // FSAVE.28
++urom[494] = 120'h37d8c0110001760000304000000058;  // FSAVE.29
++urom[495] = 120'h37c030000000000000000010000000;  // FSAVE.30
++urom[496] = 120'h347d800000000000000;  // FSAVE_PD.0
++urom[497] = 120'h37d8c0110001760000004000000040;  // FSAVE_PD.1
++urom[498] = 120'h37d8c0110001760000024000000041;  // FSAVE_PD.2
++urom[499] = 120'h37d8c0110001760000044000000042;  // FSAVE_PD.3
++urom[500] = 120'h37d8c0110001760000064000000043;  // FSAVE_PD.4
++urom[501] = 120'h37d8c0110001760000084000000044;  // FSAVE_PD.5
++urom[502] = 120'h37d8c01100017600000a4000000045;  // FSAVE_PD.6
++urom[503] = 120'h37d8c01100017600000c4000000046;  // FSAVE_PD.7
++urom[504] = 120'h37d8c01100017600000e4000000047;  // FSAVE_PD.8
++urom[505] = 120'h37d8c0110001760000104000000048;  // FSAVE_PD.9
++urom[506] = 120'h37d8c0110001760000124000000049;  // FSAVE_PD.10
++urom[507] = 120'h37d8c011000176000014400000004a;  // FSAVE_PD.11
++urom[508] = 120'h37d8c011000176000016400000004b;  // FSAVE_PD.12
++urom[509] = 120'h37d8c011000176000018400000004c;  // FSAVE_PD.13
++urom[510] = 120'h37d8c01100017600001a400000004d;  // FSAVE_PD.14
++urom[511] = 120'h37d8c01100017600001c400000004e;  // FSAVE_PD.15
++urom[512] = 120'h37d8c01100017600001e400000004f;  // FSAVE_PD.16
++urom[513] = 120'h37d8c0110001760000204000000050;  // FSAVE_PD.17
++urom[514] = 120'h37d8c0110001760000224000000051;  // FSAVE_PD.18
++urom[515] = 120'h37d8c0110001760000244000000052;  // FSAVE_PD.19
++urom[516] = 120'h37d8c0110001760000264000000053;  // FSAVE_PD.20
++urom[517] = 120'h37d8c0110001760000284000000054;  // FSAVE_PD.21
++urom[518] = 120'h37d8c01100017600002a4000000055;  // FSAVE_PD.22
++urom[519] = 120'h37d8c01100017600002c4000000056;  // FSAVE_PD.23
++urom[520] = 120'h37d8c01100017600002e4000000057;  // FSAVE_PD.24
++urom[521] = 120'h37d8c0110001760000304000000058;  // FSAVE_PD.25
++urom[522] = 120'h37c030000002761c00000010000000;  // FSAVE_PD.26
++urom[523] = 120'h37c000218000000000000000000000;  // FRESTORE.0
++urom[524] = 120'hf45400;  // FRESTORE.1
++urom[525] = 120'h280d800000000000000;  // FRESTORE.2
++urom[526] = 120'hd8001b02b1760000002000000000;  // FRESTORE.3
++urom[527] = 120'h37c0d02b02b0000000000000000000;  // FRESTORE.4
++urom[528] = 120'h26bd400000000000000;  // FRESTORE.5
++urom[529] = 120'h37d8e01b4401760000022000000061;  // FRESTORE.6
++urom[530] = 120'h37d8e01b4401760000042000000062;  // FRESTORE.7
++urom[531] = 120'h37d8e01b4401760000062000000063;  // FRESTORE.8
++urom[532] = 120'h37d8e01b4401760000082000000064;  // FRESTORE.9
++urom[533] = 120'h37d8e01b44017600000a2000000065;  // FRESTORE.10
++urom[534] = 120'h37d8e01b44017600000c2000000066;  // FRESTORE.11
++urom[535] = 120'h37d8e01b44017600000e2000000067;  // FRESTORE.12
++urom[536] = 120'h37d8e01b4401760000102000000068;  // FRESTORE.13
++urom[537] = 120'h37d8e01b4401760000122000000069;  // FRESTORE.14
++urom[538] = 120'h37d8e01b440176000014200000006a;  // FRESTORE.15
++urom[539] = 120'h37d8e01b440176000016200000006b;  // FRESTORE.16
++urom[540] = 120'h37d8e01b440176000018200000006c;  // FRESTORE.17
++urom[541] = 120'h37d8e01b44017600001a200000006d;  // FRESTORE.18
++urom[542] = 120'h37d8e01b44017600001c200000006e;  // FRESTORE.19
++urom[543] = 120'h37d8e01b44017600001e200000006f;  // FRESTORE.20
++urom[544] = 120'h37d8e01b4401760000202000000070;  // FRESTORE.21
++urom[545] = 120'h37d8e01b4401760000222000000071;  // FRESTORE.22
++urom[546] = 120'h37d8e01b4401760000242000000072;  // FRESTORE.23
++urom[547] = 120'h37d8e01b4401760000262000000073;  // FRESTORE.24
++urom[548] = 120'h37d8e01b4401760000282000000074;  // FRESTORE.25
++urom[549] = 120'h37d8e01b44017600002a2000000075;  // FRESTORE.26
++urom[550] = 120'h37d8e01b44017600002c2000000076;  // FRESTORE.27
++urom[551] = 120'h37d8e01b44017600002e2000000077;  // FRESTORE.28
++urom[552] = 120'h37d8e01b4401760000302000000078;  // FRESTORE.29
++urom[553] = 120'h37c030000000000000000010000000;  // FRESTORE.30
++urom[554] = 120'h247d800000000000000;  // FREST_PI.0
++urom[555] = 120'hd8001b02b1760000002000000000;  // FREST_PI.1
++urom[556] = 120'h37c0d02b02b0000000000000000000;  // FREST_PI.2
++urom[557] = 120'h26bd400000000000000;  // FREST_PI.3
++urom[558] = 120'h37d8e01b4401760000022000000061;  // FREST_PI.4
++urom[559] = 120'h37d8e01b4401760000042000000062;  // FREST_PI.5
++urom[560] = 120'h37d8e01b4401760000062000000063;  // FREST_PI.6
++urom[561] = 120'h37d8e01b4401760000082000000064;  // FREST_PI.7
++urom[562] = 120'h37d8e01b44017600000a2000000065;  // FREST_PI.8
++urom[563] = 120'h37d8e01b44017600000c2000000066;  // FREST_PI.9
++urom[564] = 120'h37d8e01b44017600000e2000000067;  // FREST_PI.10
++urom[565] = 120'h37d8e01b4401760000102000000068;  // FREST_PI.11
++urom[566] = 120'h37d8e01b4401760000122000000069;  // FREST_PI.12
++urom[567] = 120'h37d8e01b440176000014200000006a;  // FREST_PI.13
++urom[568] = 120'h37d8e01b440176000016200000006b;  // FREST_PI.14
++urom[569] = 120'h37d8e01b440176000018200000006c;  // FREST_PI.15
++urom[570] = 120'h37d8e01b44017600001a200000006d;  // FREST_PI.16
++urom[571] = 120'h37d8e01b44017600001c200000006e;  // FREST_PI.17
++urom[572] = 120'h37d8e01b44017600001e200000006f;  // FREST_PI.18
++urom[573] = 120'h37d8e01b4401760000202000000070;  // FREST_PI.19
++urom[574] = 120'h37d8e01b4401760000222000000071;  // FREST_PI.20
++urom[575] = 120'h37d8e01b4401760000242000000072;  // FREST_PI.21
++urom[576] = 120'h37d8e01b4401760000262000000073;  // FREST_PI.22
++urom[577] = 120'h37d8e01b4401760000282000000074;  // FREST_PI.23
++urom[578] = 120'h37d8e01b44017600002a2000000075;  // FREST_PI.24
++urom[579] = 120'h37d8e01b44017600002c2000000076;  // FREST_PI.25
++urom[580] = 120'h37d8e01b44017600002e2000000077;  // FREST_PI.26
++urom[581] = 120'h37d8e01b4401760000302000000078;  // FREST_PI.27
++urom[582] = 120'h37c030000003471c00000010000000;  // FREST_PI.28
++urom[583] = 120'h90003700014d007fff4c00000000;  // EXC_FMT0.0
++urom[584] = 120'hd8003400014d007ffd4c00000000;  // EXC_FMT0.1
++urom[585] = 120'h90003500018d007ffc4c00000000;  // EXC_FMT0.2
++urom[586] = 120'hd8f01b0001730000002c90000000;  // EXC_FMT0.3
++urom[587] = 120'hd8003600014d007ffe4c00000000;  // EXC_FMT2.0
++urom[588] = 120'h90003700014d007ffd4c00000000;  // EXC_FMT2.1
++urom[589] = 120'hd8003400014d007ffb4c00000000;  // EXC_FMT2.2
++urom[590] = 120'h90003500018d007ffa4c00000000;  // EXC_FMT2.3
++urom[591] = 120'hd8f01b0001730000002c90000000;  // EXC_FMT2.4
++urom[592] = 120'hd8001000014d007ffe4c00000000;  // EXC_FMT7.0
++urom[593] = 120'hd8001000014d007ffc4c00000000;  // EXC_FMT7.1
++urom[594] = 120'hd8001000014d007ffa4c00000000;  // EXC_FMT7.2
++urom[595] = 120'hd8001000014d007ff84c00000000;  // EXC_FMT7.3
++urom[596] = 120'hd8001000014d007ff64c00000000;  // EXC_FMT7.4
++urom[597] = 120'hd8001000014d007ff44c00000000;  // EXC_FMT7.5
++urom[598] = 120'hd8001000014d007ff24c00000000;  // EXC_FMT7.6
++urom[599] = 120'hd8003200014d007ff04c00000000;  // EXC_FMT7.7
++urom[600] = 120'hd8003100014d007fee4c00000000;  // EXC_FMT7.8
++urom[601] = 120'hd8001000014d007fec4c00000000;  // EXC_FMT7.9
++urom[602] = 120'hd8003600014d007fec4c00000000;  // EXC_FMT7.10
++urom[603] = 120'hd8001000014d007fea4c00000000;  // EXC_FMT7.11
++urom[604] = 120'h90001000014d007fe94c00000000;  // EXC_FMT7.12
++urom[605] = 120'h90003800014d007fe84c00000000;  // EXC_FMT7.13
++urom[606] = 120'hd8003000014d007fe64c00000000;  // EXC_FMT7.14
++urom[607] = 120'h90003700014d007fe54c00000000;  // EXC_FMT7.15
++urom[608] = 120'hd8003400014d007fe34c00000000;  // EXC_FMT7.16
++urom[609] = 120'h90003500018d007fe24c00000000;  // EXC_FMT7.17
++urom[610] = 120'hd8f01b0001730000002c90000000;  // EXC_FMT7.18
++urom[611] = 120'hd8001b0291500000002c00000000;  // EXC_RESET.0
++urom[612] = 120'hd8001b0001500000022c90000000;  // EXC_RESET.1
++urom[613] = 120'h3ec8001b037150007fffb000000000;  // EXC_IRQ.0
++urom[614] = 120'h3ec010000330000000000000000000;  // EXC_IRQ.1
++urom[615] = 120'h900037000169007fff4c00000000;  // EXC_IRQ.2
++urom[616] = 120'hd80034000169007ffd4c00000000;  // EXC_IRQ.3
++urom[617] = 120'h9000350001a9007ffc4c00000000;  // EXC_IRQ.4
++urom[618] = 120'hd8f01b0001730000002c90000000;  // EXC_IRQ.5
++urom[619] = 120'h3ec8001b037150007fffb000000000;  // EXC_IRQM.0
++urom[620] = 120'h3ec010000330000000000000000000;  // EXC_IRQM.1
++urom[621] = 120'h90003700016a007fff4c00000000;  // EXC_IRQM.2
++urom[622] = 120'hd8003400016a007ffd4c00000000;  // EXC_IRQM.3
++urom[623] = 120'h9000350001aa007ffc4c00000000;  // EXC_IRQM.4
++urom[624] = 120'h7800011df20000008000000000000;  // EXC_IRQM.5
++urom[625] = 120'h7800011d710000010000000000000;  // EXC_IRQM.6
++urom[626] = 120'h900032000169007fff4c00000000;  // EXC_IRQM.7
++urom[627] = 120'hd80034000169007ffd4c00000000;  // EXC_IRQM.8
++urom[628] = 120'h9000310001a9007ffc4c00000000;  // EXC_IRQM.9
++urom[629] = 120'hd8f01b0001730000002c90000000;  // EXC_IRQM.10
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/rtl/gen/ap68040_ucode_rom.svh stageB/rtl/ap68040_faster/rtl/gen/ap68040_ucode_rom.svh
+--- base/rtl/ap68040_faster/rtl/gen/ap68040_ucode_rom.svh	2026-10-24 21:53:47.634800021 -0700
++++ stageB/rtl/ap68040_faster/rtl/gen/ap68040_ucode_rom.svh	2026-10-24 22:24:54.585070812 -0700
+@@ -233,8 +233,8 @@
+ 		10'd229: ucode_rom = 120'h99d600;  // FPU_GEN.2
+ 		10'd230: ucode_rom = 120'ha1da00;  // FPU_GEN.3
+ 		10'd231: ucode_rom = 120'haa2c00;  // FPU_GEN.4
+-		10'd232: ucode_rom = 120'hb29800;  // FPU_GEN.5
+-		10'd233: ucode_rom = 120'hbade00;  // FPU_GEN.6
++		10'd232: ucode_rom = 120'hb28c00;  // FPU_GEN.5
++		10'd233: ucode_rom = 120'hbad200;  // FPU_GEN.6
+ 		10'd234: ucode_rom = 120'h37c010000000000000000010000000;  // FPU_GEN.7
+ 		10'd235: ucode_rom = 120'h37c010000000000000000010000000;  // FPU_RR.0
+ 		10'd236: ucode_rom = 120'h378000218000000000000010000000;  // FPU_RRF.0
+@@ -279,10 +279,10 @@
+ 		10'd275: ucode_rom = 120'hd8001b02c1760000023400000000;  // FPU_K_IN12.2
+ 		10'd276: ucode_rom = 120'h2ed8001b0001760000043400000000;  // FPU_K_IN12.3
+ 		10'd277: ucode_rom = 120'h37c0102bb003c00000000010000000;  // FPU_K_IN12.4
+-		10'd278: ucode_rom = 120'h2a5a00;  // FPU_OUT.0
++		10'd278: ucode_rom = 120'h2a5400;  // FPU_OUT.0
+ 		10'd279: ucode_rom = 120'h37c0f000000380d800000000000000;  // FPU_OUT.1
+ 		10'd280: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_OUT.2
+-		10'd281: ucode_rom = 120'hda4e00;  // FPU_OUT.3
++		10'd281: ucode_rom = 120'hda4c00;  // FPU_OUT.3
+ 		10'd282: ucode_rom = 120'hd24600;  // FPU_OUT.4
+ 		10'd283: ucode_rom = 120'hca4200;  // FPU_OUT.5
+ 		10'd284: ucode_rom = 120'hc23e00;  // FPU_OUT.6
+@@ -292,367 +292,345 @@
+ 		10'd288: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_OUT1.1
+ 		10'd289: ucode_rom = 120'hd0002b0001760000004000000000;  // FPU_OUT2.0
+ 		10'd290: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_OUT2.1
+-		10'd291: ucode_rom = 120'h37c0201102c0000000008000000000;  // FPU_OUT8.0
+-		10'd292: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_OUT8.1
+-		10'd293: ucode_rom = 120'hd8002c0001760000024000000000;  // FPU_OUT8.2
+-		10'd294: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_OUT8.3
+-		10'd295: ucode_rom = 120'h37c0201102c0000000008000000000;  // FPU_OUT12.0
+-		10'd296: ucode_rom = 120'h37c0201102d0000000010000000000;  // FPU_OUT12.1
+-		10'd297: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_OUT12.2
+-		10'd298: ucode_rom = 120'hd8002c0001760000024000000000;  // FPU_OUT12.3
+-		10'd299: ucode_rom = 120'hd8002d0001760000044000000000;  // FPU_OUT12.4
+-		10'd300: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_OUT12.5
+-		10'd301: ucode_rom = 120'h37c010000410000000000000000000;  // FPU_OUTD.0
+-		10'd302: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_OUTD.1
+-		10'd303: ucode_rom = 120'h37c000218000000000000000000000;  // FPU_K_OUTD.0
+-		10'd304: ucode_rom = 120'h37c010000410000000000000000000;  // FPU_K_OUTD.1
+-		10'd305: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_K_OUTD.2
+-		10'd306: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT4.0
+-		10'd307: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT4.1
+-		10'd308: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_K_OUT4.2
+-		10'd309: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT4.3
+-		10'd310: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT1.0
+-		10'd311: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT1.1
+-		10'd312: ucode_rom = 120'hc8002b0001760000004000000000;  // FPU_K_OUT1.2
+-		10'd313: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT1.3
+-		10'd314: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT2.0
+-		10'd315: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT2.1
+-		10'd316: ucode_rom = 120'hd0002b0001760000004000000000;  // FPU_K_OUT2.2
+-		10'd317: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT2.3
+-		10'd318: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT8.0
+-		10'd319: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT8.1
+-		10'd320: ucode_rom = 120'h37c0201102c0000000008000000000;  // FPU_K_OUT8.2
+-		10'd321: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_K_OUT8.3
+-		10'd322: ucode_rom = 120'hd8002c0001760000024000000000;  // FPU_K_OUT8.4
+-		10'd323: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT8.5
+-		10'd324: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT12.0
+-		10'd325: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT12.1
+-		10'd326: ucode_rom = 120'h37c0201102c0000000008000000000;  // FPU_K_OUT12.2
+-		10'd327: ucode_rom = 120'h37c0201102d0000000010000000000;  // FPU_K_OUT12.3
+-		10'd328: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_K_OUT12.4
+-		10'd329: ucode_rom = 120'hd8002c0001760000024000000000;  // FPU_K_OUT12.5
+-		10'd330: ucode_rom = 120'hd8002d0001760000044000000000;  // FPU_K_OUT12.6
+-		10'd331: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT12.7
+-		10'd332: ucode_rom = 120'hfabc00;  // FPU_CR.0
+-		10'd333: ucode_rom = 120'h2ab400;  // FPU_CR.1
+-		10'd334: ucode_rom = 120'h32b400;  // FPU_CR.2
+-		10'd335: ucode_rom = 120'h37c0f000000380d800000000000000;  // FPU_CR.3
+-		10'd336: ucode_rom = 120'hd8001b02b1760000003400000080;  // FPU_CR.4
+-		10'd337: ucode_rom = 120'h37c0502b4400000000000000000000;  // FPU_CR.5
+-		10'd338: ucode_rom = 120'h276d800020000000080;  // FPU_CR.6
+-		10'd339: ucode_rom = 120'hd8001b02b1760000003400000081;  // FPU_CR.7
+-		10'd340: ucode_rom = 120'h37c0502b4400000000008000000000;  // FPU_CR.8
+-		10'd341: ucode_rom = 120'h276d800020000000081;  // FPU_CR.9
+-		10'd342: ucode_rom = 120'hd8001b02b1760000003400000082;  // FPU_CR.10
+-		10'd343: ucode_rom = 120'h37c0502b4400000000010000000000;  // FPU_CR.11
+-		10'd344: ucode_rom = 120'h276d800020000000082;  // FPU_CR.12
+-		10'd345: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_CR.13
+-		10'd346: ucode_rom = 120'h37c050014400000000000000000000;  // FPU_CRLR.0
+-		10'd347: ucode_rom = 120'h37c050014400000000008000000000;  // FPU_CRLR.1
+-		10'd348: ucode_rom = 120'h37c050014400000000010000000000;  // FPU_CRLR.2
+-		10'd349: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_CRLR.3
+-		10'd350: ucode_rom = 120'h2ad600;  // FPU_CRS.0
+-		10'd351: ucode_rom = 120'h32d600;  // FPU_CRS.1
+-		10'd352: ucode_rom = 120'h37c0f000000380d800000000000000;  // FPU_CRS.2
+-		10'd353: ucode_rom = 120'h37c0401102b0000000000000000000;  // FPU_CRS.3
+-		10'd354: ucode_rom = 120'hd8002b0001760000004000000080;  // FPU_CRS.4
+-		10'd355: ucode_rom = 120'h276d800020000000080;  // FPU_CRS.5
+-		10'd356: ucode_rom = 120'h37c0401102b0000000008000000000;  // FPU_CRS.6
+-		10'd357: ucode_rom = 120'hd8002b0001760000004000000081;  // FPU_CRS.7
+-		10'd358: ucode_rom = 120'h276d800020000000081;  // FPU_CRS.8
+-		10'd359: ucode_rom = 120'h37c0401102b0000000010000000000;  // FPU_CRS.9
+-		10'd360: ucode_rom = 120'hd8002b0001760000004000000082;  // FPU_CRS.10
+-		10'd361: ucode_rom = 120'h276d800020000000082;  // FPU_CRS.11
+-		10'd362: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_CRS.12
+-		10'd363: ucode_rom = 120'h37c040110010000000000000000000;  // FPU_CRSR.0
+-		10'd364: ucode_rom = 120'h37c040110010000000008000000000;  // FPU_CRSR.1
+-		10'd365: ucode_rom = 120'h37c040110010000000010000000000;  // FPU_CRSR.2
+-		10'd366: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_CRSR.3
+-		10'd367: ucode_rom = 120'h37c0602202b0000000000000000000;  // FPU_MVM.0
+-		10'd368: ucode_rom = 120'h26bd400000000000000;  // FPU_MVM.1
+-		10'd369: ucode_rom = 120'heaec00;  // FPU_MVM.2
+-		10'd370: ucode_rom = 120'hf2f000;  // FPU_MVM.3
+-		10'd371: ucode_rom = 120'h37c0f000000380d800000000000000;  // FPU_MVM.4
+-		10'd372: ucode_rom = 120'hfb4800;  // FPU_MVM.5
+-		10'd373: ucode_rom = 120'haf400;  // FPU_MVM.6
+-		10'd374: ucode_rom = 120'h347d800000000000000;  // FPU_MVPD.0
+-		10'd375: ucode_rom = 120'hb4800;  // FPU_MVPD.1
+-		10'd376: ucode_rom = 120'h247d800000000000000;  // FPU_MVPI.0
+-		10'd377: ucode_rom = 120'haf400;  // FPU_MVPI.1
+-		10'd378: ucode_rom = 120'hd8001b02d1760000003400000020;  // FPU_MVL.0
+-		10'd379: ucode_rom = 120'hd8001b02e1760000023400000020;  // FPU_MVL.1
+-		10'd380: ucode_rom = 120'h2ed8001b0001760000043400000020;  // FPU_MVL.2
+-		10'd381: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.3
+-		10'd382: ucode_rom = 120'h276d800060000000020;  // FPU_MVL.4
+-		10'd383: ucode_rom = 120'hd8001b02d1760000003400000021;  // FPU_MVL.5
+-		10'd384: ucode_rom = 120'hd8001b02e1760000023400000021;  // FPU_MVL.6
+-		10'd385: ucode_rom = 120'h2ed8001b0001760000043400000021;  // FPU_MVL.7
+-		10'd386: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.8
+-		10'd387: ucode_rom = 120'h276d800060000000021;  // FPU_MVL.9
+-		10'd388: ucode_rom = 120'hd8001b02d1760000003400000022;  // FPU_MVL.10
+-		10'd389: ucode_rom = 120'hd8001b02e1760000023400000022;  // FPU_MVL.11
+-		10'd390: ucode_rom = 120'h2ed8001b0001760000043400000022;  // FPU_MVL.12
+-		10'd391: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.13
+-		10'd392: ucode_rom = 120'h276d800060000000022;  // FPU_MVL.14
+-		10'd393: ucode_rom = 120'hd8001b02d1760000003400000023;  // FPU_MVL.15
+-		10'd394: ucode_rom = 120'hd8001b02e1760000023400000023;  // FPU_MVL.16
+-		10'd395: ucode_rom = 120'h2ed8001b0001760000043400000023;  // FPU_MVL.17
+-		10'd396: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.18
+-		10'd397: ucode_rom = 120'h276d800060000000023;  // FPU_MVL.19
+-		10'd398: ucode_rom = 120'hd8001b02d1760000003400000024;  // FPU_MVL.20
+-		10'd399: ucode_rom = 120'hd8001b02e1760000023400000024;  // FPU_MVL.21
+-		10'd400: ucode_rom = 120'h2ed8001b0001760000043400000024;  // FPU_MVL.22
+-		10'd401: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.23
+-		10'd402: ucode_rom = 120'h276d800060000000024;  // FPU_MVL.24
+-		10'd403: ucode_rom = 120'hd8001b02d1760000003400000025;  // FPU_MVL.25
+-		10'd404: ucode_rom = 120'hd8001b02e1760000023400000025;  // FPU_MVL.26
+-		10'd405: ucode_rom = 120'h2ed8001b0001760000043400000025;  // FPU_MVL.27
+-		10'd406: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.28
+-		10'd407: ucode_rom = 120'h276d800060000000025;  // FPU_MVL.29
+-		10'd408: ucode_rom = 120'hd8001b02d1760000003400000026;  // FPU_MVL.30
+-		10'd409: ucode_rom = 120'hd8001b02e1760000023400000026;  // FPU_MVL.31
+-		10'd410: ucode_rom = 120'h2ed8001b0001760000043400000026;  // FPU_MVL.32
+-		10'd411: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.33
+-		10'd412: ucode_rom = 120'h276d800060000000026;  // FPU_MVL.34
+-		10'd413: ucode_rom = 120'hd8001b02d1760000003400000027;  // FPU_MVL.35
+-		10'd414: ucode_rom = 120'hd8001b02e1760000023400000027;  // FPU_MVL.36
+-		10'd415: ucode_rom = 120'h2ed8001b0001760000043400000027;  // FPU_MVL.37
+-		10'd416: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.38
+-		10'd417: ucode_rom = 120'h276d800060000000027;  // FPU_MVL.39
+-		10'd418: ucode_rom = 120'hf3bc00;  // FPU_MVL.40
+-		10'd419: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_MVL.41
+-		10'd420: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.0
+-		10'd421: ucode_rom = 120'h37c0201102e0000000008000000000;  // FPU_MVS.1
+-		10'd422: ucode_rom = 120'h37c0201102f0000000010000000000;  // FPU_MVS.2
+-		10'd423: ucode_rom = 120'hd8002d0001760000004000000020;  // FPU_MVS.3
+-		10'd424: ucode_rom = 120'hd8002e0001760000024000000020;  // FPU_MVS.4
+-		10'd425: ucode_rom = 120'hd8002f0001760000044000000020;  // FPU_MVS.5
+-		10'd426: ucode_rom = 120'h276d800060000000020;  // FPU_MVS.6
+-		10'd427: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.7
+-		10'd428: ucode_rom = 120'h37c0201102e0000000008000000000;  // FPU_MVS.8
+-		10'd429: ucode_rom = 120'h37c0201102f0000000010000000000;  // FPU_MVS.9
+-		10'd430: ucode_rom = 120'hd8002d0001760000004000000021;  // FPU_MVS.10
+-		10'd431: ucode_rom = 120'hd8002e0001760000024000000021;  // FPU_MVS.11
+-		10'd432: ucode_rom = 120'hd8002f0001760000044000000021;  // FPU_MVS.12
+-		10'd433: ucode_rom = 120'h276d800060000000021;  // FPU_MVS.13
+-		10'd434: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.14
+-		10'd435: ucode_rom = 120'h37c0201102e0000000008000000000;  // FPU_MVS.15
+-		10'd436: ucode_rom = 120'h37c0201102f0000000010000000000;  // FPU_MVS.16
+-		10'd437: ucode_rom = 120'hd8002d0001760000004000000022;  // FPU_MVS.17
+-		10'd438: ucode_rom = 120'hd8002e0001760000024000000022;  // FPU_MVS.18
+-		10'd439: ucode_rom = 120'hd8002f0001760000044000000022;  // FPU_MVS.19
+-		10'd440: ucode_rom = 120'h276d800060000000022;  // FPU_MVS.20
+-		10'd441: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.21
+-		10'd442: ucode_rom = 120'h37c0201102e0000000008000000000;  // FPU_MVS.22
+-		10'd443: ucode_rom = 120'h37c0201102f0000000010000000000;  // FPU_MVS.23
+-		10'd444: ucode_rom = 120'hd8002d0001760000004000000023;  // FPU_MVS.24
+-		10'd445: ucode_rom = 120'hd8002e0001760000024000000023;  // FPU_MVS.25
+-		10'd446: ucode_rom = 120'hd8002f0001760000044000000023;  // FPU_MVS.26
+-		10'd447: ucode_rom = 120'h276d800060000000023;  // FPU_MVS.27
+-		10'd448: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.28
+-		10'd449: ucode_rom = 120'h37c0201102e0000000008000000000;  // FPU_MVS.29
+-		10'd450: ucode_rom = 120'h37c0201102f0000000010000000000;  // FPU_MVS.30
+-		10'd451: ucode_rom = 120'hd8002d0001760000004000000024;  // FPU_MVS.31
+-		10'd452: ucode_rom = 120'hd8002e0001760000024000000024;  // FPU_MVS.32
+-		10'd453: ucode_rom = 120'hd8002f0001760000044000000024;  // FPU_MVS.33
+-		10'd454: ucode_rom = 120'h276d800060000000024;  // FPU_MVS.34
+-		10'd455: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.35
+-		10'd456: ucode_rom = 120'h37c0201102e0000000008000000000;  // FPU_MVS.36
+-		10'd457: ucode_rom = 120'h37c0201102f0000000010000000000;  // FPU_MVS.37
+-		10'd458: ucode_rom = 120'hd8002d0001760000004000000025;  // FPU_MVS.38
+-		10'd459: ucode_rom = 120'hd8002e0001760000024000000025;  // FPU_MVS.39
+-		10'd460: ucode_rom = 120'hd8002f0001760000044000000025;  // FPU_MVS.40
+-		10'd461: ucode_rom = 120'h276d800060000000025;  // FPU_MVS.41
+-		10'd462: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.42
+-		10'd463: ucode_rom = 120'h37c0201102e0000000008000000000;  // FPU_MVS.43
+-		10'd464: ucode_rom = 120'h37c0201102f0000000010000000000;  // FPU_MVS.44
+-		10'd465: ucode_rom = 120'hd8002d0001760000004000000026;  // FPU_MVS.45
+-		10'd466: ucode_rom = 120'hd8002e0001760000024000000026;  // FPU_MVS.46
+-		10'd467: ucode_rom = 120'hd8002f0001760000044000000026;  // FPU_MVS.47
+-		10'd468: ucode_rom = 120'h276d800060000000026;  // FPU_MVS.48
+-		10'd469: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.49
+-		10'd470: ucode_rom = 120'h37c0201102e0000000008000000000;  // FPU_MVS.50
+-		10'd471: ucode_rom = 120'h37c0201102f0000000010000000000;  // FPU_MVS.51
+-		10'd472: ucode_rom = 120'hd8002d0001760000004000000027;  // FPU_MVS.52
+-		10'd473: ucode_rom = 120'hd8002e0001760000024000000027;  // FPU_MVS.53
+-		10'd474: ucode_rom = 120'hd8002f0001760000044000000027;  // FPU_MVS.54
+-		10'd475: ucode_rom = 120'h276d800060000000027;  // FPU_MVS.55
+-		10'd476: ucode_rom = 120'hebbc00;  // FPU_MVS.56
+-		10'd477: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_MVS.57
+-		10'd478: ucode_rom = 120'h37c030000003471c00000010000000;  // FPU_MVE.0
+-		10'd479: ucode_rom = 120'h37c000218000000000000000000000;  // FBCC.0
+-		10'd480: ucode_rom = 120'h37c090000000000000000030000000;  // FBCC.1
+-		10'd481: ucode_rom = 120'h37c000218000000000000000000000;  // FSCC.0
+-		10'd482: ucode_rom = 120'h374090006810000000000010000000;  // FSCC.1
+-		10'd483: ucode_rom = 120'h37c000218000000000000000000000;  // FDBCC.0
+-		10'd484: ucode_rom = 120'h37c0a0001450000000000030000000;  // FDBCC.1
+-		10'd485: ucode_rom = 120'h37c000218000000000000000000000;  // FTRAPCC.0
+-		10'd486: ucode_rom = 120'h37c090000000000000000010000000;  // FTRAPCC.1
+-		10'd487: ucode_rom = 120'h37c000218000000000000000000000;  // FSAVE.0
+-		10'd488: ucode_rom = 120'h37c0b00002b0000000000000000000;  // FSAVE.1
+-		10'd489: ucode_rom = 120'h26bd400000000000000;  // FSAVE.2
+-		10'd490: ucode_rom = 120'hec0c00;  // FSAVE.3
+-		10'd491: ucode_rom = 120'h280d800000000000000;  // FSAVE.4
+-		10'd492: ucode_rom = 120'h37d8c0110001760000004000000040;  // FSAVE.5
+-		10'd493: ucode_rom = 120'h37d8c0110001760000024000000041;  // FSAVE.6
+-		10'd494: ucode_rom = 120'h37d8c0110001760000044000000042;  // FSAVE.7
+-		10'd495: ucode_rom = 120'h37d8c0110001760000064000000043;  // FSAVE.8
+-		10'd496: ucode_rom = 120'h37d8c0110001760000084000000044;  // FSAVE.9
+-		10'd497: ucode_rom = 120'h37d8c01100017600000a4000000045;  // FSAVE.10
+-		10'd498: ucode_rom = 120'h37d8c01100017600000c4000000046;  // FSAVE.11
+-		10'd499: ucode_rom = 120'h37d8c01100017600000e4000000047;  // FSAVE.12
+-		10'd500: ucode_rom = 120'h37d8c0110001760000104000000048;  // FSAVE.13
+-		10'd501: ucode_rom = 120'h37d8c0110001760000124000000049;  // FSAVE.14
+-		10'd502: ucode_rom = 120'h37d8c011000176000014400000004a;  // FSAVE.15
+-		10'd503: ucode_rom = 120'h37d8c011000176000016400000004b;  // FSAVE.16
+-		10'd504: ucode_rom = 120'h37d8c011000176000018400000004c;  // FSAVE.17
+-		10'd505: ucode_rom = 120'h37d8c01100017600001a400000004d;  // FSAVE.18
+-		10'd506: ucode_rom = 120'h37d8c01100017600001c400000004e;  // FSAVE.19
+-		10'd507: ucode_rom = 120'h37d8c01100017600001e400000004f;  // FSAVE.20
+-		10'd508: ucode_rom = 120'h37d8c0110001760000204000000050;  // FSAVE.21
+-		10'd509: ucode_rom = 120'h37d8c0110001760000224000000051;  // FSAVE.22
+-		10'd510: ucode_rom = 120'h37d8c0110001760000244000000052;  // FSAVE.23
+-		10'd511: ucode_rom = 120'h37d8c0110001760000264000000053;  // FSAVE.24
+-		10'd512: ucode_rom = 120'h37d8c0110001760000284000000054;  // FSAVE.25
+-		10'd513: ucode_rom = 120'h37d8c01100017600002a4000000055;  // FSAVE.26
+-		10'd514: ucode_rom = 120'h37d8c01100017600002c4000000056;  // FSAVE.27
+-		10'd515: ucode_rom = 120'h37d8c01100017600002e4000000057;  // FSAVE.28
+-		10'd516: ucode_rom = 120'h37d8c0110001760000304000000058;  // FSAVE.29
+-		10'd517: ucode_rom = 120'h37c030000000000000000010000000;  // FSAVE.30
+-		10'd518: ucode_rom = 120'h347d800000000000000;  // FSAVE_PD.0
+-		10'd519: ucode_rom = 120'h37d8c0110001760000004000000040;  // FSAVE_PD.1
+-		10'd520: ucode_rom = 120'h37d8c0110001760000024000000041;  // FSAVE_PD.2
+-		10'd521: ucode_rom = 120'h37d8c0110001760000044000000042;  // FSAVE_PD.3
+-		10'd522: ucode_rom = 120'h37d8c0110001760000064000000043;  // FSAVE_PD.4
+-		10'd523: ucode_rom = 120'h37d8c0110001760000084000000044;  // FSAVE_PD.5
+-		10'd524: ucode_rom = 120'h37d8c01100017600000a4000000045;  // FSAVE_PD.6
+-		10'd525: ucode_rom = 120'h37d8c01100017600000c4000000046;  // FSAVE_PD.7
+-		10'd526: ucode_rom = 120'h37d8c01100017600000e4000000047;  // FSAVE_PD.8
+-		10'd527: ucode_rom = 120'h37d8c0110001760000104000000048;  // FSAVE_PD.9
+-		10'd528: ucode_rom = 120'h37d8c0110001760000124000000049;  // FSAVE_PD.10
+-		10'd529: ucode_rom = 120'h37d8c011000176000014400000004a;  // FSAVE_PD.11
+-		10'd530: ucode_rom = 120'h37d8c011000176000016400000004b;  // FSAVE_PD.12
+-		10'd531: ucode_rom = 120'h37d8c011000176000018400000004c;  // FSAVE_PD.13
+-		10'd532: ucode_rom = 120'h37d8c01100017600001a400000004d;  // FSAVE_PD.14
+-		10'd533: ucode_rom = 120'h37d8c01100017600001c400000004e;  // FSAVE_PD.15
+-		10'd534: ucode_rom = 120'h37d8c01100017600001e400000004f;  // FSAVE_PD.16
+-		10'd535: ucode_rom = 120'h37d8c0110001760000204000000050;  // FSAVE_PD.17
+-		10'd536: ucode_rom = 120'h37d8c0110001760000224000000051;  // FSAVE_PD.18
+-		10'd537: ucode_rom = 120'h37d8c0110001760000244000000052;  // FSAVE_PD.19
+-		10'd538: ucode_rom = 120'h37d8c0110001760000264000000053;  // FSAVE_PD.20
+-		10'd539: ucode_rom = 120'h37d8c0110001760000284000000054;  // FSAVE_PD.21
+-		10'd540: ucode_rom = 120'h37d8c01100017600002a4000000055;  // FSAVE_PD.22
+-		10'd541: ucode_rom = 120'h37d8c01100017600002c4000000056;  // FSAVE_PD.23
+-		10'd542: ucode_rom = 120'h37d8c01100017600002e4000000057;  // FSAVE_PD.24
+-		10'd543: ucode_rom = 120'h37d8c0110001760000304000000058;  // FSAVE_PD.25
+-		10'd544: ucode_rom = 120'h37c030000002761c00000010000000;  // FSAVE_PD.26
+-		10'd545: ucode_rom = 120'h37c000218000000000000000000000;  // FRESTORE.0
+-		10'd546: ucode_rom = 120'hf48000;  // FRESTORE.1
+-		10'd547: ucode_rom = 120'h280d800000000000000;  // FRESTORE.2
+-		10'd548: ucode_rom = 120'hd8001b02b1760000002000000000;  // FRESTORE.3
+-		10'd549: ucode_rom = 120'h37c0d02b02b0000000000000000000;  // FRESTORE.4
+-		10'd550: ucode_rom = 120'h26bd400000000000000;  // FRESTORE.5
+-		10'd551: ucode_rom = 120'h37d8e01b4401760000022000000061;  // FRESTORE.6
+-		10'd552: ucode_rom = 120'h37d8e01b4401760000042000000062;  // FRESTORE.7
+-		10'd553: ucode_rom = 120'h37d8e01b4401760000062000000063;  // FRESTORE.8
+-		10'd554: ucode_rom = 120'h37d8e01b4401760000082000000064;  // FRESTORE.9
+-		10'd555: ucode_rom = 120'h37d8e01b44017600000a2000000065;  // FRESTORE.10
+-		10'd556: ucode_rom = 120'h37d8e01b44017600000c2000000066;  // FRESTORE.11
+-		10'd557: ucode_rom = 120'h37d8e01b44017600000e2000000067;  // FRESTORE.12
+-		10'd558: ucode_rom = 120'h37d8e01b4401760000102000000068;  // FRESTORE.13
+-		10'd559: ucode_rom = 120'h37d8e01b4401760000122000000069;  // FRESTORE.14
+-		10'd560: ucode_rom = 120'h37d8e01b440176000014200000006a;  // FRESTORE.15
+-		10'd561: ucode_rom = 120'h37d8e01b440176000016200000006b;  // FRESTORE.16
+-		10'd562: ucode_rom = 120'h37d8e01b440176000018200000006c;  // FRESTORE.17
+-		10'd563: ucode_rom = 120'h37d8e01b44017600001a200000006d;  // FRESTORE.18
+-		10'd564: ucode_rom = 120'h37d8e01b44017600001c200000006e;  // FRESTORE.19
+-		10'd565: ucode_rom = 120'h37d8e01b44017600001e200000006f;  // FRESTORE.20
+-		10'd566: ucode_rom = 120'h37d8e01b4401760000202000000070;  // FRESTORE.21
+-		10'd567: ucode_rom = 120'h37d8e01b4401760000222000000071;  // FRESTORE.22
+-		10'd568: ucode_rom = 120'h37d8e01b4401760000242000000072;  // FRESTORE.23
+-		10'd569: ucode_rom = 120'h37d8e01b4401760000262000000073;  // FRESTORE.24
+-		10'd570: ucode_rom = 120'h37d8e01b4401760000282000000074;  // FRESTORE.25
+-		10'd571: ucode_rom = 120'h37d8e01b44017600002a2000000075;  // FRESTORE.26
+-		10'd572: ucode_rom = 120'h37d8e01b44017600002c2000000076;  // FRESTORE.27
+-		10'd573: ucode_rom = 120'h37d8e01b44017600002e2000000077;  // FRESTORE.28
+-		10'd574: ucode_rom = 120'h37d8e01b4401760000302000000078;  // FRESTORE.29
+-		10'd575: ucode_rom = 120'h37c030000000000000000010000000;  // FRESTORE.30
+-		10'd576: ucode_rom = 120'h247d800000000000000;  // FREST_PI.0
+-		10'd577: ucode_rom = 120'hd8001b02b1760000002000000000;  // FREST_PI.1
+-		10'd578: ucode_rom = 120'h37c0d02b02b0000000000000000000;  // FREST_PI.2
+-		10'd579: ucode_rom = 120'h26bd400000000000000;  // FREST_PI.3
+-		10'd580: ucode_rom = 120'h37d8e01b4401760000022000000061;  // FREST_PI.4
+-		10'd581: ucode_rom = 120'h37d8e01b4401760000042000000062;  // FREST_PI.5
+-		10'd582: ucode_rom = 120'h37d8e01b4401760000062000000063;  // FREST_PI.6
+-		10'd583: ucode_rom = 120'h37d8e01b4401760000082000000064;  // FREST_PI.7
+-		10'd584: ucode_rom = 120'h37d8e01b44017600000a2000000065;  // FREST_PI.8
+-		10'd585: ucode_rom = 120'h37d8e01b44017600000c2000000066;  // FREST_PI.9
+-		10'd586: ucode_rom = 120'h37d8e01b44017600000e2000000067;  // FREST_PI.10
+-		10'd587: ucode_rom = 120'h37d8e01b4401760000102000000068;  // FREST_PI.11
+-		10'd588: ucode_rom = 120'h37d8e01b4401760000122000000069;  // FREST_PI.12
+-		10'd589: ucode_rom = 120'h37d8e01b440176000014200000006a;  // FREST_PI.13
+-		10'd590: ucode_rom = 120'h37d8e01b440176000016200000006b;  // FREST_PI.14
+-		10'd591: ucode_rom = 120'h37d8e01b440176000018200000006c;  // FREST_PI.15
+-		10'd592: ucode_rom = 120'h37d8e01b44017600001a200000006d;  // FREST_PI.16
+-		10'd593: ucode_rom = 120'h37d8e01b44017600001c200000006e;  // FREST_PI.17
+-		10'd594: ucode_rom = 120'h37d8e01b44017600001e200000006f;  // FREST_PI.18
+-		10'd595: ucode_rom = 120'h37d8e01b4401760000202000000070;  // FREST_PI.19
+-		10'd596: ucode_rom = 120'h37d8e01b4401760000222000000071;  // FREST_PI.20
+-		10'd597: ucode_rom = 120'h37d8e01b4401760000242000000072;  // FREST_PI.21
+-		10'd598: ucode_rom = 120'h37d8e01b4401760000262000000073;  // FREST_PI.22
+-		10'd599: ucode_rom = 120'h37d8e01b4401760000282000000074;  // FREST_PI.23
+-		10'd600: ucode_rom = 120'h37d8e01b44017600002a2000000075;  // FREST_PI.24
+-		10'd601: ucode_rom = 120'h37d8e01b44017600002c2000000076;  // FREST_PI.25
+-		10'd602: ucode_rom = 120'h37d8e01b44017600002e2000000077;  // FREST_PI.26
+-		10'd603: ucode_rom = 120'h37d8e01b4401760000302000000078;  // FREST_PI.27
+-		10'd604: ucode_rom = 120'h37c030000003471c00000010000000;  // FREST_PI.28
+-		10'd605: ucode_rom = 120'h90003700014d007fff4c00000000;  // EXC_FMT0.0
+-		10'd606: ucode_rom = 120'hd8003400014d007ffd4c00000000;  // EXC_FMT0.1
+-		10'd607: ucode_rom = 120'h90003500018d007ffc4c00000000;  // EXC_FMT0.2
+-		10'd608: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_FMT0.3
+-		10'd609: ucode_rom = 120'hd8003600014d007ffe4c00000000;  // EXC_FMT2.0
+-		10'd610: ucode_rom = 120'h90003700014d007ffd4c00000000;  // EXC_FMT2.1
+-		10'd611: ucode_rom = 120'hd8003400014d007ffb4c00000000;  // EXC_FMT2.2
+-		10'd612: ucode_rom = 120'h90003500018d007ffa4c00000000;  // EXC_FMT2.3
+-		10'd613: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_FMT2.4
+-		10'd614: ucode_rom = 120'hd8001000014d007ffe4c00000000;  // EXC_FMT7.0
+-		10'd615: ucode_rom = 120'hd8001000014d007ffc4c00000000;  // EXC_FMT7.1
+-		10'd616: ucode_rom = 120'hd8001000014d007ffa4c00000000;  // EXC_FMT7.2
+-		10'd617: ucode_rom = 120'hd8001000014d007ff84c00000000;  // EXC_FMT7.3
+-		10'd618: ucode_rom = 120'hd8001000014d007ff64c00000000;  // EXC_FMT7.4
+-		10'd619: ucode_rom = 120'hd8001000014d007ff44c00000000;  // EXC_FMT7.5
+-		10'd620: ucode_rom = 120'hd8001000014d007ff24c00000000;  // EXC_FMT7.6
+-		10'd621: ucode_rom = 120'hd8003200014d007ff04c00000000;  // EXC_FMT7.7
+-		10'd622: ucode_rom = 120'hd8003100014d007fee4c00000000;  // EXC_FMT7.8
+-		10'd623: ucode_rom = 120'hd8001000014d007fec4c00000000;  // EXC_FMT7.9
+-		10'd624: ucode_rom = 120'hd8003600014d007fec4c00000000;  // EXC_FMT7.10
+-		10'd625: ucode_rom = 120'hd8001000014d007fea4c00000000;  // EXC_FMT7.11
+-		10'd626: ucode_rom = 120'h90001000014d007fe94c00000000;  // EXC_FMT7.12
+-		10'd627: ucode_rom = 120'h90003800014d007fe84c00000000;  // EXC_FMT7.13
+-		10'd628: ucode_rom = 120'hd8003000014d007fe64c00000000;  // EXC_FMT7.14
+-		10'd629: ucode_rom = 120'h90003700014d007fe54c00000000;  // EXC_FMT7.15
+-		10'd630: ucode_rom = 120'hd8003400014d007fe34c00000000;  // EXC_FMT7.16
+-		10'd631: ucode_rom = 120'h90003500018d007fe24c00000000;  // EXC_FMT7.17
+-		10'd632: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_FMT7.18
+-		10'd633: ucode_rom = 120'hd8001b0291500000002c00000000;  // EXC_RESET.0
+-		10'd634: ucode_rom = 120'hd8001b0001500000022c90000000;  // EXC_RESET.1
+-		10'd635: ucode_rom = 120'h3ec8001b037150007fffb000000000;  // EXC_IRQ.0
+-		10'd636: ucode_rom = 120'h3ec010000330000000000000000000;  // EXC_IRQ.1
+-		10'd637: ucode_rom = 120'h900037000169007fff4c00000000;  // EXC_IRQ.2
+-		10'd638: ucode_rom = 120'hd80034000169007ffd4c00000000;  // EXC_IRQ.3
+-		10'd639: ucode_rom = 120'h9000350001a9007ffc4c00000000;  // EXC_IRQ.4
+-		10'd640: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_IRQ.5
+-		10'd641: ucode_rom = 120'h3ec8001b037150007fffb000000000;  // EXC_IRQM.0
+-		10'd642: ucode_rom = 120'h3ec010000330000000000000000000;  // EXC_IRQM.1
+-		10'd643: ucode_rom = 120'h90003700016a007fff4c00000000;  // EXC_IRQM.2
+-		10'd644: ucode_rom = 120'hd8003400016a007ffd4c00000000;  // EXC_IRQM.3
+-		10'd645: ucode_rom = 120'h9000350001aa007ffc4c00000000;  // EXC_IRQM.4
+-		10'd646: ucode_rom = 120'h7800011df20000008000000000000;  // EXC_IRQM.5
+-		10'd647: ucode_rom = 120'h7800011d710000010000000000000;  // EXC_IRQM.6
+-		10'd648: ucode_rom = 120'h900032000169007fff4c00000000;  // EXC_IRQM.7
+-		10'd649: ucode_rom = 120'hd80034000169007ffd4c00000000;  // EXC_IRQM.8
+-		10'd650: ucode_rom = 120'h9000310001a9007ffc4c00000000;  // EXC_IRQM.9
+-		10'd651: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_IRQM.10
++		10'd291: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_OUT8.0
++		10'd292: ucode_rom = 120'hd810100001760000024000000000;  // FPU_OUT8.1
++		10'd293: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_OUT8.2
++		10'd294: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_OUT12.0
++		10'd295: ucode_rom = 120'hd810100001760000024000000000;  // FPU_OUT12.1
++		10'd296: ucode_rom = 120'hd820100001760000044000000000;  // FPU_OUT12.2
++		10'd297: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_OUT12.3
++		10'd298: ucode_rom = 120'h37c010000410000000000000000000;  // FPU_OUTD.0
++		10'd299: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_OUTD.1
++		10'd300: ucode_rom = 120'h37c000218000000000000000000000;  // FPU_K_OUTD.0
++		10'd301: ucode_rom = 120'h37c010000410000000000000000000;  // FPU_K_OUTD.1
++		10'd302: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_K_OUTD.2
++		10'd303: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT4.0
++		10'd304: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT4.1
++		10'd305: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_K_OUT4.2
++		10'd306: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT4.3
++		10'd307: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT1.0
++		10'd308: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT1.1
++		10'd309: ucode_rom = 120'hc8002b0001760000004000000000;  // FPU_K_OUT1.2
++		10'd310: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT1.3
++		10'd311: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT2.0
++		10'd312: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT2.1
++		10'd313: ucode_rom = 120'hd0002b0001760000004000000000;  // FPU_K_OUT2.2
++		10'd314: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT2.3
++		10'd315: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT8.0
++		10'd316: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT8.1
++		10'd317: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_K_OUT8.2
++		10'd318: ucode_rom = 120'hd810100001760000024000000000;  // FPU_K_OUT8.3
++		10'd319: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT8.4
++		10'd320: ucode_rom = 120'h37400021800380d800000000000000;  // FPU_K_OUT12.0
++		10'd321: ucode_rom = 120'h37c0100002b0000000000000000000;  // FPU_K_OUT12.1
++		10'd322: ucode_rom = 120'hd8002b0001760000004000000000;  // FPU_K_OUT12.2
++		10'd323: ucode_rom = 120'hd810100001760000024000000000;  // FPU_K_OUT12.3
++		10'd324: ucode_rom = 120'hd820100001760000044000000000;  // FPU_K_OUT12.4
++		10'd325: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_K_OUT12.5
++		10'd326: ucode_rom = 120'hfab000;  // FPU_CR.0
++		10'd327: ucode_rom = 120'h2aa800;  // FPU_CR.1
++		10'd328: ucode_rom = 120'h32a800;  // FPU_CR.2
++		10'd329: ucode_rom = 120'h37c0f000000380d800000000000000;  // FPU_CR.3
++		10'd330: ucode_rom = 120'hd8001b02b1760000003400000080;  // FPU_CR.4
++		10'd331: ucode_rom = 120'h37c0502b4400000000000000000000;  // FPU_CR.5
++		10'd332: ucode_rom = 120'h276d800020000000080;  // FPU_CR.6
++		10'd333: ucode_rom = 120'hd8001b02b1760000003400000081;  // FPU_CR.7
++		10'd334: ucode_rom = 120'h37c0502b4400000000008000000000;  // FPU_CR.8
++		10'd335: ucode_rom = 120'h276d800020000000081;  // FPU_CR.9
++		10'd336: ucode_rom = 120'hd8001b02b1760000003400000082;  // FPU_CR.10
++		10'd337: ucode_rom = 120'h37c0502b4400000000010000000000;  // FPU_CR.11
++		10'd338: ucode_rom = 120'h276d800020000000082;  // FPU_CR.12
++		10'd339: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_CR.13
++		10'd340: ucode_rom = 120'h37c050014400000000000000000000;  // FPU_CRLR.0
++		10'd341: ucode_rom = 120'h37c050014400000000008000000000;  // FPU_CRLR.1
++		10'd342: ucode_rom = 120'h37c050014400000000010000000000;  // FPU_CRLR.2
++		10'd343: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_CRLR.3
++		10'd344: ucode_rom = 120'h2aca00;  // FPU_CRS.0
++		10'd345: ucode_rom = 120'h32ca00;  // FPU_CRS.1
++		10'd346: ucode_rom = 120'h37c0f000000380d800000000000000;  // FPU_CRS.2
++		10'd347: ucode_rom = 120'h37c0401102b0000000000000000000;  // FPU_CRS.3
++		10'd348: ucode_rom = 120'hd8002b0001760000004000000080;  // FPU_CRS.4
++		10'd349: ucode_rom = 120'h276d800020000000080;  // FPU_CRS.5
++		10'd350: ucode_rom = 120'h37c0401102b0000000008000000000;  // FPU_CRS.6
++		10'd351: ucode_rom = 120'hd8002b0001760000004000000081;  // FPU_CRS.7
++		10'd352: ucode_rom = 120'h276d800020000000081;  // FPU_CRS.8
++		10'd353: ucode_rom = 120'h37c0401102b0000000010000000000;  // FPU_CRS.9
++		10'd354: ucode_rom = 120'hd8002b0001760000004000000082;  // FPU_CRS.10
++		10'd355: ucode_rom = 120'h276d800020000000082;  // FPU_CRS.11
++		10'd356: ucode_rom = 120'h37c030000003c00000000010000000;  // FPU_CRS.12
++		10'd357: ucode_rom = 120'h37c040110010000000000000000000;  // FPU_CRSR.0
++		10'd358: ucode_rom = 120'h37c040110010000000008000000000;  // FPU_CRSR.1
++		10'd359: ucode_rom = 120'h37c040110010000000010000000000;  // FPU_CRSR.2
++		10'd360: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_CRSR.3
++		10'd361: ucode_rom = 120'h37c0602202b0000000000000000000;  // FPU_MVM.0
++		10'd362: ucode_rom = 120'h26bd400000000000000;  // FPU_MVM.1
++		10'd363: ucode_rom = 120'heae000;  // FPU_MVM.2
++		10'd364: ucode_rom = 120'hf2e400;  // FPU_MVM.3
++		10'd365: ucode_rom = 120'h37c0f000000380d800000000000000;  // FPU_MVM.4
++		10'd366: ucode_rom = 120'hfb3c00;  // FPU_MVM.5
++		10'd367: ucode_rom = 120'hae800;  // FPU_MVM.6
++		10'd368: ucode_rom = 120'h347d800000000000000;  // FPU_MVPD.0
++		10'd369: ucode_rom = 120'hb3c00;  // FPU_MVPD.1
++		10'd370: ucode_rom = 120'h247d800000000000000;  // FPU_MVPI.0
++		10'd371: ucode_rom = 120'hae800;  // FPU_MVPI.1
++		10'd372: ucode_rom = 120'hd8001b02d1760000003400000020;  // FPU_MVL.0
++		10'd373: ucode_rom = 120'hd8001b02e1760000023400000020;  // FPU_MVL.1
++		10'd374: ucode_rom = 120'h2ed8001b0001760000043400000020;  // FPU_MVL.2
++		10'd375: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.3
++		10'd376: ucode_rom = 120'h276d800060000000020;  // FPU_MVL.4
++		10'd377: ucode_rom = 120'hd8001b02d1760000003400000021;  // FPU_MVL.5
++		10'd378: ucode_rom = 120'hd8001b02e1760000023400000021;  // FPU_MVL.6
++		10'd379: ucode_rom = 120'h2ed8001b0001760000043400000021;  // FPU_MVL.7
++		10'd380: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.8
++		10'd381: ucode_rom = 120'h276d800060000000021;  // FPU_MVL.9
++		10'd382: ucode_rom = 120'hd8001b02d1760000003400000022;  // FPU_MVL.10
++		10'd383: ucode_rom = 120'hd8001b02e1760000023400000022;  // FPU_MVL.11
++		10'd384: ucode_rom = 120'h2ed8001b0001760000043400000022;  // FPU_MVL.12
++		10'd385: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.13
++		10'd386: ucode_rom = 120'h276d800060000000022;  // FPU_MVL.14
++		10'd387: ucode_rom = 120'hd8001b02d1760000003400000023;  // FPU_MVL.15
++		10'd388: ucode_rom = 120'hd8001b02e1760000023400000023;  // FPU_MVL.16
++		10'd389: ucode_rom = 120'h2ed8001b0001760000043400000023;  // FPU_MVL.17
++		10'd390: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.18
++		10'd391: ucode_rom = 120'h276d800060000000023;  // FPU_MVL.19
++		10'd392: ucode_rom = 120'hd8001b02d1760000003400000024;  // FPU_MVL.20
++		10'd393: ucode_rom = 120'hd8001b02e1760000023400000024;  // FPU_MVL.21
++		10'd394: ucode_rom = 120'h2ed8001b0001760000043400000024;  // FPU_MVL.22
++		10'd395: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.23
++		10'd396: ucode_rom = 120'h276d800060000000024;  // FPU_MVL.24
++		10'd397: ucode_rom = 120'hd8001b02d1760000003400000025;  // FPU_MVL.25
++		10'd398: ucode_rom = 120'hd8001b02e1760000023400000025;  // FPU_MVL.26
++		10'd399: ucode_rom = 120'h2ed8001b0001760000043400000025;  // FPU_MVL.27
++		10'd400: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.28
++		10'd401: ucode_rom = 120'h276d800060000000025;  // FPU_MVL.29
++		10'd402: ucode_rom = 120'hd8001b02d1760000003400000026;  // FPU_MVL.30
++		10'd403: ucode_rom = 120'hd8001b02e1760000023400000026;  // FPU_MVL.31
++		10'd404: ucode_rom = 120'h2ed8001b0001760000043400000026;  // FPU_MVL.32
++		10'd405: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.33
++		10'd406: ucode_rom = 120'h276d800060000000026;  // FPU_MVL.34
++		10'd407: ucode_rom = 120'hd8001b02d1760000003400000027;  // FPU_MVL.35
++		10'd408: ucode_rom = 120'hd8001b02e1760000023400000027;  // FPU_MVL.36
++		10'd409: ucode_rom = 120'h2ed8001b0001760000043400000027;  // FPU_MVL.37
++		10'd410: ucode_rom = 120'h37c0802db800000000000000000000;  // FPU_MVL.38
++		10'd411: ucode_rom = 120'h276d800060000000027;  // FPU_MVL.39
++		10'd412: ucode_rom = 120'hf39000;  // FPU_MVL.40
++		10'd413: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_MVL.41
++		10'd414: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.0
++		10'd415: ucode_rom = 120'hd8002d0001760000004000000020;  // FPU_MVS.1
++		10'd416: ucode_rom = 120'hd810100001760000024000000020;  // FPU_MVS.2
++		10'd417: ucode_rom = 120'hd820100001760000044000000020;  // FPU_MVS.3
++		10'd418: ucode_rom = 120'h276d800060000000020;  // FPU_MVS.4
++		10'd419: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.5
++		10'd420: ucode_rom = 120'hd8002d0001760000004000000021;  // FPU_MVS.6
++		10'd421: ucode_rom = 120'hd810100001760000024000000021;  // FPU_MVS.7
++		10'd422: ucode_rom = 120'hd820100001760000044000000021;  // FPU_MVS.8
++		10'd423: ucode_rom = 120'h276d800060000000021;  // FPU_MVS.9
++		10'd424: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.10
++		10'd425: ucode_rom = 120'hd8002d0001760000004000000022;  // FPU_MVS.11
++		10'd426: ucode_rom = 120'hd810100001760000024000000022;  // FPU_MVS.12
++		10'd427: ucode_rom = 120'hd820100001760000044000000022;  // FPU_MVS.13
++		10'd428: ucode_rom = 120'h276d800060000000022;  // FPU_MVS.14
++		10'd429: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.15
++		10'd430: ucode_rom = 120'hd8002d0001760000004000000023;  // FPU_MVS.16
++		10'd431: ucode_rom = 120'hd810100001760000024000000023;  // FPU_MVS.17
++		10'd432: ucode_rom = 120'hd820100001760000044000000023;  // FPU_MVS.18
++		10'd433: ucode_rom = 120'h276d800060000000023;  // FPU_MVS.19
++		10'd434: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.20
++		10'd435: ucode_rom = 120'hd8002d0001760000004000000024;  // FPU_MVS.21
++		10'd436: ucode_rom = 120'hd810100001760000024000000024;  // FPU_MVS.22
++		10'd437: ucode_rom = 120'hd820100001760000044000000024;  // FPU_MVS.23
++		10'd438: ucode_rom = 120'h276d800060000000024;  // FPU_MVS.24
++		10'd439: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.25
++		10'd440: ucode_rom = 120'hd8002d0001760000004000000025;  // FPU_MVS.26
++		10'd441: ucode_rom = 120'hd810100001760000024000000025;  // FPU_MVS.27
++		10'd442: ucode_rom = 120'hd820100001760000044000000025;  // FPU_MVS.28
++		10'd443: ucode_rom = 120'h276d800060000000025;  // FPU_MVS.29
++		10'd444: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.30
++		10'd445: ucode_rom = 120'hd8002d0001760000004000000026;  // FPU_MVS.31
++		10'd446: ucode_rom = 120'hd810100001760000024000000026;  // FPU_MVS.32
++		10'd447: ucode_rom = 120'hd820100001760000044000000026;  // FPU_MVS.33
++		10'd448: ucode_rom = 120'h276d800060000000026;  // FPU_MVS.34
++		10'd449: ucode_rom = 120'h37c0700002d0000000000000000000;  // FPU_MVS.35
++		10'd450: ucode_rom = 120'hd8002d0001760000004000000027;  // FPU_MVS.36
++		10'd451: ucode_rom = 120'hd810100001760000024000000027;  // FPU_MVS.37
++		10'd452: ucode_rom = 120'hd820100001760000044000000027;  // FPU_MVS.38
++		10'd453: ucode_rom = 120'h276d800060000000027;  // FPU_MVS.39
++		10'd454: ucode_rom = 120'heb9000;  // FPU_MVS.40
++		10'd455: ucode_rom = 120'h37c030000000000000000010000000;  // FPU_MVS.41
++		10'd456: ucode_rom = 120'h37c030000003471c00000010000000;  // FPU_MVE.0
++		10'd457: ucode_rom = 120'h37c000218000000000000000000000;  // FBCC.0
++		10'd458: ucode_rom = 120'h37c090000000000000000030000000;  // FBCC.1
++		10'd459: ucode_rom = 120'h37c000218000000000000000000000;  // FSCC.0
++		10'd460: ucode_rom = 120'h374090006810000000000010000000;  // FSCC.1
++		10'd461: ucode_rom = 120'h37c000218000000000000000000000;  // FDBCC.0
++		10'd462: ucode_rom = 120'h37c0a0001450000000000030000000;  // FDBCC.1
++		10'd463: ucode_rom = 120'h37c000218000000000000000000000;  // FTRAPCC.0
++		10'd464: ucode_rom = 120'h37c090000000000000000010000000;  // FTRAPCC.1
++		10'd465: ucode_rom = 120'h37c000218000000000000000000000;  // FSAVE.0
++		10'd466: ucode_rom = 120'h37c0b00002b0000000000000000000;  // FSAVE.1
++		10'd467: ucode_rom = 120'h26bd400000000000000;  // FSAVE.2
++		10'd468: ucode_rom = 120'hebe000;  // FSAVE.3
++		10'd469: ucode_rom = 120'h280d800000000000000;  // FSAVE.4
++		10'd470: ucode_rom = 120'h37d8c0110001760000004000000040;  // FSAVE.5
++		10'd471: ucode_rom = 120'h37d8c0110001760000024000000041;  // FSAVE.6
++		10'd472: ucode_rom = 120'h37d8c0110001760000044000000042;  // FSAVE.7
++		10'd473: ucode_rom = 120'h37d8c0110001760000064000000043;  // FSAVE.8
++		10'd474: ucode_rom = 120'h37d8c0110001760000084000000044;  // FSAVE.9
++		10'd475: ucode_rom = 120'h37d8c01100017600000a4000000045;  // FSAVE.10
++		10'd476: ucode_rom = 120'h37d8c01100017600000c4000000046;  // FSAVE.11
++		10'd477: ucode_rom = 120'h37d8c01100017600000e4000000047;  // FSAVE.12
++		10'd478: ucode_rom = 120'h37d8c0110001760000104000000048;  // FSAVE.13
++		10'd479: ucode_rom = 120'h37d8c0110001760000124000000049;  // FSAVE.14
++		10'd480: ucode_rom = 120'h37d8c011000176000014400000004a;  // FSAVE.15
++		10'd481: ucode_rom = 120'h37d8c011000176000016400000004b;  // FSAVE.16
++		10'd482: ucode_rom = 120'h37d8c011000176000018400000004c;  // FSAVE.17
++		10'd483: ucode_rom = 120'h37d8c01100017600001a400000004d;  // FSAVE.18
++		10'd484: ucode_rom = 120'h37d8c01100017600001c400000004e;  // FSAVE.19
++		10'd485: ucode_rom = 120'h37d8c01100017600001e400000004f;  // FSAVE.20
++		10'd486: ucode_rom = 120'h37d8c0110001760000204000000050;  // FSAVE.21
++		10'd487: ucode_rom = 120'h37d8c0110001760000224000000051;  // FSAVE.22
++		10'd488: ucode_rom = 120'h37d8c0110001760000244000000052;  // FSAVE.23
++		10'd489: ucode_rom = 120'h37d8c0110001760000264000000053;  // FSAVE.24
++		10'd490: ucode_rom = 120'h37d8c0110001760000284000000054;  // FSAVE.25
++		10'd491: ucode_rom = 120'h37d8c01100017600002a4000000055;  // FSAVE.26
++		10'd492: ucode_rom = 120'h37d8c01100017600002c4000000056;  // FSAVE.27
++		10'd493: ucode_rom = 120'h37d8c01100017600002e4000000057;  // FSAVE.28
++		10'd494: ucode_rom = 120'h37d8c0110001760000304000000058;  // FSAVE.29
++		10'd495: ucode_rom = 120'h37c030000000000000000010000000;  // FSAVE.30
++		10'd496: ucode_rom = 120'h347d800000000000000;  // FSAVE_PD.0
++		10'd497: ucode_rom = 120'h37d8c0110001760000004000000040;  // FSAVE_PD.1
++		10'd498: ucode_rom = 120'h37d8c0110001760000024000000041;  // FSAVE_PD.2
++		10'd499: ucode_rom = 120'h37d8c0110001760000044000000042;  // FSAVE_PD.3
++		10'd500: ucode_rom = 120'h37d8c0110001760000064000000043;  // FSAVE_PD.4
++		10'd501: ucode_rom = 120'h37d8c0110001760000084000000044;  // FSAVE_PD.5
++		10'd502: ucode_rom = 120'h37d8c01100017600000a4000000045;  // FSAVE_PD.6
++		10'd503: ucode_rom = 120'h37d8c01100017600000c4000000046;  // FSAVE_PD.7
++		10'd504: ucode_rom = 120'h37d8c01100017600000e4000000047;  // FSAVE_PD.8
++		10'd505: ucode_rom = 120'h37d8c0110001760000104000000048;  // FSAVE_PD.9
++		10'd506: ucode_rom = 120'h37d8c0110001760000124000000049;  // FSAVE_PD.10
++		10'd507: ucode_rom = 120'h37d8c011000176000014400000004a;  // FSAVE_PD.11
++		10'd508: ucode_rom = 120'h37d8c011000176000016400000004b;  // FSAVE_PD.12
++		10'd509: ucode_rom = 120'h37d8c011000176000018400000004c;  // FSAVE_PD.13
++		10'd510: ucode_rom = 120'h37d8c01100017600001a400000004d;  // FSAVE_PD.14
++		10'd511: ucode_rom = 120'h37d8c01100017600001c400000004e;  // FSAVE_PD.15
++		10'd512: ucode_rom = 120'h37d8c01100017600001e400000004f;  // FSAVE_PD.16
++		10'd513: ucode_rom = 120'h37d8c0110001760000204000000050;  // FSAVE_PD.17
++		10'd514: ucode_rom = 120'h37d8c0110001760000224000000051;  // FSAVE_PD.18
++		10'd515: ucode_rom = 120'h37d8c0110001760000244000000052;  // FSAVE_PD.19
++		10'd516: ucode_rom = 120'h37d8c0110001760000264000000053;  // FSAVE_PD.20
++		10'd517: ucode_rom = 120'h37d8c0110001760000284000000054;  // FSAVE_PD.21
++		10'd518: ucode_rom = 120'h37d8c01100017600002a4000000055;  // FSAVE_PD.22
++		10'd519: ucode_rom = 120'h37d8c01100017600002c4000000056;  // FSAVE_PD.23
++		10'd520: ucode_rom = 120'h37d8c01100017600002e4000000057;  // FSAVE_PD.24
++		10'd521: ucode_rom = 120'h37d8c0110001760000304000000058;  // FSAVE_PD.25
++		10'd522: ucode_rom = 120'h37c030000002761c00000010000000;  // FSAVE_PD.26
++		10'd523: ucode_rom = 120'h37c000218000000000000000000000;  // FRESTORE.0
++		10'd524: ucode_rom = 120'hf45400;  // FRESTORE.1
++		10'd525: ucode_rom = 120'h280d800000000000000;  // FRESTORE.2
++		10'd526: ucode_rom = 120'hd8001b02b1760000002000000000;  // FRESTORE.3
++		10'd527: ucode_rom = 120'h37c0d02b02b0000000000000000000;  // FRESTORE.4
++		10'd528: ucode_rom = 120'h26bd400000000000000;  // FRESTORE.5
++		10'd529: ucode_rom = 120'h37d8e01b4401760000022000000061;  // FRESTORE.6
++		10'd530: ucode_rom = 120'h37d8e01b4401760000042000000062;  // FRESTORE.7
++		10'd531: ucode_rom = 120'h37d8e01b4401760000062000000063;  // FRESTORE.8
++		10'd532: ucode_rom = 120'h37d8e01b4401760000082000000064;  // FRESTORE.9
++		10'd533: ucode_rom = 120'h37d8e01b44017600000a2000000065;  // FRESTORE.10
++		10'd534: ucode_rom = 120'h37d8e01b44017600000c2000000066;  // FRESTORE.11
++		10'd535: ucode_rom = 120'h37d8e01b44017600000e2000000067;  // FRESTORE.12
++		10'd536: ucode_rom = 120'h37d8e01b4401760000102000000068;  // FRESTORE.13
++		10'd537: ucode_rom = 120'h37d8e01b4401760000122000000069;  // FRESTORE.14
++		10'd538: ucode_rom = 120'h37d8e01b440176000014200000006a;  // FRESTORE.15
++		10'd539: ucode_rom = 120'h37d8e01b440176000016200000006b;  // FRESTORE.16
++		10'd540: ucode_rom = 120'h37d8e01b440176000018200000006c;  // FRESTORE.17
++		10'd541: ucode_rom = 120'h37d8e01b44017600001a200000006d;  // FRESTORE.18
++		10'd542: ucode_rom = 120'h37d8e01b44017600001c200000006e;  // FRESTORE.19
++		10'd543: ucode_rom = 120'h37d8e01b44017600001e200000006f;  // FRESTORE.20
++		10'd544: ucode_rom = 120'h37d8e01b4401760000202000000070;  // FRESTORE.21
++		10'd545: ucode_rom = 120'h37d8e01b4401760000222000000071;  // FRESTORE.22
++		10'd546: ucode_rom = 120'h37d8e01b4401760000242000000072;  // FRESTORE.23
++		10'd547: ucode_rom = 120'h37d8e01b4401760000262000000073;  // FRESTORE.24
++		10'd548: ucode_rom = 120'h37d8e01b4401760000282000000074;  // FRESTORE.25
++		10'd549: ucode_rom = 120'h37d8e01b44017600002a2000000075;  // FRESTORE.26
++		10'd550: ucode_rom = 120'h37d8e01b44017600002c2000000076;  // FRESTORE.27
++		10'd551: ucode_rom = 120'h37d8e01b44017600002e2000000077;  // FRESTORE.28
++		10'd552: ucode_rom = 120'h37d8e01b4401760000302000000078;  // FRESTORE.29
++		10'd553: ucode_rom = 120'h37c030000000000000000010000000;  // FRESTORE.30
++		10'd554: ucode_rom = 120'h247d800000000000000;  // FREST_PI.0
++		10'd555: ucode_rom = 120'hd8001b02b1760000002000000000;  // FREST_PI.1
++		10'd556: ucode_rom = 120'h37c0d02b02b0000000000000000000;  // FREST_PI.2
++		10'd557: ucode_rom = 120'h26bd400000000000000;  // FREST_PI.3
++		10'd558: ucode_rom = 120'h37d8e01b4401760000022000000061;  // FREST_PI.4
++		10'd559: ucode_rom = 120'h37d8e01b4401760000042000000062;  // FREST_PI.5
++		10'd560: ucode_rom = 120'h37d8e01b4401760000062000000063;  // FREST_PI.6
++		10'd561: ucode_rom = 120'h37d8e01b4401760000082000000064;  // FREST_PI.7
++		10'd562: ucode_rom = 120'h37d8e01b44017600000a2000000065;  // FREST_PI.8
++		10'd563: ucode_rom = 120'h37d8e01b44017600000c2000000066;  // FREST_PI.9
++		10'd564: ucode_rom = 120'h37d8e01b44017600000e2000000067;  // FREST_PI.10
++		10'd565: ucode_rom = 120'h37d8e01b4401760000102000000068;  // FREST_PI.11
++		10'd566: ucode_rom = 120'h37d8e01b4401760000122000000069;  // FREST_PI.12
++		10'd567: ucode_rom = 120'h37d8e01b440176000014200000006a;  // FREST_PI.13
++		10'd568: ucode_rom = 120'h37d8e01b440176000016200000006b;  // FREST_PI.14
++		10'd569: ucode_rom = 120'h37d8e01b440176000018200000006c;  // FREST_PI.15
++		10'd570: ucode_rom = 120'h37d8e01b44017600001a200000006d;  // FREST_PI.16
++		10'd571: ucode_rom = 120'h37d8e01b44017600001c200000006e;  // FREST_PI.17
++		10'd572: ucode_rom = 120'h37d8e01b44017600001e200000006f;  // FREST_PI.18
++		10'd573: ucode_rom = 120'h37d8e01b4401760000202000000070;  // FREST_PI.19
++		10'd574: ucode_rom = 120'h37d8e01b4401760000222000000071;  // FREST_PI.20
++		10'd575: ucode_rom = 120'h37d8e01b4401760000242000000072;  // FREST_PI.21
++		10'd576: ucode_rom = 120'h37d8e01b4401760000262000000073;  // FREST_PI.22
++		10'd577: ucode_rom = 120'h37d8e01b4401760000282000000074;  // FREST_PI.23
++		10'd578: ucode_rom = 120'h37d8e01b44017600002a2000000075;  // FREST_PI.24
++		10'd579: ucode_rom = 120'h37d8e01b44017600002c2000000076;  // FREST_PI.25
++		10'd580: ucode_rom = 120'h37d8e01b44017600002e2000000077;  // FREST_PI.26
++		10'd581: ucode_rom = 120'h37d8e01b4401760000302000000078;  // FREST_PI.27
++		10'd582: ucode_rom = 120'h37c030000003471c00000010000000;  // FREST_PI.28
++		10'd583: ucode_rom = 120'h90003700014d007fff4c00000000;  // EXC_FMT0.0
++		10'd584: ucode_rom = 120'hd8003400014d007ffd4c00000000;  // EXC_FMT0.1
++		10'd585: ucode_rom = 120'h90003500018d007ffc4c00000000;  // EXC_FMT0.2
++		10'd586: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_FMT0.3
++		10'd587: ucode_rom = 120'hd8003600014d007ffe4c00000000;  // EXC_FMT2.0
++		10'd588: ucode_rom = 120'h90003700014d007ffd4c00000000;  // EXC_FMT2.1
++		10'd589: ucode_rom = 120'hd8003400014d007ffb4c00000000;  // EXC_FMT2.2
++		10'd590: ucode_rom = 120'h90003500018d007ffa4c00000000;  // EXC_FMT2.3
++		10'd591: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_FMT2.4
++		10'd592: ucode_rom = 120'hd8001000014d007ffe4c00000000;  // EXC_FMT7.0
++		10'd593: ucode_rom = 120'hd8001000014d007ffc4c00000000;  // EXC_FMT7.1
++		10'd594: ucode_rom = 120'hd8001000014d007ffa4c00000000;  // EXC_FMT7.2
++		10'd595: ucode_rom = 120'hd8001000014d007ff84c00000000;  // EXC_FMT7.3
++		10'd596: ucode_rom = 120'hd8001000014d007ff64c00000000;  // EXC_FMT7.4
++		10'd597: ucode_rom = 120'hd8001000014d007ff44c00000000;  // EXC_FMT7.5
++		10'd598: ucode_rom = 120'hd8001000014d007ff24c00000000;  // EXC_FMT7.6
++		10'd599: ucode_rom = 120'hd8003200014d007ff04c00000000;  // EXC_FMT7.7
++		10'd600: ucode_rom = 120'hd8003100014d007fee4c00000000;  // EXC_FMT7.8
++		10'd601: ucode_rom = 120'hd8001000014d007fec4c00000000;  // EXC_FMT7.9
++		10'd602: ucode_rom = 120'hd8003600014d007fec4c00000000;  // EXC_FMT7.10
++		10'd603: ucode_rom = 120'hd8001000014d007fea4c00000000;  // EXC_FMT7.11
++		10'd604: ucode_rom = 120'h90001000014d007fe94c00000000;  // EXC_FMT7.12
++		10'd605: ucode_rom = 120'h90003800014d007fe84c00000000;  // EXC_FMT7.13
++		10'd606: ucode_rom = 120'hd8003000014d007fe64c00000000;  // EXC_FMT7.14
++		10'd607: ucode_rom = 120'h90003700014d007fe54c00000000;  // EXC_FMT7.15
++		10'd608: ucode_rom = 120'hd8003400014d007fe34c00000000;  // EXC_FMT7.16
++		10'd609: ucode_rom = 120'h90003500018d007fe24c00000000;  // EXC_FMT7.17
++		10'd610: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_FMT7.18
++		10'd611: ucode_rom = 120'hd8001b0291500000002c00000000;  // EXC_RESET.0
++		10'd612: ucode_rom = 120'hd8001b0001500000022c90000000;  // EXC_RESET.1
++		10'd613: ucode_rom = 120'h3ec8001b037150007fffb000000000;  // EXC_IRQ.0
++		10'd614: ucode_rom = 120'h3ec010000330000000000000000000;  // EXC_IRQ.1
++		10'd615: ucode_rom = 120'h900037000169007fff4c00000000;  // EXC_IRQ.2
++		10'd616: ucode_rom = 120'hd80034000169007ffd4c00000000;  // EXC_IRQ.3
++		10'd617: ucode_rom = 120'h9000350001a9007ffc4c00000000;  // EXC_IRQ.4
++		10'd618: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_IRQ.5
++		10'd619: ucode_rom = 120'h3ec8001b037150007fffb000000000;  // EXC_IRQM.0
++		10'd620: ucode_rom = 120'h3ec010000330000000000000000000;  // EXC_IRQM.1
++		10'd621: ucode_rom = 120'h90003700016a007fff4c00000000;  // EXC_IRQM.2
++		10'd622: ucode_rom = 120'hd8003400016a007ffd4c00000000;  // EXC_IRQM.3
++		10'd623: ucode_rom = 120'h9000350001aa007ffc4c00000000;  // EXC_IRQM.4
++		10'd624: ucode_rom = 120'h7800011df20000008000000000000;  // EXC_IRQM.5
++		10'd625: ucode_rom = 120'h7800011d710000010000000000000;  // EXC_IRQM.6
++		10'd626: ucode_rom = 120'h900032000169007fff4c00000000;  // EXC_IRQM.7
++		10'd627: ucode_rom = 120'hd80034000169007ffd4c00000000;  // EXC_IRQM.8
++		10'd628: ucode_rom = 120'h9000310001a9007ffc4c00000000;  // EXC_IRQM.9
++		10'd629: ucode_rom = 120'hd8f01b0001730000002c90000000;  // EXC_IRQM.10
+ 		default: ucode_rom = '0;
+ 	endcase
+ endfunction
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/rtl/gen/ap68040_upkg.sv stageB/rtl/ap68040_faster/rtl/gen/ap68040_upkg.sv
+--- base/rtl/ap68040_faster/rtl/gen/ap68040_upkg.sv	2026-10-24 21:53:47.631799980 -0700
++++ stageB/rtl/ap68040_faster/rtl/gen/ap68040_upkg.sv	2026-10-24 22:24:54.582070789 -0700
+@@ -124,18 +124,18 @@
+ localparam logic [5:0] JC_EA0_APD = 6'd29;
+ localparam logic [5:0] JC_EA0_AIP = 6'd30;
+ localparam logic [5:0] JC_EXT13 = 6'd31;
+-localparam logic [9:0] UA_EXC_FMT0 = 10'd605;
+-localparam logic [9:0] UA_EXC_FMT2 = 10'd609;
+-localparam logic [9:0] UA_EXC_FMT7 = 10'd614;
+-localparam logic [9:0] UA_EXC_RESET = 10'd633;
+-localparam logic [9:0] UA_EXC_IRQ = 10'd635;
+-localparam logic [9:0] UA_EXC_IRQM = 10'd641;
++localparam logic [9:0] UA_EXC_FMT0 = 10'd583;
++localparam logic [9:0] UA_EXC_FMT2 = 10'd587;
++localparam logic [9:0] UA_EXC_FMT7 = 10'd592;
++localparam logic [9:0] UA_EXC_RESET = 10'd611;
++localparam logic [9:0] UA_EXC_IRQ = 10'd613;
++localparam logic [9:0] UA_EXC_IRQM = 10'd619;
+ localparam logic [9:0] UA_DEC_EXC = 10'd1;
+ localparam logic [9:0] UA_BCC = 10'd86;
+ localparam logic [9:0] UA_BSR = 10'd87;
+ localparam logic [9:0] UA_DBCC = 10'd88;
+-localparam logic [9:0] UA_FBCC = 10'd479;
+-localparam logic [9:0] UA_FDBCC = 10'd483;
++localparam logic [9:0] UA_FBCC = 10'd457;
++localparam logic [9:0] UA_FDBCC = 10'd461;
+ localparam logic [9:0] UA_FPU_GEN = 10'd227;
+ localparam logic [9:0] UA_TRAP = 10'd113;
+ localparam logic [9:0] UA_BKPT = 10'd114;
+@@ -154,12 +154,12 @@
+ localparam logic [9:0] UA_FPU_K_IN4 = 10'd260;
+ localparam logic [9:0] UA_FPU_K_IN8 = 10'd269;
+ localparam logic [9:0] UA_FPU_K_IN12 = 10'd273;
+-localparam logic [9:0] UA_FPU_K_OUTD = 10'd303;
+-localparam logic [9:0] UA_FPU_K_OUT1 = 10'd310;
+-localparam logic [9:0] UA_FPU_K_OUT2 = 10'd314;
+-localparam logic [9:0] UA_FPU_K_OUT4 = 10'd306;
+-localparam logic [9:0] UA_FPU_K_OUT8 = 10'd318;
+-localparam logic [9:0] UA_FPU_K_OUT12 = 10'd324;
++localparam logic [9:0] UA_FPU_K_OUTD = 10'd300;
++localparam logic [9:0] UA_FPU_K_OUT1 = 10'd307;
++localparam logic [9:0] UA_FPU_K_OUT2 = 10'd311;
++localparam logic [9:0] UA_FPU_K_OUT4 = 10'd303;
++localparam logic [9:0] UA_FPU_K_OUT8 = 10'd315;
++localparam logic [9:0] UA_FPU_K_OUT12 = 10'd320;
+ // the predecoder table word (tools/ucode.py emit_pdrom)
+ typedef struct packed {
+ 	logic [1:0] kind;
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/tb/tb_ap68040.sv stageB/rtl/ap68040_faster/tb/tb_ap68040.sv
+--- base/rtl/ap68040_faster/tb/tb_ap68040.sv	2026-10-24 21:45:54.471399639 -0700
++++ stageB/rtl/ap68040_faster/tb/tb_ap68040.sv	2026-10-24 22:24:41.447974009 -0700
+@@ -981,8 +981,8 @@
+ 					end
+ 				end
+ 				16'hF108: begin
+-					$display("STAMP tag=%04x cycles=%0d instructions=%0d at=%0d", w, cycles - stamp_prev,
+-					         insns - insn_prev, cycles);
++					$display("STAMP tag=%04x cycles=%0d instructions=%0d", w, cycles - stamp_prev,
++					         insns - insn_prev);
+ 					if (prof) prof_report();
+ 					stamp_prev <= cycles;
+ 					insn_prev  <= insns;
+@@ -1073,97 +1073,6 @@
+ 		         dut.be.ex_v ? $sformatf("%04x", dut.be.ex_u.pc[15:0]) : "----",
+ 		         dut.be.ex_u.op, dut.be.ex_u.cond, dut.be.ex_u.sz, dut.be.ex_hold);
+ 
+-// fp_store_trace 2026-10-24: +fstag=<n>,+fslen=<cycles>: the whole pipeline,
+-// the FPU interface's handshake and the DMU's store path, one line a cycle
+-// from the stamp with tag <n>
+-int fs_tag, fs_len, fs_from, fs_to;
+-initial begin
+-	if (!$value$plusargs("fstag=%d", fs_tag)) fs_tag = -1;
+-	if (!$value$plusargs("fslen=%d", fs_len)) fs_len = 400;
+-	fs_from = -1; fs_to = -1;
+-end
+-function automatic string fs_reg(input logic [4:0] r);
+-	if (r < 5'd8) return $sformatf("D%0d", r);
+-	else if (r < 5'd15) return $sformatf("A%0d", r - 5'd8);
+-	else if (r == 5'd15) return "USP";
+-	else if (r == 5'd16) return "ISP";
+-	else if (r == 5'd17) return "MSP";
+-	else return $sformatf("T%0d", r - 5'd18);
+-endfunction
+-function automatic string fs_sub(input logic [3:0] c);
+-	case (c)
+-		4'd0: return "CHK";  4'd1: return "DISP"; 4'd2: return "GET";  4'd3: return "END";
+-		4'd4: return "CRR";  4'd5: return "CRW";  4'd6: return "LIST"; 4'd7: return "MVR";
+-		4'd8: return "MVW";  4'd9: return "COND"; 4'd10: return "DBCC"; 4'd11: return "SV0";
+-		4'd12: return "SVW"; 4'd13: return "RS0"; 4'd14: return "RSW"; default: return "EAL";
+-	endcase
+-endfunction
+-function automatic string fs_uop(input logic v, input ap68040_pkg::uop_t u);
+-	string s;
+-	if (!v) return "----                      ";
+-	case (u.op)
+-		7'd55: s = $sformatf("FPU.%s", fs_sub(u.cond));
+-		7'd0:  s = "MOV";
+-		7'd1:  s = "ADD";
+-		7'd3:  s = "SUB";
+-		7'd5:  s = "CMP";
+-		7'd35: s = "EA";
+-		7'd36: s = "BCC";
+-		7'd37: s = "DBCC";
+-		7'd46: s = "LATCH";
+-		7'd54: s = "MISC";
+-		default: s = $sformatf("op%0d", u.op);
+-	endcase
+-	if (u.mem == 2'd1) s = {s, " L"};
+-	else if (u.mem == 2'd2) s = {s, " S"};
+-	else if (u.mem == 2'd3) s = {s, " RMW"};
+-	if (u.d_v) s = {s, ">", fs_reg(u.d_reg)};
+-	if (u.ag && u.upd_v) s = {s, " ag>", fs_reg(u.upd_reg)};
+-	if (u.last) s = {s, "*"};
+-	return $sformatf("%04x %-21s", u.pc[15:0], s);
+-endfunction
+-always_ff @(posedge clk) begin
+-	if (fs_tag >= 0 && fs_from < 0 && ev && !ev_rd && !ev_err && ev_tt == 2'd0 &&
+-	    (ev_addr[15:0] & 16'hFFFE) == 16'hF108 && ev_word(ev_addr, ev_data) == 16'(fs_tag)) begin
+-		fs_from = cycles + 1;
+-		fs_to   = fs_from + fs_len;
+-		$display("%8d FSTRACE start: stamp tag %04x", cycles, fs_tag[15:0]);
+-	end
+-	if (fs_from >= 0 && cycles >= fs_from && cycles < fs_to)
+-		$display("%8d Q%0d R%0d U%0d | AG %s| D1 %s| D2 %s| EX %s| WB %s| h a%b d1%b d2%b e%b w%b adv e%b w%b%s%s | FP %s sf%b h%b go%b dq%b bg%b rq%b/%b dn%b ac%b pb%b fst%0d mw%b | DM st%b fa%b rdy%b e%0d dw%b d2r%b m2f%b hit%b",
+-		         cycles, dut.fetch.cnt, dut.rq_n, dut.uq_n,
+-		         fs_uop(dut.be.ag_v, dut.be.ag_u), fs_uop(dut.be.dc1_v, dut.be.dc1_u),
+-		         fs_uop(dut.be.dc2_v, dut.be.dc2_u), fs_uop(dut.be.ex_v, dut.be.ex_u),
+-		         fs_uop(dut.be.wb_v, dut.be.wb_u),
+-		         dut.be.ag_hold, dut.dm_hold1, dut.be.dc2_hold, dut.be.ex_hold, dut.be.wb_hold,
+-		         dut.be.adv_ex, dut.be.adv_wb, dut.be.wb1_commit ? "+1" : "  ",
+-		         dut.redir_v ? " REDIR" : (dut.d_redir_v ? " DREDIR" : ""),
+-		         (dut.be.ex_v && dut.be.ex_is_fp) ? fs_sub(dut.be.ex_u.cond) : "-",
+-		         dut.be.fpif.safe, dut.be.fpif.hold, dut.be.fpif.go, dut.be.fpif.done_q, dut.be.fpif.bg,
+-		         dut.be.fpif.f_req, dut.be.fpif.fpu.rq, dut.be.fpif.f_done, dut.be.fpif.f_accepted,
+-		         dut.be.fpif.f_pbusy, dut.be.fpif.fpu.fst, dut.be.fpif.mvr_wait,
+-		         dut.dmu.wb_st, dut.dmu.wb_fast, dut.dmu.st_rdy, dut.dmu.e_st, dut.dmu.dw,
+-		         dut.dmu.dc2_rdy, dut.dmu.m2.fast, dut.dmu.m2.x.hit);
+-end
+-
+-// fp_store_changes 2026-10-24: +memdump=<file> +dumpfrom=<hex> +dumpto=<hex>:
+-// the bench memory at the end of the run, one long word a line
+-string fs_dump;
+-int    fs_d0, fs_d1;
+-initial begin
+-	if (!$value$plusargs("memdump=%s", fs_dump)) fs_dump = "";
+-	if (!$value$plusargs("dumpfrom=%h", fs_d0)) fs_d0 = 32'h40000;
+-	if (!$value$plusargs("dumpto=%h", fs_d1)) fs_d1 = 32'h7E000;
+-end
+-task automatic fs_memdump();
+-	int fd;
+-	fd = $fopen(fs_dump, "w");
+-	for (int a = fs_d0; a < fs_d1; a += 4)
+-		$fdisplay(fd, "%08x %08x", a, mem.mem[a >> 2]);
+-	$fclose(fd);
+-	$display("MEMDUMP %s %08x-%08x", fs_dump, fs_d0, fs_d1);
+-endtask
+-
+ // exception entries
+ always_ff @(posedge clk)
+ 	if (trace && dut.be.x_go)
+@@ -1312,7 +1221,6 @@
+ 	end
+ 	if (prof) prof_report();
+ 	if (pcprof) pcprof_dump();
+-	if (fs_dump != "") fs_memdump();
+ 	if ($test$plusargs("pevstat")) pev_report();
+ 	// the DMU's own checks (its "FAIL: DMU:" lines): a run that tripped
+ 	// one has failed whatever the program says
+Binary files base/rtl/ap68040_faster/tools/__pycache__/isa.cpython-312.pyc and stageB/rtl/ap68040_faster/tools/__pycache__/isa.cpython-312.pyc differ
+diff -ur -x '*.orig' -x '*.o' -x 'obj_*' -x 'build*' -x output_files -x db -x incremental_db -x '*.rpt' -x '*.summary' -x '*.smsg' -x '*.log' base/rtl/ap68040_faster/tools/ucode.py stageB/rtl/ap68040_faster/tools/ucode.py
+--- base/rtl/ap68040_faster/tools/ucode.py	2026-10-24 16:18:50.000000000 -0700
++++ stageB/rtl/ap68040_faster/tools/ucode.py	2026-10-24 21:56:29.894991955 -0700
+@@ -596,10 +596,10 @@
+   F('END', ag='FUPD', last=1))
+ R('FPU_OUT1', _fst('T0', 0, msz='B'), F('END', ag='FUPD', last=1))
+ R('FPU_OUT2', _fst('T0', 0, msz='W'), F('END', ag='FUPD', last=1))
+-R('FPU_OUT8', F('GET', a='CONST', const=1, d='T1'), _fst('T0', 0), _fst('T1', 4),
++R('FPU_OUT8', _fst('T0', 0), _fst('ZERO', 4, cond=1),
++  F('END', ag='FUPD', last=1))
++R('FPU_OUT12', _fst('T0', 0), _fst('ZERO', 4, cond=1), _fst('ZERO', 8, cond=2),
+   F('END', ag='FUPD', last=1))
+-R('FPU_OUT12', F('GET', a='CONST', const=1, d='T1'), F('GET', a='CONST', const=2, d='T2'),
+-  _fst('T0', 0), _fst('T1', 4), _fst('T2', 8), F('END', ag='FUPD', last=1))
+ R('FPU_OUTD', F('DISP', b='EA0', d='EA0'), F('END', last=1))
+ R('FPU_K_OUTD', FCHK(), F('DISP', b='EA0', d='EA0'), F('END', last=1))
+ R('FPU_K_OUT4', FCHKEA(), F('DISP', d='T0'),
+@@ -609,11 +609,11 @@
+ R('FPU_K_OUT2', FCHKEA(), F('DISP', d='T0'),
+   _fst('T0', 0, msz='W'), F('END', ag='FUPD', last=1))
+ R('FPU_K_OUT8', FCHKEA(), F('DISP', d='T0'),
+-  F('GET', a='CONST', const=1, d='T1'), _fst('T0', 0), _fst('T1', 4),
++  _fst('T0', 0), _fst('ZERO', 4, cond=1),
+   F('END', ag='FUPD', last=1))
+ R('FPU_K_OUT12', FCHKEA(), F('DISP', d='T0'),
+-  F('GET', a='CONST', const=1, d='T1'), F('GET', a='CONST', const=2, d='T2'),
+-  _fst('T0', 0), _fst('T1', 4), _fst('T2', 8), F('END', ag='FUPD', last=1))
++  _fst('T0', 0), _fst('ZERO', 4, cond=1), _fst('ZERO', 8, cond=2),
++  F('END', ag='FUPD', last=1))
+ # FMOVE(M) control registers: one slot each for FPCR, FPSR, FPIAR, the
+ # absent ones cancelled; Dn / An hold the single register
+ R('FPU_CR',
+@@ -659,10 +659,9 @@
+   F('END', last=1))
+ R('FPU_MVS',
+   *[u for k in range(8) for u in (
+-      F('MVR', d='T2'), F('GET', a='CONST', const=1, d='T3'),
+-      F('GET', a='CONST', const=2, d='T4'),
+-      _fst('T2', 0, dyn=1, dynk=k), _fst('T3', 4, dyn=1, dynk=k),
+-      _fst('T4', 8, dyn=1, dynk=k),
++      F('MVR', d='T2'),
++      _fst('T2', 0, dyn=1, dynk=k), _fst('ZERO', 4, dyn=1, dynk=k, cond=1),
++      _fst('ZERO', 8, dyn=1, dynk=k, cond=2),
+       U(ag='ADDC', agb='T11', agw='T11', const=12, dyn=1, dynk=k))],
+   U(jc='EA0_APD', jt='FPU_MVE.0'),
+   F('END', last=1))
+Only in stageB/scripts: local.env
+Only in stageB/verilator/tb_cpu040: prog.bin
+Only in stageB/verilator/tb_cpu040: prog.hex

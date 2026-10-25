@@ -1,0 +1,23 @@
+--- stageB/rtl/ap68040_faster/rtl/ap68040_fpif.sv	2026-10-24 21:56:29.893991942 -0700
++++ stageC/rtl/ap68040_faster/rtl/ap68040_fpif.sv	2026-10-24 22:31:04.450332588 -0700
+@@ -635,7 +635,7 @@
+ 			FC_LIST: res_g = (ea_pd) ? -{25'd0, l_bytes} : {25'd0, l_bytes};
+ 			FC_MVR: begin
+ 				res_g = mv_rev ? f_fmrd[31:0] : f_fmrd[95:64];
+-				if (!mvr_wait) hold = 1'b1;
++				if (cur_on && !mvr_wait) hold = 1'b1;
+ 			end
+ 			FC_COND, FC_DBCC: begin
+ 				logic [5:0] pred;
+@@ -925,7 +925,10 @@
+ 				slot   <= 3'd0;
+ 			end
+ 			FC_MVR: begin
+-				if (!mvr_wait) begin
++				if (!cur_on) begin
++					if (adv) slot <= slot + 3'd1;
++				end
++				else if (!mvr_wait) begin
+ 					// the raw image comes through the source-register port
+ 					mvr_wait <= 1'b1;
+ 				end
