@@ -73,6 +73,7 @@ module ap68040_fpif
 	input  logic        adv,            // the uop leaves EX this cycle
 	input  logic        kill,
 	input  logic  [2:0] dynk,
+	input  logic        dc2_disp,
 
 	output logic        hold,
 	output logic [31:0] res,
@@ -751,6 +752,13 @@ always_comb begin
 			n_opm   = opm;
 			n_fmt   = fmt;
 		end
+		else if (ocl == 3'b011 && !chk_pend && !chk_x && !bg && dc2_disp) begin
+			n_srcr  = ext[9:7];
+			n_dstr  = ext[9:7];
+			n_class = 3'b011;
+			n_opm   = opm;
+			n_fmt   = fmt;
+		end
 		FC_DISP: if (!go) begin
 			n_srcr  = (ocl == 3'b011) ? ext[9:7] : ext[12:10];
 			n_dstr  = ext[9:7];
@@ -850,8 +858,16 @@ always_ff @(posedge clk) begin
 				if (eal) eaa <= ea;
 				sx_v  <= 1'b0;
 				sx_kill <= 1'b0;
-				go    <= 1'b0;
 				done_q <= 1'b0;
+				if (ocl == 3'b011 && !chk_pend && !chk_x && !bg && dc2_disp) begin
+					go     <= 1'b1;
+					f_req  <= 1'b1;
+					f_iawe <= 1'b1;
+					f_iapc <= pc;
+				end
+				else begin
+					go     <= 1'b0;
+				end
 				if (chk_pend) pend <= 1'b0;
 				// FScc FDBcc FTRAPcc record FPIAR once decoded; so do the
 				// encodings that fault after recording it
@@ -1036,7 +1052,7 @@ always_ff @(posedge clk) begin
 		// a request is done with when its uop leaves (a fused CHK may follow)
 		if (act && adv && sub == FC_DISP) go <= 1'b0;
 		if (kill) begin
-			go <= 1'b0; mvr_wait <= 1'b0; crr_wait <= 1'b0;
+			go <= 1'b0; done_q <= 1'b0; mvr_wait <= 1'b0; crr_wait <= 1'b0;
 		end
 	end
 end
