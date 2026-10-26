@@ -297,12 +297,18 @@ reg  [7:0] dma_burst_idx;
 reg  [5:0] dma_beats_left;
 reg [16:0] dma_cur_addr;
 
-// 64-bit Read Cache Latch (Single-cycle instant hit for adjacent longword reads)
-reg [16:0] last_rd_addr;
-reg [63:0] last_rd_data;
-reg        last_rd_valid = 1'b0;
+// 32-Byte (4 x 64-bit word) Read Line Cache
+reg [14:0] rd_cache_tag;
+reg [63:0] rd_cache_line [0:3];
+reg  [3:0] rd_cache_valid = 4'b0000;
+reg  [1:0] rd_burst_beat;
 
-wire rd_cache_hit = last_rd_valid && (last_rd_addr == cpu_w64_addr) && !fifo_conflict;
+wire rd_cache_hit = rd_cache_valid[cpu_w64_addr[1:0]] &&
+                    (rd_cache_tag == cpu_w64_addr[16:2]) &&
+                    !fifo_conflict;
+
+wire [63:0] hit_data = rd_cache_line[cpu_w64_addr[1:0]];
+wire [31:0] hit_word = mem_addr[2] ? hit_data[63:32] : hit_data[31:0];
 
 // DDR3 Request & Arbitration FSM States
 localparam S_IDLE      = 3'd0;
@@ -361,7 +367,8 @@ always @(posedge clk_sys) begin
 		cpu_rd_pend     <= 1'b0;
 		vram_wr_ph      <= 1'b0;
 		dma_word64_idx  <= 9'd0;
-		last_rd_valid   <= 1'b0;
+		rd_cache_valid  <= 4'b0000;
+		rd_burst_beat   <= 2'd0;
 	end
 	else begin
 		// Normal write handshake with quadra800 bus
@@ -373,9 +380,9 @@ always @(posedge clk_sys) begin
 			vram_wr_ph <= 1'b0;
 		end
 
-		// Invalidate read cache latch on CPU write to the same 64-bit word
-		if (cpu_vram_write && (cpu_w64_addr == last_rd_addr)) begin
-			last_rd_valid <= 1'b0;
+		// Invalidate read cache word on CPU write to matching address
+		if (cpu_vram_write && (cpu_w64_addr[16:2] == rd_cache_tag)) begin
+			rd_cache_valid[cpu_w64_addr[1:0]] <= 1'b0;
 		end
 
 		// DMA trigger: start prefetch on line_req_sys (32-beat bursts)
@@ -390,7 +397,7 @@ always @(posedge clk_sys) begin
 		// CPU Read detection & Instant Cache Hit
 		if (mem_req && mem_is_vram && !mem_write && !vram_ack) begin
 			if (rd_cache_hit) begin
-				vram_rdata  <= mem_addr[2] ? last_rd_data[63:32] : last_rd_data[31:0];
+				vram_rdata  <= hit_word;
 				vram_ack    <= 1'b1;
 				cpu_rd_pend <= 1'b0;
 			end
@@ -402,12 +409,15 @@ always @(posedge clk_sys) begin
 		// DDR3 bus state machine
 		case (state)
 		S_IDLE: begin
-			// 1. CPU Read (immediate bypass if no conflict with pending writes)
+			// 1. CPU Read (burst of 4 beats = 32 bytes into line cache)
 			if (cpu_rd_pend && !fifo_conflict) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b0;
-				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, cpu_w64_addr};
-				vram_ddr_burstcnt <= 8'd1;
+				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, cpu_w64_addr[16:2], 2'b00};
+				vram_ddr_burstcnt <= 8'd4;
+				rd_cache_tag      <= cpu_w64_addr[16:2];
+				rd_cache_valid    <= 4'b0000;
+				rd_burst_beat     <= 2'd0;
 				state             <= S_CPU_READ;
 			end
 			// 2. High-priority CPU Write drain (FIFO >= 32, or CPU read waiting on conflicting write)
@@ -445,29 +455,35 @@ always @(posedge clk_sys) begin
 			if (vram_ddr_ack) begin
 				vram_ddr_req <= 1'b0;
 				if (vram_ddr_rvalid) begin
-					vram_rdata    <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
-					vram_ack      <= 1'b1;
-					cpu_rd_pend   <= 1'b0;
-					last_rd_addr  <= cpu_w64_addr;
-					last_rd_data  <= vram_ddr_dout;
-					last_rd_valid <= 1'b1;
-					state         <= S_IDLE;
+					rd_cache_line[2'd0]  <= vram_ddr_dout;
+					rd_cache_valid[2'd0] <= 1'b1;
+					rd_burst_beat        <= 2'd1;
+					if (cpu_rd_pend && (cpu_w64_addr[1:0] == 2'd0)) begin
+						vram_rdata  <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
+						vram_ack    <= 1'b1;
+						cpu_rd_pend <= 1'b0;
+					end
+					state <= S_CPU_DATA;
 				end
 				else begin
-					state         <= S_CPU_DATA;
+					state <= S_CPU_DATA;
 				end
 			end
 		end
 
 		S_CPU_DATA: begin
 			if (vram_ddr_rvalid) begin
-				vram_rdata    <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
-				vram_ack      <= 1'b1;
-				cpu_rd_pend   <= 1'b0;
-				last_rd_addr  <= cpu_w64_addr;
-				last_rd_data  <= vram_ddr_dout;
-				last_rd_valid <= 1'b1;
-				state         <= S_IDLE;
+				rd_cache_line[rd_burst_beat]  <= vram_ddr_dout;
+				rd_cache_valid[rd_burst_beat] <= 1'b1;
+				rd_burst_beat                 <= rd_burst_beat + 1'b1;
+				if (cpu_rd_pend && (cpu_w64_addr[1:0] == rd_burst_beat)) begin
+					vram_rdata  <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
+					vram_ack    <= 1'b1;
+					cpu_rd_pend <= 1'b0;
+				end
+				if (rd_burst_beat == 2'd3) begin
+					state <= S_IDLE;
+				end
 			end
 		end
 

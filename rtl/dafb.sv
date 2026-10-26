@@ -123,7 +123,8 @@ dafb_clut clut_g_i (.clka(clk), .aa(pal_addr), .da(wdata[7:0]), .wea(pal_we_g), 
 dafb_clut clut_b_i (.clka(clk), .aa(pal_addr), .da(wdata[7:0]), .wea(pal_we_b), .qa(pal_q_b),
                     .clkb(clk_vid), .ab(clut_idx), .qb(clut_b));
 reg  [7:0] pbctrl;
-reg  [2:0] mode;                 // 0=1bpp 1=2bpp 2=4bpp 3=8bpp 4=24bpp
+reg  [7:0] pcbr1;
+reg  [2:0] mode;                 // 0=1bpp 1=2bpp 2=4bpp 3=8bpp 4=24bpp 5=16bpp
 
 assign vbl_irq = |(int_status & int_en);
 
@@ -141,7 +142,7 @@ always @(posedge clk) begin
 		test_r <= 0; swatch_test <= 0;
 		int_en <= 0; int_status <= 0;
 		cursor_line <= 0; anim_line <= 0;
-		pal_addr <= 0; pal_idx <= 0; pbctrl <= 0; mode <= 3'd0;
+		pal_addr <= 0; pal_idx <= 0; pbctrl <= 0; pcbr1 <= 8'h01; mode <= 3'd0;
 		pal_rd_pend <= 0;
 	end
 	else if (ce) begin
@@ -250,14 +251,24 @@ always @(posedge clk) begin
 						else pal_idx <= pal_idx + 1'b1;
 					end
 					6'h08: begin
-						pbctrl <= wdata[7:0];
-						case (wdata[4:2])
-						3'b000: mode <= 3'd0;             // 1bpp
-						3'b010: mode <= 3'd1;             // 2bpp
-						3'b100: mode <= 3'd2;             // 4bpp
-						3'b110: mode <= 3'd3;             // 8bpp
-						default: mode <= 3'd4;            // 24bpp
-						endcase
+						if ((pal_addr == 8'd1) && ((pbctrl & 8'h06) == 8'h06)) begin
+							pcbr1 <= (wdata[7:0] & 8'hF0) | 8'h01;
+						end
+						else begin
+							pbctrl <= wdata[7:0];
+							if (((pcbr1 & 8'hC0) == 8'hC0) && ((wdata[7:0] & 8'h06) == 8'h06)) begin
+								mode <= 3'd5; // 16 bpp DirectColor x555
+							end
+							else begin
+								case (wdata[4:2])
+								3'b000: mode <= 3'd0;             // 1bpp
+								3'b010: mode <= 3'd1;             // 2bpp
+								3'b100: mode <= 3'd2;             // 4bpp
+								3'b110: mode <= 3'd3;             // 8bpp
+								default: mode <= 3'd4;            // 24bpp
+								endcase
+							end
+						end
 					end
 					default: ;
 					endcase
@@ -271,7 +282,7 @@ always @(posedge clk) begin
 						                                     pal_q_b};
 						pal_idx <= (pal_idx == 2'd2) ? 2'd0 : pal_idx + 1'b1;
 					end
-					6'h08: rdata <= {24'd0, pbctrl};
+					6'h08: rdata <= {24'd0, ((pal_addr == 8'd1) && ((pbctrl & 8'h06) == 8'h06)) ? pcbr1 : pbctrl};
 					default: ;
 					endcase
 				end
@@ -340,10 +351,12 @@ always @(posedge clk) begin
 end
 assign vbl_start = vbl_s ^ vbl_s_d;
 
-// pixels per 32-bit word by depth: 32/16/8/4 for 1/2/4/8bpp
+// pixels per 32-bit word by depth: 32/16/8/4/2/1 for 1/2/4/8/16/24bpp
 wire [5:0] pix_per_word = (mode_v == 3'd0) ? 6'd32 :
                           (mode_v == 3'd1) ? 6'd16 :
-                          (mode_v == 3'd2) ? 6'd8  : 6'd4;
+                          (mode_v == 3'd2) ? 6'd8  :
+                          (mode_v == 3'd3) ? 6'd4  :
+                          (mode_v == 3'd5) ? 6'd2  : 6'd1;
 
 // Fetch pipeline: a trigger at cycle T presents vid_addr during T+1, the
 // platform registers the VRAM read at the T+1 edge, and fetch_word
@@ -361,15 +374,35 @@ assign vid_addr = fetch_addr[21:2];
 // current word: the freshly fetched one on a refill boundary
 wire [31:0] cur = (shcnt == 0) ? fetch_word : shreg;
 assign clut_idx = (mode_v == 3'd3) ? cur[31:24] :
-                      (mode_v == 3'd0) ? {7'd0, cur[31]} :
-                      (mode_v == 3'd1) ? {6'd0, cur[31:30]} :
-                                         {4'd0, cur[31:28]};
+                  (mode_v == 3'd0) ? {7'd0, cur[31]} :
+                  (mode_v == 3'd1) ? {6'd0, cur[31:30]} :
+                                     {4'd0, cur[31:28]};
+
+// Direct color unpack:
+// 16 bpp: x555 RGB
+wire [7:0] dir16_r = {cur[30:26], cur[30:28]};
+wire [7:0] dir16_g = {cur[25:21], cur[25:23]};
+wire [7:0] dir16_b = {cur[20:16], cur[20:18]};
+
+// 24/32 bpp: 888 RGB
+wire [7:0] true_r  = cur[23:16];
+wire [7:0] true_g  = cur[15:8];
+wire [7:0] true_b  = cur[7:0];
 
 reg       act_q;                  // active-video, aligned with the CLUT read
 reg       hb_r, vb_r;
-assign vga_r = act_q ? clut_r : 8'd0;
-assign vga_g = act_q ? clut_g : 8'd0;
-assign vga_b = act_q ? clut_b : 8'd0;
+assign vga_r = !act_q ? 8'd0 :
+               (mode_v == 3'd4) ? true_r :
+               (mode_v == 3'd5) ? dir16_r : clut_r;
+
+assign vga_g = !act_q ? 8'd0 :
+               (mode_v == 3'd4) ? true_g :
+               (mode_v == 3'd5) ? dir16_g : clut_g;
+
+assign vga_b = !act_q ? 8'd0 :
+               (mode_v == 3'd4) ? true_b :
+               (mode_v == 3'd5) ? dir16_b : clut_b;
+
 assign vga_hb = hb_r;
 assign vga_vb = vb_r;
 
@@ -441,7 +474,8 @@ always @(posedge clk_vid) begin
 				shreg <= (mode_v == 3'd0) ? {cur[30:0], 1'b0} :
 				         (mode_v == 3'd1) ? {cur[29:0], 2'b0} :
 				         (mode_v == 3'd2) ? {cur[27:0], 4'b0} :
-				                            {cur[23:0], 8'b0};
+				         (mode_v == 3'd3) ? {cur[23:0], 8'b0} :
+				         (mode_v == 3'd5) ? {cur[15:0], 16'b0} : 32'd0;
 				shcnt <= pix_per_word - 1'b1;
 				fetch_addr <= fetch_addr + 22'd4;
 				fpipe <= 2'b01;
@@ -452,7 +486,8 @@ always @(posedge clk_vid) begin
 				shreg <= (mode_v == 3'd0) ? {shreg[30:0], 1'b0} :
 				         (mode_v == 3'd1) ? {shreg[29:0], 2'b0} :
 				         (mode_v == 3'd2) ? {shreg[27:0], 4'b0} :
-				                            {shreg[23:0], 8'b0};
+				         (mode_v == 3'd3) ? {shreg[23:0], 8'b0} :
+				         (mode_v == 3'd5) ? {shreg[15:0], 16'b0} : 32'd0;
 			end
 		end
 

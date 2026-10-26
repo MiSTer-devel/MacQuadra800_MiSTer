@@ -445,6 +445,11 @@ initial begin
 
 	// 11. Test 64-bit Read Cache Latch (1-cycle hit for adjacent word)
 	$display("Test 11: 64-bit Read Cache Latch (1-cycle hit)");
+	// Preload DDR words for w64 = 10241, 10242, 10243 so burst captures them
+	ddr_mem[10241] = 64'h7777_8888_5555_6666;
+	ddr_mem[10242] = 64'hBBBB_CCCC_9999_AAAA;
+	ddr_mem[10243] = 64'hFFFF_0000_DDDD_EEEE;
+
 	// Read word 0 (low half) - this is a cold miss that fetches from DDR3
 	@(posedge clk_sys);
 	mem_req     <= 1;
@@ -464,6 +469,41 @@ initial begin
 	wait (vram_ack);
 	if (vram_rdata !== 32'h3333_4444) $fatal(1, "Test 11: Cached data mismatch! Got %08x", vram_rdata);
 	$display("  -> Word 1 acknowledged in exactly 1 cycle from read cache: 0x%08x!", vram_rdata);
+	@(posedge clk_sys);
+	mem_req <= 0;
+
+	// 12. Test 32-Byte Burst Line Cache hits on subsequent words 2..7
+	$display("Test 12: 32-Byte Burst Line Cache hits across words 2..7");
+	// Wait a few cycles for the burst to finish filling
+	repeat (10) @(posedge clk_sys);
+
+	// Now read word 2 (addr 5002): should hit instantly!
+	@(posedge clk_sys);
+	mem_req  <= 1;
+	mem_addr <= 30'h3E40_5002;
+	wait (vram_ack);
+	$display("  -> Word 2 read: 0x%08x (vram_ack=%0b, state=%0d)", vram_rdata, vram_ack, dut.state);
+	if (vram_rdata !== 32'h5555_6666) $fatal(1, "Test 12: Word 2 mismatch! Got %08x", vram_rdata);
+	@(posedge clk_sys);
+	mem_req <= 0;
+
+	// Read word 3 (addr 5003): should hit instantly!
+	@(posedge clk_sys);
+	mem_req  <= 1;
+	mem_addr <= 30'h3E40_5003;
+	wait (vram_ack);
+	$display("  -> Word 3 read: 0x%08x", vram_rdata);
+	if (vram_rdata !== 32'h7777_8888) $fatal(1, "Test 12: Word 3 mismatch! Got %08x", vram_rdata);
+	@(posedge clk_sys);
+	mem_req <= 0;
+
+	// Read word 7 (addr 5007): should hit instantly!
+	@(posedge clk_sys);
+	mem_req  <= 1;
+	mem_addr <= 30'h3E40_5007;
+	wait (vram_ack);
+	$display("  -> Word 7 read: 0x%08x", vram_rdata);
+	if (vram_rdata !== 32'hFFFF_0000) $fatal(1, "Test 12: Word 7 mismatch! Got %08x", vram_rdata);
 	@(posedge clk_sys);
 	mem_req <= 0;
 	mem_is_vram <= 0;
