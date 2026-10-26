@@ -191,7 +191,8 @@ wire cpu_vram_write = mem_vram_wp || (mem_req && mem_is_vram && mem_write && !vr
 
 // Write Combining: merge adjacent CPU writes to the same 64-bit word in FIFO
 wire [5:0] last_wptr = fifo_wptr - 1'b1;
-wire can_combine = (fifo_count > 0) &&
+wire can_combine = cpu_vram_write &&
+                   (fifo_count > 0) &&
                    (fifo_addr[last_wptr] == cpu_w64_addr) &&
                    !((state == S_CPU_WRITE) && (fifo_rptr == last_wptr));
 wire is_new_entry = cpu_vram_write && !can_combine && (fifo_count < FIFO_DEPTH);
@@ -301,7 +302,7 @@ reg [16:0] last_rd_addr;
 reg [63:0] last_rd_data;
 reg        last_rd_valid = 1'b0;
 
-wire rd_cache_hit = last_rd_valid && (last_rd_addr == cpu_w64_addr);
+wire rd_cache_hit = last_rd_valid && (last_rd_addr == cpu_w64_addr) && !fifo_conflict;
 
 // DDR3 Request & Arbitration FSM States
 localparam S_IDLE      = 3'd0;
@@ -409,8 +410,8 @@ always @(posedge clk_sys) begin
 				vram_ddr_burstcnt <= 8'd1;
 				state             <= S_CPU_READ;
 			end
-			// 2. High-priority CPU Write drain (FIFO >= 4, or CPU read waiting on conflicting write)
-			else if ((fifo_count > 0) && (cpu_rd_pend || (fifo_count >= 7'd4))) begin
+			// 2. High-priority CPU Write drain (FIFO >= 32, or CPU read waiting on conflicting write)
+			else if ((fifo_count > 0) && (cpu_rd_pend || (fifo_count >= 7'd32))) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b1;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, fifo_addr[fifo_rptr]};
