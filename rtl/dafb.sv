@@ -63,6 +63,12 @@ module dafb
 	// away the never-visible tail of each row (see MacQuadra800.sv)
 	output [13:0] vid_stride,
 
+	// DDR3 Scanline DMA handshake & Ping-Pong cache interface
+	output reg  [9:0] vid_col_word,
+	output reg        vid_line_req,
+	output reg [20:0] vid_line_addr,
+	output reg        vid_line_swap,
+
 	output  [7:0] vga_r,
 	output  [7:0] vga_g,
 	output  [7:0] vga_b,
@@ -379,13 +385,32 @@ always @(posedge clk_vid) begin
 		fetch_addr <= 0; fetch_word <= 0; fpipe <= 0;
 		act_q <= 0;
 		line_base_next <= 0;
+		vid_col_word <= 10'd0;
+		vid_line_req <= 1'b0;
+		vid_line_addr <= 21'd0;
+		vid_line_swap <= 1'b0;
 	end
 	else begin
+		vid_line_req  <= 1'b0;
+		vid_line_swap <= 1'b0;
+
 		if (hcnt == H_TOT-1) begin
 			hcnt <= 0;
 			vcnt <= (vcnt == V_TOT-1) ? 10'd0 : vcnt + 1'b1;
 		end
 		else hcnt <= hcnt + 1'b1;
+
+		// Scanline prefetch trigger to DDR3 DMA at hcnt==0
+		if (hcnt == 10'd0) begin
+			if (vcnt == V_TOT-1) begin
+				vid_line_addr <= fb_base_v;
+				vid_line_req  <= 1'b1;
+			end
+			else if (vcnt < V_ACT-1) begin
+				vid_line_addr <= fb_base_v + line_base_next[20:0];
+				vid_line_req  <= 1'b1;
+			end
+		end
 
 		// outputs registered once, so blanks/syncs stay pixel-aligned
 		vga_hs <= ~((hcnt >= H_ACT+H_FP) && (hcnt < H_ACT+H_FP+H_SYNC));
@@ -397,6 +422,8 @@ always @(posedge clk_vid) begin
 		if (fpipe[1]) fetch_word <= vid_rdata;
 
 		if (hcnt == H_TOT-3) begin
+			vid_line_swap <= 1'b1;
+			vid_col_word  <= 10'd0;
 			// prime the next line (or frame) while still in the blank
 			if ((vcnt < V_ACT-1) || (vcnt == V_TOT-1)) begin
 				fetch_addr <= (vcnt == V_TOT-1) ? {1'b0, fb_base_v}
@@ -418,6 +445,7 @@ always @(posedge clk_vid) begin
 				shcnt <= pix_per_word - 1'b1;
 				fetch_addr <= fetch_addr + 22'd4;
 				fpipe <= 2'b01;
+				vid_col_word <= vid_col_word + 1'b1;
 			end
 			else begin
 				shcnt <= shcnt - 1'b1;

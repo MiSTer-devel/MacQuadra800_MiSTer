@@ -69,6 +69,7 @@ module quadra800
 	output reg  [3:0] mem_wp_be,
 	output reg [31:0] mem_wp_data,
 	input             mem_wq_room,
+	input             mem_vram_wq_room,
 	// a VRAM write straight into the VRAM block RAM at mem_addr/be/wdata,
 	// with mem_req low (2026-09-26)
 	output reg        mem_vram_wp,
@@ -86,6 +87,10 @@ module quadra800
 	output     [21:2] vid_addr,
 	input      [31:0] vid_rdata,
 	output     [13:0] vid_stride,
+	output      [9:0] vid_col_word,
+	output            vid_line_req,
+	output     [20:0] vid_line_addr,
+	output            vid_line_swap,
 	output      [7:0] VGA_R,
 	output      [7:0] VGA_G,
 	output      [7:0] VGA_B,
@@ -499,6 +504,10 @@ dafb dafb (
 	.vid_addr(vid_addr),
 	.vid_rdata(vid_rdata),
 	.vid_stride(vid_stride),
+	.vid_col_word(vid_col_word),
+	.vid_line_req(vid_line_req),
+	.vid_line_addr(vid_line_addr),
+	.vid_line_swap(vid_line_swap),
 
 	.vga_r(VGA_R),
 	.vga_g(VGA_G),
@@ -701,7 +710,7 @@ wire bus_wr_direct = (DIRECT_WRITES != 0) && (svc == S_IDLE) && !walker_pend && 
 wire bus_vram_direct = (DIRECT_WRITES != 0) && (svc == S_IDLE) && !walker_pend && !cpu_berr &&
 	                   !bus_miss_ack && !bus_line_ack && !bus_adapter_active && !wr_split_pend &&
 	                   !bus_ack_adapter && bus_req && bus_write && !bus_wr_span &&
-	                   (decode(bus_addr[31:2]) == 3'd2);
+	                   (decode(bus_addr[31:2]) == 3'd2) && mem_vram_wq_room;
 
 // A VRAM read inside one longword goes the way of a RAM first miss: into
 // S_MEM from bus_req, acknowledged through bus_miss_ack with the bytes

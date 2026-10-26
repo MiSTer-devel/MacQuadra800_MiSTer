@@ -181,6 +181,7 @@ quadra800 #(.RAM_ADDR_BITS(RAM_ADDR_BITS), .SONIC(0)) machine (
 	.mem_wp_be(mem_wp_be),
 	.mem_wp_data(mem_wp_data),
 	.mem_wq_room(1'b1),
+	.mem_vram_wq_room(1'b1),
 	.mem_line_valid(ram_line_model && ram_line_valid),
 	.mem_line_tag(ram_line_tag),
 	.mem_line_data(ram_line),

@@ -616,8 +616,13 @@ wire        mem_is_rom  = (mem_memsel == 2'd1);
 wire        mem_is_vram = !mem_is_ram && !mem_is_rom;
 
 wire [21:2] vid_addr;
-reg  [31:0] vid_rdata;
+wire [31:0] vid_rdata;
 wire [13:0] vid_stride;
+wire  [9:0] vid_col_word;
+wire        vid_line_req;
+wire [20:0] vid_line_addr;
+wire        vid_line_swap;
+wire        vram_wq_room;
 
 wire [255:0] m_debug_status;
 wire [127:0] m_debug_status2;
@@ -730,6 +735,7 @@ quadra800 #(.RAM_ADDR_BITS(RAM_ADDR_BITS), .CDROM(CDROM_EN), .SONIC(SONIC_EN)) m
 	.mem_wp_be(mem_wp_be),
 	.mem_wp_data(mem_wp_data),
 	.mem_wq_room(sdr_wq_room),
+	.mem_vram_wq_room(vram_wq_room),
 	.mem_vram_wp(mem_vram_wp),
 	.mem_line_valid(sdr_line_valid),
 	.mem_line_tag(sdr_line_tag),
@@ -743,6 +749,10 @@ quadra800 #(.RAM_ADDR_BITS(RAM_ADDR_BITS), .CDROM(CDROM_EN), .SONIC(SONIC_EN)) m
 	.vid_addr(vid_addr),
 	.vid_rdata(vid_rdata),
 	.vid_stride(vid_stride),
+	.vid_col_word(vid_col_word),
+	.vid_line_req(vid_line_req),
+	.vid_line_addr(vid_line_addr),
+	.vid_line_swap(vid_line_swap),
 	.VGA_R(mac_vga_r),
 	.VGA_G(mac_vga_g),
 	.VGA_B(mac_vga_b),
@@ -1002,7 +1012,7 @@ wire [31:0] sdr_rdata;
 // consumer.  A VRAM beat is acknowledged in its second clock, straight from
 // the block RAM's output (vram_ack, below).
 wire        vram_ack;
-reg  [31:0] vram_qa;
+wire [31:0] vram_qa;
 assign mem_ack   = mem_ack_r | sdr_ack | vram_ack;
 assign mem_rdata = sdr_ack ? sdr_rdata : mem_is_vram ? vram_qa : mem_rdata_r;
 
@@ -1045,98 +1055,61 @@ sdram_beat32 sdr
 );
 
 //////////////////////////////////////////////////////////////////
-// VRAM — on-chip, true dual port: CPU beats on port A (2-cycle
-// handshake: capture, then deliver), DAFB scanout on port B with the
-// registered 1-cycle read the machine expects.
-//
-// The machine's 2 MB window aliases mod 512 KB, so a ROM size probe sees
-// the classic power-of-2 wrap and ADVERTISES 512 KB.  Backing all of it
-// is impossible on this device — but it does not have to be backed
-// densely; see the compaction note on VRAM_WORDS below.
+// VRAM — 1 MB DDR3-backed framebuffer with M10K Ping-Pong Scanline Cache.
+// Replaces ~260 M10K blocks with 8 blocks while giving flat uncompacted
+// 1 MB VRAM for 16/24-bit TrueColor and full Quadra resolutions.
 //////////////////////////////////////////////////////////////////
-// STRIDE COMPACTION.  The ROM programs a 1024-byte row pitch (confirmed on
-// hardware and by the sim's [DAFB] tap), so a 480-row framebuffer spans
-// 0x1000 + 480*1024 = 495,616 bytes — far past anything M10K can hold, and
-// the old fold aliased screen rows 304..479 back onto rows 100..275 (the
-// duplicated boot floppy seen on the DE10).
-//
-// But at 640 pixels wide only the FIRST 640 bytes of each 1024-byte row are
-// ever visible: 80 bytes at 1bpp, 160 at 2bpp, 320 at 4bpp, 640 at 8bpp.
-// The remaining 384 bytes are pitch padding no supported depth reaches.  So
-// store 640 bytes of every row and drop the tail: the whole 512 KB window
-// becomes 512*640 = 320 KB of BRAM, which fits with room to spare, and
-// EVERY row of EVERY depth (8bpp included) is backed exactly once — no
-// aliasing anywhere in the visible framebuffer.
-//
-// The 384-byte tails all share one scratch block, so a write and read-back
-// at the same tail address still agree (VRAM size probes poke row-aligned
-// offsets, which are all col 0).  Only software genuinely storing data in
-// the pitch padding of two different rows at once would notice.
-//
-// Compaction assumes the 1024-byte pitch, so it engages only when the
-// driver has actually programmed one; any pitch <= 640 already fits the
-// array linearly and maps identically (with the old fold as a backstop for
-// probe reads past the end).
-localparam VRAM_WORDS = 82016;             // 320.4 KB: 512*160 + 96 tail
-localparam [16:0] VRAM_FOLD = 17'd52224;   // 204 KB, in words
-localparam [16:0] VRAM_TAIL = 17'd81920;   // 512 rows * 160 words
+localparam [28:0] DDR_VRAM_BASE = 29'h0500_0000;   // byte 0x2800_0000 >> 3
 
-wire vram_compact = (vid_stride == 14'd1024);
+wire        vram_ddr_req, vram_ddr_we;
+wire [28:0] vram_ddr_addr;
+wire  [7:0] vram_ddr_burstcnt;
+wire [63:0] vram_ddr_din;
+wire  [7:0] vram_ddr_be;
+reg         vram_ddr_ack;
+wire        vram_ddr_rvalid;
 
-function [16:0] vram_map(input [16:0] w);  // window word -> storage word
-	reg [8:0] row;                         // 1024 B = 256 words per row
-	reg [7:0] col;
-	begin
-		row = w[16:8];
-		col = w[7:0];
-		if (!vram_compact)
-			vram_map = (w >= VRAM_WORDS) ? (w - VRAM_FOLD) : w;
-		else if (col < 8'd160)             // visible 640 bytes: row*160 + col
-			vram_map = {row, 7'd0} + {2'd0, row, 5'd0} + {9'd0, col};
-		else                               // pitch padding: shared scratch
-			vram_map = VRAM_TAIL + {9'd0, (col - 8'd160)};
-	end
-endfunction
+vram_ddr3 #(
+	.DDR_VRAM_BASE(DDR_VRAM_BASE),
+	.VRAM_1MB(1)
+) vram_inst (
+	.clk_sys(clk_sys),
+	.reset(reset),
 
-reg        vram_ph;                        // port-A phase: 0 capture, 1 deliver
+	// CPU interface
+	.mem_req(mem_req),
+	.mem_is_vram(mem_is_vram),
+	.mem_write(mem_write),
+	.mem_addr(mem_addr),
+	.mem_be(mem_be),
+	.mem_wdata(mem_wdata),
+	.mem_vram_wp(mem_vram_wp),
+	.vram_ack(vram_ack),
+	.vram_rdata(vram_qa),
+	.vram_wq_room(vram_wq_room),
 
-wire [16:0]  va_addr     = vram_map(mem_addr[18:2]);
-wire [16:0]  vb_addr     = vram_map(vid_addr[18:2]);
-// a beat writes in its capture clock; a direct write (the store buffer's
-// drain, quadra800 bus_vram_direct) is a one-clock pulse with mem_req low
-wire         va_we       = (mem_req && mem_is_vram && mem_write && !vram_ph) || mem_vram_wp;
-assign       vram_ack    = mem_req && mem_is_vram && vram_ph;
+	// Video scanout interface
+	.clk_vid(clk_vid),
+	.reset_vid(~pll_locked),
+	.vid_col_word(vid_col_word),
+	.vid_stride(vid_stride),
+	.vid_line_req(vid_line_req),
+	.vid_line_addr(vid_line_addr),
+	.vid_line_swap(vid_line_swap),
+	.vid_rdata(vid_rdata),
 
-// Storage is one byte-wide array per lane rather than one 32-bit array
-// with byte enables: mem_be becomes each lane's write enable, so nothing
-// rests on Quartus inferring byte enables on a true-dual-port M10K, and a
-// x8 two-read-port array is the simplest shape a block can take.
-// no_rw_check is accurate here — port A throws its read away on a write
-// cycle (vram_ph delivers on the FOLLOWING cycle), so the
-// read-during-write value is a genuine don't-care.  Without these
-// attributes Quartus honors the implied "old data" same-port
-// read-during-write in logic cells, and 2.5 Mbit of registers is what
-// turns Analysis & Synthesis into an all-day run that never finishes.
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] vram0 [0:VRAM_WORDS-1];
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] vram1 [0:VRAM_WORDS-1];
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] vram2 [0:VRAM_WORDS-1];
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] vram3 [0:VRAM_WORDS-1];
-
-always @(posedge clk_sys) begin            // port A: CPU beats
-	if (va_we && mem_be[0]) vram0[va_addr] <= mem_wdata[7:0];
-	if (va_we && mem_be[1]) vram1[va_addr] <= mem_wdata[15:8];
-	if (va_we && mem_be[2]) vram2[va_addr] <= mem_wdata[23:16];
-	if (va_we && mem_be[3]) vram3[va_addr] <= mem_wdata[31:24];
-	vram_qa <= {vram3[va_addr], vram2[va_addr],
-	            vram1[va_addr], vram0[va_addr]};
-end
-
-// port B: DAFB scanout, on the PIXEL clock.  M10K is natively dual-clock, so
-// this costs nothing and there is no timed arc between the ports -- the
-// crossing is blessed in MacQuadra800.sdc along with the rest of clk_vid.
-always @(posedge clk_vid)
-	vid_rdata <= {vram3[vb_addr], vram2[vb_addr],
-	              vram1[vb_addr], vram0[vb_addr]};
+	// DDR3 client interface
+	.vram_ddr_req(vram_ddr_req),
+	.vram_ddr_we(vram_ddr_we),
+	.vram_ddr_addr(vram_ddr_addr),
+	.vram_ddr_burstcnt(vram_ddr_burstcnt),
+	.vram_ddr_din(vram_ddr_din),
+	.vram_ddr_be(vram_ddr_be),
+	.vram_ddr_busy(DDRAM_BUSY),
+	.vram_ddr_ack(vram_ddr_ack),
+	.vram_ddr_dout(DDRAM_DOUT),
+	.vram_ddr_rvalid(vram_ddr_rvalid)
+);
 
 //////////////////////////////////////////////////////////////////
 // DDR3 bridge — RAM + ROM regions, plus the boot.rom upload path.
@@ -1181,9 +1154,17 @@ reg         ddr_rd_beat1;                  // the line's first 64-bit beat is in
 reg        ddr_wait_eth = 1'b0;            // ... for the Ethernet window instead
 assign     eth_mem_rvalid = ddr_wait_eth && DDRAM_DOUT_READY;
 
+reg        ddr_wait_vram = 1'b0;
+reg  [7:0] ddr_vram_beats_left = 8'd0;
+reg        vram_ddr_accept = 1'b0;
+assign     vram_ddr_rvalid = ddr_wait_vram && DDRAM_DOUT_READY;
+
 always @(posedge clk_sys) begin
 	mem_ack_r <= 0;
 	eth_mem_accept <= 0;
+	vram_ddr_ack <= 0;
+
+	if (!vram_ddr_req) vram_ddr_accept <= 0;
 
 	// boot.rom halfwords: capture, then stall hps_io until written
 	if (ioctl_download && rom_index && ioctl_wr) begin
@@ -1197,10 +1178,6 @@ always @(posedge clk_sys) begin
 		ddram_we <= 0;
 		ddram_rd <= 0;
 	end
-
-	// VRAM beats (BRAM port A): the capture edge, then vram_qa is delivered
-	// with the combinational vram_ack; the machine drops mem_req on it
-	if (mem_req && mem_is_vram) vram_ph <= !vram_ph;
 
 	if (ddr_wait_data) begin
 		if (DDRAM_DOUT_READY) begin
@@ -1223,6 +1200,14 @@ always @(posedge clk_sys) begin
 			end
 		end
 	end
+	else if (ddr_wait_vram) begin
+		if (DDRAM_DOUT_READY) begin
+			ddr_vram_beats_left <= ddr_vram_beats_left - 1'b1;
+			if (ddr_vram_beats_left == 8'd1) begin
+				ddr_wait_vram <= 0;
+			end
+		end
+	end
 	else if (ddr_wait_eth) begin
 		if (DDRAM_DOUT_READY) ddr_wait_eth <= 0;
 	end
@@ -1239,6 +1224,20 @@ always @(posedge clk_sys) begin
 			ddram_we       <= 1;
 			ioctl_pend     <= 0;
 			ioctl_wait     <= 0;
+		end
+		else if (vram_ddr_req && !vram_ddr_accept) begin
+			ddram_addr      <= vram_ddr_addr;
+			ddram_din       <= vram_ddr_din;
+			ddram_be        <= vram_ddr_be;
+			ddram_burstcnt  <= vram_ddr_burstcnt;
+			ddram_we        <= vram_ddr_we;
+			ddram_rd        <= !vram_ddr_we;
+			if (!vram_ddr_we) begin
+				ddr_wait_vram       <= 1;
+				ddr_vram_beats_left <= vram_ddr_burstcnt;
+			end
+			vram_ddr_accept <= 1;
+			vram_ddr_ack    <= 1;
 		end
 		else if (mem_req && !mem_ack && mem_is_rom) begin
 			if (mem_write) begin
@@ -1275,8 +1274,8 @@ always @(posedge clk_sys) begin
 
 	if (ioctl_download && rom_index) rom_line_valid <= 0;
 	if (reset && !ioctl_download) begin
-		vram_ph <= 0;
 		ddr_wait_data <= 0;
+		ddr_wait_vram <= 0;
 		// ddr_wait_eth is NOT cleared: the bridge will still answer that read, and the
 		// answer must not be taken for the ROM's.
 	end
