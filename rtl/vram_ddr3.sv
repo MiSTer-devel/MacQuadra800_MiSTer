@@ -58,8 +58,9 @@ module vram_ddr3 #(
 
 //----------------------------------------------------------------------------
 // Address mapping: relative 64-bit word address within VRAM
+// 1 MB = 131,072 64-bit words -> addressed by mem_addr[19:3] (17 bits)
 //----------------------------------------------------------------------------
-wire [16:0] cpu_w64_addr = VRAM_1MB ? {1'b0, mem_addr[18:3]} : mem_addr[19:3];
+wire [16:0] cpu_w64_addr = mem_addr[19:3];
 wire [63:0] cpu_w64_din  = mem_addr[2] ? {mem_wdata, 32'd0} : {32'd0, mem_wdata};
 wire  [7:0] cpu_w64_be   = mem_addr[2] ? {mem_be, 4'b0000}  : {4'b0000, mem_be};
 
@@ -100,33 +101,35 @@ end
 assign vid_rdata = vid_col_word_d[0] ? vid_rdata_odd : vid_rdata_even;
 
 // Buffer swap on clk_vid
-reg swap_tog_vid = 1'b0;
 always @(posedge clk_vid) begin
 	if (reset_vid) begin
 		buf_display_vid <= 1'b1;
-		swap_tog_vid    <= 1'b0;
 	end
 	else if (vid_line_swap) begin
 		buf_display_vid <= ~buf_display_vid;
-		swap_tog_vid    <= ~swap_tog_vid;
 	end
 end
 
-// Synchronize swap to clk_sys
-reg swap_meta, swap_s1, swap_s2;
+// Directly synchronize buf_display_vid level to clk_sys domain
+// Prefetch buffer is strictly the complement of display buffer, preventing any phase desync
+reg buf_disp_meta, buf_disp_s1, buf_disp_s2;
 always @(posedge clk_sys) begin
-	swap_meta <= swap_tog_vid;
-	swap_s1   <= swap_meta;
-	swap_s2   <= swap_s1;
 	if (reset) begin
-		buf_prefetch_sys <= 1'b0;
+		buf_disp_meta    <= 1'b1;
+		buf_disp_s1      <= 1'b1;
+		buf_disp_s2      <= 1'b1;
 		buf_display_sys  <= 1'b1;
+		buf_prefetch_sys <= 1'b0;
 	end
-	else if (swap_s1 ^ swap_s2) begin
-		buf_prefetch_sys <= ~buf_prefetch_sys;
-		buf_display_sys  <= ~buf_display_sys;
+	else begin
+		buf_disp_meta    <= buf_display_vid;
+		buf_disp_s1      <= buf_disp_meta;
+		buf_disp_s2      <= buf_disp_s1;
+		buf_display_sys  <= buf_disp_s1;
+		buf_prefetch_sys <= ~buf_disp_s1;
 	end
 end
+wire swap_pulse_sys = buf_disp_s1 ^ buf_disp_s2;
 
 // Synchronize line_fetch_req from clk_vid to clk_sys
 reg fetch_tog_vid = 1'b0;
@@ -156,7 +159,7 @@ always @(posedge clk_sys) begin
 	end
 	else begin
 		vid_stride_sys <= vid_stride;
-		if (swap_s1 ^ swap_s2) begin
+		if (swap_pulse_sys) begin
 			cur_display_line_word64 <= cur_prefetch_line_word64;
 		end
 		if (line_req_sys) begin
@@ -175,39 +178,41 @@ reg   [7:0] fifo_be   [0:FIFO_DEPTH-1];
 reg   [5:0] fifo_count = 6'd0;
 reg   [4:0] fifo_wptr  = 5'd0;
 reg   [4:0] fifo_rptr  = 5'd0;
-reg         fifo_pop;
 
-wire  [5:0] fifo_count_eff = fifo_pop ? (fifo_count - 1'b1) : fifo_count;
+// Pop condition is combinational: asserted the exact cycle the DDR3 arbiter acks a write
+wire fifo_pop = (state == S_CPU_WRITE) && vram_ddr_ack;
 
-assign vram_wq_room = (fifo_count_eff < (FIFO_DEPTH - 4));
+assign vram_wq_room = (fifo_count < (FIFO_DEPTH - 4));
 
 // Detect CPU write condition
 reg vram_wr_ph = 1'b0;
 wire cpu_vram_write = mem_vram_wp || (mem_req && mem_is_vram && mem_write && !vram_wr_ph);
 
-// Write FIFO push logic
+// Write FIFO push and pop logic
 always @(posedge clk_sys) begin
 	if (reset) begin
 		fifo_count <= 6'd0;
 		fifo_wptr  <= 5'd0;
+		fifo_rptr  <= 5'd0;
 	end
 	else begin
+		case ({cpu_vram_write && (fifo_count < FIFO_DEPTH), fifo_pop})
+		2'b10: fifo_count <= fifo_count + 1'b1;
+		2'b01: fifo_count <= fifo_count - 1'b1;
+		default: ; // 2'b11 or 2'b00: count unchanged
+		endcase
+
 		if (cpu_vram_write && (fifo_count < FIFO_DEPTH)) begin
 			fifo_addr[fifo_wptr] <= cpu_w64_addr;
 			fifo_din[fifo_wptr]  <= cpu_w64_din;
 			fifo_be[fifo_wptr]   <= cpu_w64_be;
 			fifo_wptr            <= fifo_wptr + 1'b1;
-			if (!fifo_pop) fifo_count <= fifo_count + 1'b1;
 		end
-		else if (fifo_pop) begin
-			fifo_count <= fifo_count - 1'b1;
+
+		if (fifo_pop) begin
+			fifo_rptr <= fifo_rptr + 1'b1;
 		end
 	end
-end
-
-always @(posedge clk_sys) begin
-	if (reset) fifo_rptr <= 5'd0;
-	else if (fifo_pop) fifo_rptr <= fifo_rptr + 1'b1;
 end
 
 //----------------------------------------------------------------------------
@@ -215,29 +220,39 @@ end
 // Updates visible scanline immediately so CPU writes never tear or drop
 //----------------------------------------------------------------------------
 wire [16:0] snoop_disp_diff = cpu_w64_addr - cur_display_line_word64;
-wire        snoop_disp_hit  = (snoop_disp_diff < {6'd0, vid_stride_sys[13:3]});
+wire        snoop_disp_hit  = (cpu_w64_addr >= cur_display_line_word64) &&
+                              (snoop_disp_diff < {6'd0, vid_stride_sys[13:3]});
 wire  [9:0] snoop_disp_addr = {buf_display_sys, snoop_disp_diff[8:0]};
 
 wire [16:0] snoop_pref_diff = cpu_w64_addr - cur_prefetch_line_word64;
-wire        snoop_pref_hit  = (snoop_pref_diff < {6'd0, vid_stride_sys[13:3]});
+wire        snoop_pref_hit  = (cpu_w64_addr >= cur_prefetch_line_word64) &&
+                              (snoop_pref_diff < {6'd0, vid_stride_sys[13:3]});
 wire  [9:0] snoop_pref_addr = {buf_prefetch_sys, snoop_pref_diff[8:0]};
 
 //----------------------------------------------------------------------------
 // DDR3 DMA Burst Engine for Line Pre-fetch
 //----------------------------------------------------------------------------
-localparam DMA_IDLE       = 3'd0;
-localparam DMA_BURST_REQ  = 3'd1;
-localparam DMA_BURST_DATA = 3'd2;
-localparam DMA_BURST_DONE = 3'd3;
+localparam DMA_IDLE      = 1'b0;
+localparam DMA_BURST_REQ = 1'b1;
 
-reg [2:0] dma_state = DMA_IDLE;
-reg [8:0] dma_word64_idx;
-reg [7:0] dma_total_bursts;
-reg [7:0] dma_burst_idx;
-reg [4:0] dma_beats_left;
+reg        dma_state = DMA_IDLE;
+reg  [8:0] dma_word64_idx;
+reg  [7:0] dma_total_bursts;
+reg  [7:0] dma_burst_idx;
+reg  [4:0] dma_beats_left;
 reg [16:0] dma_cur_addr;
 
-wire dma_writing = (dma_state == DMA_BURST_DATA) && vram_ddr_rvalid;
+// DDR3 Request & Arbitration FSM States
+localparam S_IDLE      = 3'd0;
+localparam S_CPU_READ  = 3'd1;
+localparam S_DMA_BURST = 3'd2;
+localparam S_DMA_DATA  = 3'd3;
+localparam S_CPU_WRITE = 3'd4;
+
+reg [2:0] state = S_IDLE;
+reg       cpu_rd_pend = 1'b0;
+
+wire dma_writing = (state == S_DMA_DATA) && vram_ddr_rvalid;
 wire [9:0] dma_wr_addr = {buf_prefetch_sys, dma_word64_idx};
 
 // Single multiplexed Write Port on clk_sys for M10K BRAM inference
@@ -269,20 +284,12 @@ end
 // DDR3 Request & Arbitration FSM
 // Priority:
 //   1. CPU Read (on-demand probe / CopyBits read, flushes write queue first)
-//   2. Line DMA Burst (pre-fetches next scanline during horizontal period)
-//   3. CPU Write Drain (drains FIFO to DDR3 between DMA bursts)
+//   2. High-priority CPU Write Drain (if queue >= 24 or CPU read waiting)
+//   3. Line DMA Burst (pre-fetches next scanline during horizontal period)
+//   4. Normal CPU Write Drain (drains FIFO to DDR3 when DMA is idle)
 //----------------------------------------------------------------------------
-localparam S_IDLE      = 3'd0;
-localparam S_CPU_READ  = 3'd1;
-localparam S_DMA_BURST = 3'd2;
-localparam S_CPU_WRITE = 3'd3;
-
-reg [2:0] state = S_IDLE;
-reg       cpu_rd_pend = 1'b0;
-
 always @(posedge clk_sys) begin
 	vram_ack     <= 1'b0;
-	fifo_pop     <= 1'b0;
 	vram_ddr_req <= 1'b0;
 
 	if (reset) begin
@@ -316,37 +323,19 @@ always @(posedge clk_sys) begin
 			cpu_rd_pend <= 1'b1;
 		end
 
-		// DMA beat counter
-		if (dma_state == DMA_BURST_DATA) begin
-			if (vram_ddr_rvalid) begin
-				dma_word64_idx  <= dma_word64_idx + 1'b1;
-				dma_cur_addr    <= dma_cur_addr + 1'b1;
-				dma_beats_left  <= dma_beats_left - 1'b1;
-				if (dma_beats_left == 5'd1) begin
-					dma_burst_idx <= dma_burst_idx + 1'b1;
-					if (dma_burst_idx + 1'b1 >= dma_total_bursts) begin
-						dma_state <= DMA_IDLE;
-					end
-					else begin
-						dma_state <= DMA_BURST_REQ;
-					end
-				end
-			end
-		end
-
 		// DDR3 bus state machine
 		case (state)
 		S_IDLE: begin
 			// 1. CPU Read (if write queue empty)
-			if (cpu_rd_pend && (fifo_count_eff == 0)) begin
+			if (cpu_rd_pend && (fifo_count == 0)) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b0;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, cpu_w64_addr};
 				vram_ddr_burstcnt <= 8'd1;
 				state             <= S_CPU_READ;
 			end
-			// 2. CPU Write drain (top priority if CPU read waiting on non-empty queue, or if queue getting full)
-			else if ((fifo_count_eff > 0) && (cpu_rd_pend || (fifo_count_eff >= 16) || (dma_state == DMA_IDLE))) begin
+			// 2. High-priority CPU Write drain (FIFO getting full, or CPU read waiting on non-empty queue)
+			else if ((fifo_count > 0) && (cpu_rd_pend || (fifo_count >= 24))) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b1;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, fifo_addr[fifo_rptr]};
@@ -363,8 +352,8 @@ always @(posedge clk_sys) begin
 				vram_ddr_burstcnt <= 8'd16;
 				state             <= S_DMA_BURST;
 			end
-			// 4. Opportunistic write drain when idle
-			else if (fifo_count_eff > 0) begin
+			// 4. Normal CPU Write drain when DMA is idle
+			else if ((fifo_count > 0) && (dma_state == DMA_IDLE)) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b1;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, fifo_addr[fifo_rptr]};
@@ -393,8 +382,25 @@ always @(posedge clk_sys) begin
 			if (vram_ddr_ack) begin
 				vram_ddr_req   <= 1'b0;
 				dma_beats_left <= 5'd16;
-				dma_state      <= DMA_BURST_DATA;
-				state          <= S_IDLE; // returns to IDLE to interleave writes or next burst
+				state          <= S_DMA_DATA;
+			end
+		end
+
+		S_DMA_DATA: begin
+			if (vram_ddr_rvalid) begin
+				dma_word64_idx <= dma_word64_idx + 1'b1;
+				dma_cur_addr   <= dma_cur_addr + 1'b1;
+				dma_beats_left <= dma_beats_left - 1'b1;
+				if (dma_beats_left == 5'd1) begin
+					dma_burst_idx <= dma_burst_idx + 1'b1;
+					if (dma_burst_idx + 1'b1 >= dma_total_bursts) begin
+						dma_state <= DMA_IDLE;
+					end
+					else begin
+						dma_state <= DMA_BURST_REQ;
+					end
+					state <= S_IDLE;
+				end
 			end
 		end
 
@@ -402,7 +408,6 @@ always @(posedge clk_sys) begin
 			vram_ddr_req <= 1'b1;
 			if (vram_ddr_ack) begin
 				vram_ddr_req <= 1'b0;
-				fifo_pop     <= 1'b1;
 				state        <= S_IDLE;
 			end
 		end

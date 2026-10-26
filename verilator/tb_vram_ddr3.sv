@@ -244,6 +244,73 @@ initial begin
 	$display("  Snoop Word 2: vid_rdata = %08x (expected 5555AAAA)", vid_rdata);
 	if (vid_rdata !== 32'h5555_AAAA) $fatal(1, "Snoop update mismatch!");
 
+	// 6. Test Concurrent CPU writes during DMA prefetch
+	$display("Test 6: Concurrent CPU writes while DMA is in-flight");
+	for (i = 0; i < 128; i = i + 1) begin
+		ddr_mem[256 + i] = {32'hB000_0000 + i*2 + 1, 32'hB000_0000 + i*2};
+	end
+
+	@(posedge clk_vid);
+	vid_line_addr <= 21'h000800; // Offset 2048 bytes (256 64-bit words)
+	vid_line_req  <= 1;
+	@(posedge clk_vid);
+	vid_line_req  <= 0;
+
+	// While DMA is actively executing bursts, pump in 8 CPU writes
+	repeat (10) @(posedge clk_sys);
+	for (i = 0; i < 8; i = i + 1) begin
+		@(posedge clk_sys);
+		mem_vram_wp <= 1;
+		mem_addr    <= 30'h3E40_0400 + i[29:0]; // Writing to words at offset 0x400
+		mem_be      <= 4'b1111;
+		mem_wdata   <= 32'hC000_0000 + i;
+		@(posedge clk_sys);
+		mem_vram_wp <= 0;
+	end
+
+	// Wait for DMA and FIFO drain
+	repeat (300) @(posedge clk_sys);
+
+	// Verify all 8 CPU writes reached DDR3 memory
+	for (i = 0; i < 8; i = i + 1) begin
+		if (i % 2 == 0) begin
+			if (ddr_mem[512 + (i/2)][31:0] !== (32'hC000_0000 + i)) begin
+				$fatal(1, "Concurrent CPU write %0d failed: got %08x", i, ddr_mem[512 + (i/2)][31:0]);
+			end
+		end else begin
+			if (ddr_mem[512 + (i/2)][63:32] !== (32'hC000_0000 + i)) begin
+				$fatal(1, "Concurrent CPU write %0d failed: got %08x", i, ddr_mem[512 + (i/2)][63:32]);
+			end
+		end
+	end
+	$display("  -> All 8 concurrent CPU writes cleanly reached DDR3!");
+
+	// Swap ping-pong buffer and verify prefetched line was not corrupted by the CPU writes
+	@(posedge clk_vid);
+	vid_line_swap <= 1;
+	vid_col_word  <= 10'd0;
+	@(posedge clk_vid);
+	vid_line_swap <= 0;
+
+	@(posedge clk_vid);
+	#0.01;
+	$display("  Prefetch Line Word 0: vid_rdata = %08x (expected B0000000)", vid_rdata);
+	if (vid_rdata !== 32'hB000_0000) $fatal(1, "Prefetch Line Word 0 mismatch!");
+
+	@(posedge clk_vid);
+	vid_col_word <= 10'd1;
+	@(posedge clk_vid);
+	#0.01;
+	$display("  Prefetch Line Word 1: vid_rdata = %08x (expected B0000001)", vid_rdata);
+	if (vid_rdata !== 32'hB000_0001) $fatal(1, "Prefetch Line Word 1 mismatch!");
+
+	@(posedge clk_vid);
+	vid_col_word <= 10'd127;
+	@(posedge clk_vid);
+	#0.01;
+	$display("  Prefetch Line Word 127: vid_rdata = %08x (expected B000007F)", vid_rdata);
+	if (vid_rdata !== 32'hB000_007F) $fatal(1, "Prefetch Line Word 127 mismatch!");
+
 	$display("ALL TESTS PASSED! vram_ddr3 verified successfully!");
 	$finish;
 end

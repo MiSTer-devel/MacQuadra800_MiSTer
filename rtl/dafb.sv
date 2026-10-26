@@ -422,10 +422,10 @@ always @(posedge clk_vid) begin
 		if (fpipe[1]) fetch_word <= vid_rdata;
 
 		if (hcnt == H_TOT-3) begin
-			vid_line_swap <= 1'b1;
 			vid_col_word  <= 10'd0;
 			// prime the next line (or frame) while still in the blank
 			if ((vcnt < V_ACT-1) || (vcnt == V_TOT-1)) begin
+				vid_line_swap <= 1'b1;
 				fetch_addr <= (vcnt == V_TOT-1) ? {1'b0, fb_base_v}
 				            : {1'b0, fb_base_v} + line_base_next;
 				fpipe <= 2'b01;
