@@ -189,6 +189,25 @@ assign vram_wq_room = (fifo_count < (FIFO_DEPTH - 6));
 reg vram_wr_ph = 1'b0;
 wire cpu_vram_write = mem_vram_wp || (mem_req && mem_is_vram && mem_write && !vram_wr_ph);
 
+// Write Combining: merge adjacent CPU writes to the same 64-bit word in FIFO
+wire [5:0] last_wptr = fifo_wptr - 1'b1;
+wire can_combine = (fifo_count > 0) &&
+                   (fifo_addr[last_wptr] == cpu_w64_addr) &&
+                   !((state == S_CPU_WRITE) && (fifo_rptr == last_wptr));
+wire is_new_entry = cpu_vram_write && !can_combine && (fifo_count < FIFO_DEPTH);
+
+wire [63:0] merged_din = {
+	cpu_w64_be[7] ? cpu_w64_din[63:56] : fifo_din[last_wptr][63:56],
+	cpu_w64_be[6] ? cpu_w64_din[55:48] : fifo_din[last_wptr][55:48],
+	cpu_w64_be[5] ? cpu_w64_din[47:40] : fifo_din[last_wptr][47:40],
+	cpu_w64_be[4] ? cpu_w64_din[39:32] : fifo_din[last_wptr][39:32],
+	cpu_w64_be[3] ? cpu_w64_din[31:24] : fifo_din[last_wptr][31:24],
+	cpu_w64_be[2] ? cpu_w64_din[23:16] : fifo_din[last_wptr][23:16],
+	cpu_w64_be[1] ? cpu_w64_din[15:8]  : fifo_din[last_wptr][15:8],
+	cpu_w64_be[0] ? cpu_w64_din[7:0]   : fifo_din[last_wptr][7:0]
+};
+wire [7:0] merged_be = fifo_be[last_wptr] | cpu_w64_be;
+
 // Conflict detection between CPU read address and pending writes in FIFO
 reg fifo_conflict;
 integer f_i;
@@ -212,7 +231,7 @@ always @(*) begin
 	end
 end
 
-// Write FIFO push and pop logic
+// Write FIFO push, coalesce, and pop logic
 always @(posedge clk_sys) begin
 	if (reset) begin
 		fifo_count <= 7'd0;
@@ -220,13 +239,24 @@ always @(posedge clk_sys) begin
 		fifo_rptr  <= 6'd0;
 	end
 	else begin
-		case ({cpu_vram_write && (fifo_count < FIFO_DEPTH), fifo_pop})
+		case ({is_new_entry, fifo_pop})
 		2'b10: fifo_count <= fifo_count + 1'b1;
 		2'b01: fifo_count <= fifo_count - 1'b1;
 		default: ; // 2'b11 or 2'b00: count unchanged
 		endcase
 
-		if (cpu_vram_write && (fifo_count < FIFO_DEPTH)) begin
+		if (can_combine) begin
+			fifo_be[last_wptr] <= fifo_be[last_wptr] | cpu_w64_be;
+			if (cpu_w64_be[0]) fifo_din[last_wptr][7:0]   <= cpu_w64_din[7:0];
+			if (cpu_w64_be[1]) fifo_din[last_wptr][15:8]  <= cpu_w64_din[15:8];
+			if (cpu_w64_be[2]) fifo_din[last_wptr][23:16] <= cpu_w64_din[23:16];
+			if (cpu_w64_be[3]) fifo_din[last_wptr][31:24] <= cpu_w64_din[31:24];
+			if (cpu_w64_be[4]) fifo_din[last_wptr][39:32] <= cpu_w64_din[39:32];
+			if (cpu_w64_be[5]) fifo_din[last_wptr][47:40] <= cpu_w64_din[47:40];
+			if (cpu_w64_be[6]) fifo_din[last_wptr][55:48] <= cpu_w64_din[55:48];
+			if (cpu_w64_be[7]) fifo_din[last_wptr][63:56] <= cpu_w64_din[63:56];
+		end
+		else if (cpu_vram_write && (fifo_count < FIFO_DEPTH)) begin
 			fifo_addr[fifo_wptr] <= cpu_w64_addr;
 			fifo_din[fifo_wptr]  <= cpu_w64_din;
 			fifo_be[fifo_wptr]   <= cpu_w64_be;
@@ -263,8 +293,15 @@ reg        dma_state = DMA_IDLE;
 reg  [8:0] dma_word64_idx;
 reg  [7:0] dma_total_bursts;
 reg  [7:0] dma_burst_idx;
-reg  [4:0] dma_beats_left;
+reg  [5:0] dma_beats_left;
 reg [16:0] dma_cur_addr;
+
+// 64-bit Read Cache Latch (Single-cycle instant hit for adjacent longword reads)
+reg [16:0] last_rd_addr;
+reg [63:0] last_rd_data;
+reg        last_rd_valid = 1'b0;
+
+wire rd_cache_hit = last_rd_valid && (last_rd_addr == cpu_w64_addr);
 
 // DDR3 Request & Arbitration FSM States
 localparam S_IDLE      = 3'd0;
@@ -323,6 +360,7 @@ always @(posedge clk_sys) begin
 		cpu_rd_pend     <= 1'b0;
 		vram_wr_ph      <= 1'b0;
 		dma_word64_idx  <= 9'd0;
+		last_rd_valid   <= 1'b0;
 	end
 	else begin
 		// Normal write handshake with quadra800 bus
@@ -334,18 +372,30 @@ always @(posedge clk_sys) begin
 			vram_wr_ph <= 1'b0;
 		end
 
-		// DMA trigger: start prefetch on line_req_sys
+		// Invalidate read cache latch on CPU write to the same 64-bit word
+		if (cpu_vram_write && (cpu_w64_addr == last_rd_addr)) begin
+			last_rd_valid <= 1'b0;
+		end
+
+		// DMA trigger: start prefetch on line_req_sys (32-beat bursts)
 		if (line_req_sys) begin
 			dma_cur_addr      <= vid_line_addr[19:3];
-			dma_total_bursts  <= {1'b0, vid_stride_sys[13:7]} + (vid_stride_sys[6:0] != 7'd0 ? 8'd1 : 8'd0);
+			dma_total_bursts  <= {2'd0, vid_stride_sys[13:8]} + (vid_stride_sys[7:0] != 8'd0 ? 8'd1 : 8'd0);
 			dma_burst_idx     <= 8'd0;
 			dma_word64_idx    <= 9'd0;
 			dma_state         <= DMA_BURST_REQ;
 		end
 
-		// CPU Read detection
+		// CPU Read detection & Instant Cache Hit
 		if (mem_req && mem_is_vram && !mem_write && !vram_ack) begin
-			cpu_rd_pend <= 1'b1;
+			if (rd_cache_hit) begin
+				vram_rdata  <= mem_addr[2] ? last_rd_data[63:32] : last_rd_data[31:0];
+				vram_ack    <= 1'b1;
+				cpu_rd_pend <= 1'b0;
+			end
+			else begin
+				cpu_rd_pend <= 1'b1;
+			end
 		end
 
 		// DDR3 bus state machine
@@ -364,17 +414,17 @@ always @(posedge clk_sys) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b1;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, fifo_addr[fifo_rptr]};
-				vram_ddr_din      <= fifo_din[fifo_rptr];
-				vram_ddr_be       <= fifo_be[fifo_rptr];
+				vram_ddr_din      <= (can_combine && (fifo_rptr == last_wptr)) ? merged_din : fifo_din[fifo_rptr];
+				vram_ddr_be       <= (can_combine && (fifo_rptr == last_wptr)) ? merged_be  : fifo_be[fifo_rptr];
 				vram_ddr_burstcnt <= 8'd1;
 				state             <= S_CPU_WRITE;
 			end
-			// 3. Line DMA burst read
+			// 3. Line DMA burst read (32-beat bursts)
 			else if (dma_state == DMA_BURST_REQ) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b0;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, dma_cur_addr};
-				vram_ddr_burstcnt <= 8'd16;
+				vram_ddr_burstcnt <= 8'd32;
 				state             <= S_DMA_BURST;
 			end
 			// 4. Normal CPU Write drain when DMA is idle
@@ -382,8 +432,8 @@ always @(posedge clk_sys) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b1;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, fifo_addr[fifo_rptr]};
-				vram_ddr_din      <= fifo_din[fifo_rptr];
-				vram_ddr_be       <= fifo_be[fifo_rptr];
+				vram_ddr_din      <= (can_combine && (fifo_rptr == last_wptr)) ? merged_din : fifo_din[fifo_rptr];
+				vram_ddr_be       <= (can_combine && (fifo_rptr == last_wptr)) ? merged_be  : fifo_be[fifo_rptr];
 				vram_ddr_burstcnt <= 8'd1;
 				state             <= S_CPU_WRITE;
 			end
@@ -394,23 +444,29 @@ always @(posedge clk_sys) begin
 			if (vram_ddr_ack) begin
 				vram_ddr_req <= 1'b0;
 				if (vram_ddr_rvalid) begin
-					vram_rdata  <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
-					vram_ack    <= 1'b1;
-					cpu_rd_pend <= 1'b0;
-					state       <= S_IDLE;
+					vram_rdata    <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
+					vram_ack      <= 1'b1;
+					cpu_rd_pend   <= 1'b0;
+					last_rd_addr  <= cpu_w64_addr;
+					last_rd_data  <= vram_ddr_dout;
+					last_rd_valid <= 1'b1;
+					state         <= S_IDLE;
 				end
 				else begin
-					state       <= S_CPU_DATA;
+					state         <= S_CPU_DATA;
 				end
 			end
 		end
 
 		S_CPU_DATA: begin
 			if (vram_ddr_rvalid) begin
-				vram_rdata  <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
-				vram_ack    <= 1'b1;
-				cpu_rd_pend <= 1'b0;
-				state       <= S_IDLE;
+				vram_rdata    <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
+				vram_ack      <= 1'b1;
+				cpu_rd_pend   <= 1'b0;
+				last_rd_addr  <= cpu_w64_addr;
+				last_rd_data  <= vram_ddr_dout;
+				last_rd_valid <= 1'b1;
+				state         <= S_IDLE;
 			end
 		end
 
@@ -418,7 +474,7 @@ always @(posedge clk_sys) begin
 			vram_ddr_req <= 1'b1;
 			if (vram_ddr_ack) begin
 				vram_ddr_req   <= 1'b0;
-				dma_beats_left <= 5'd16;
+				dma_beats_left <= 6'd32;
 				state          <= S_DMA_DATA;
 			end
 		end
@@ -428,7 +484,7 @@ always @(posedge clk_sys) begin
 				dma_word64_idx <= dma_word64_idx + 1'b1;
 				dma_cur_addr   <= dma_cur_addr + 1'b1;
 				dma_beats_left <= dma_beats_left - 1'b1;
-				if (dma_beats_left == 5'd1) begin
+				if (dma_beats_left == 6'd1) begin
 					dma_burst_idx <= dma_burst_idx + 1'b1;
 					if (dma_burst_idx + 1'b1 >= dma_total_bursts) begin
 						dma_state <= DMA_IDLE;

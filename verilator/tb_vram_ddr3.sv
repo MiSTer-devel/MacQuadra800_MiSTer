@@ -113,6 +113,7 @@ always @(posedge clk_sys) begin
 	else if (vram_ddr_req && !vram_ddr_ack) begin
 		vram_ddr_ack <= 1;
 		if (vram_ddr_we) begin
+			$display("  [TB_DDR_WR] addr=%04x be=%02x din=%08x_%08x", vram_ddr_addr[15:0], vram_ddr_be, vram_ddr_din[63:32], vram_ddr_din[31:0]);
 			// Write to memory
 			if (vram_ddr_be[0]) ddr_mem[vram_ddr_addr[15:0]][7:0]   <= vram_ddr_din[7:0];
 			if (vram_ddr_be[1]) ddr_mem[vram_ddr_addr[15:0]][15:8]  <= vram_ddr_din[15:8];
@@ -412,6 +413,60 @@ initial begin
 	#0.01;
 	$display("  Immediately after swap, Word 0 = %08x (expected C0000000)", vid_rdata);
 	if (vid_rdata !== 32'hC000_0000) $fatal(1, "Line swap timing mismatch! Word 0 was from wrong buffer: %08x", vid_rdata);
+
+	// 10. Test Write Combining in FIFO
+	$display("Test 10: Write Combining in FIFO for adjacent 32-bit writes");
+	repeat (20) @(posedge clk_sys); // Wait for FIFO to be empty
+	// Write low half of 64-bit word at 0x5000 (addr[2]=0)
+	@(posedge clk_sys);
+	mem_vram_wp <= 1;
+	mem_addr    <= 30'h3E40_5000;
+	mem_be      <= 4'b1111;
+	mem_wdata   <= 32'h1111_2222;
+	// Next cycle: write high half of the same 64-bit word (addr[2]=1)
+	@(posedge clk_sys);
+	mem_addr    <= 30'h3E40_5001;
+	mem_wdata   <= 32'h3333_4444;
+	@(posedge clk_sys);
+	mem_vram_wp <= 0;
+
+	// Check that the two writes were coalesced into a single FIFO entry with full 8-byte BE
+	if (dut.fifo_count !== 7'd1) $fatal(1, "Test 10: Writes were not coalesced! fifo_count=%0d, expected 1", dut.fifo_count);
+	$display("  -> Both writes coalesced into 1 FIFO entry! (fifo_count=1, be=%02x)", dut.fifo_be[dut.fifo_rptr]);
+
+	// Wait for combined write to drain to DDR3
+	repeat (20) @(posedge clk_sys);
+	$display("  [TB_TEST10] state=%0d fifo_count=%0d rptr=%0d wptr=%0d ddr_mem[10240]=%08x_%08x",
+	         dut.state, dut.fifo_count, dut.fifo_rptr, dut.fifo_wptr, ddr_mem[10240][63:32], ddr_mem[10240][31:0]);
+	if (ddr_mem[10240] !== 64'h3333_4444_1111_2222) begin
+		$fatal(1, "Test 10: Combined DDR3 data mismatch! Got %08x_%08x", ddr_mem[10240][63:32], ddr_mem[10240][31:0]);
+	end
+	$display("  -> Single combined 64-bit write cleanly reached DDR3: %08x_%08x", ddr_mem[10240][63:32], ddr_mem[10240][31:0]);
+
+	// 11. Test 64-bit Read Cache Latch (1-cycle hit for adjacent word)
+	$display("Test 11: 64-bit Read Cache Latch (1-cycle hit)");
+	// Read word 0 (low half) - this is a cold miss that fetches from DDR3
+	@(posedge clk_sys);
+	mem_req     <= 1;
+	mem_is_vram <= 1;
+	mem_write   <= 0;
+	mem_addr    <= 30'h3E40_5000;
+	mem_be      <= 4'b1111;
+	wait (vram_ack);
+	if (vram_rdata !== 32'h1111_2222) $fatal(1, "Test 11: Word 0 read mismatch! Got %08x", vram_rdata);
+	@(posedge clk_sys);
+	mem_req <= 0;
+
+	// Read word 1 (high half) on the very next cycle - MUST hit cache and ack in 1 cycle!
+	@(posedge clk_sys);
+	mem_req  <= 1;
+	mem_addr <= 30'h3E40_5001;
+	wait (vram_ack);
+	if (vram_rdata !== 32'h3333_4444) $fatal(1, "Test 11: Cached data mismatch! Got %08x", vram_rdata);
+	$display("  -> Word 1 acknowledged in exactly 1 cycle from read cache: 0x%08x!", vram_rdata);
+	@(posedge clk_sys);
+	mem_req <= 0;
+	mem_is_vram <= 0;
 
 	$display("ALL TESTS PASSED! vram_ddr3 verified successfully!");
 	$finish;
