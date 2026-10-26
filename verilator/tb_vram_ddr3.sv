@@ -431,7 +431,7 @@ initial begin
 	mem_vram_wp <= 0;
 
 	// Check that the two writes were coalesced into a single FIFO entry with full 8-byte BE
-	if (dut.fifo_count !== 7'd1) $fatal(1, "Test 10: Writes were not coalesced! fifo_count=%0d, expected 1", dut.fifo_count);
+	if (dut.fifo_count !== 5'd1) $fatal(1, "Test 10: Writes were not coalesced! fifo_count=%0d, expected 1", dut.fifo_count);
 	$display("  -> Both writes coalesced into 1 FIFO entry! (fifo_count=1, be=%02x)", dut.fifo_be[dut.fifo_rptr]);
 
 	// Wait for combined write to drain to DDR3

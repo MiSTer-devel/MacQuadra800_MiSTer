@@ -170,27 +170,28 @@ always @(posedge clk_sys) begin
 end
 
 //----------------------------------------------------------------------------
-// CPU Write FIFO (64 entries deep, 64-bit wide)
+// CPU Write FIFO (16 entries deep, 64-bit wide)
+// Sized for minimal ALM footprint while buffering full CPU burst capacity
 //----------------------------------------------------------------------------
-localparam FIFO_DEPTH = 64;
+localparam FIFO_DEPTH = 16;
 reg  [16:0] fifo_addr [0:FIFO_DEPTH-1];
 reg  [63:0] fifo_din  [0:FIFO_DEPTH-1];
 reg   [7:0] fifo_be   [0:FIFO_DEPTH-1];
-reg   [6:0] fifo_count = 7'd0;
-reg   [5:0] fifo_wptr  = 6'd0;
-reg   [5:0] fifo_rptr  = 6'd0;
+reg   [4:0] fifo_count = 5'd0;
+reg   [3:0] fifo_wptr  = 4'd0;
+reg   [3:0] fifo_rptr  = 4'd0;
 
 // Pop condition is combinational: asserted the exact cycle the DDR3 arbiter acks a write
 wire fifo_pop = (state == S_CPU_WRITE) && vram_ddr_ack;
 
-assign vram_wq_room = (fifo_count < (FIFO_DEPTH - 6));
+assign vram_wq_room = (fifo_count < (FIFO_DEPTH - 4));
 
 // Detect CPU write condition
 reg vram_wr_ph = 1'b0;
 wire cpu_vram_write = mem_vram_wp || (mem_req && mem_is_vram && mem_write && !vram_wr_ph);
 
 // Write Combining: merge adjacent CPU writes to the same 64-bit word in FIFO
-wire [5:0] last_wptr = fifo_wptr - 1'b1;
+wire [3:0] last_wptr = fifo_wptr - 1'b1;
 wire can_combine = cpu_vram_write &&
                    (fifo_count > 0) &&
                    (fifo_addr[last_wptr] == cpu_w64_addr) &&
@@ -235,9 +236,9 @@ end
 // Write FIFO push, coalesce, and pop logic
 always @(posedge clk_sys) begin
 	if (reset) begin
-		fifo_count <= 7'd0;
-		fifo_wptr  <= 6'd0;
-		fifo_rptr  <= 6'd0;
+		fifo_count <= 5'd0;
+		fifo_wptr  <= 4'd0;
+		fifo_rptr  <= 4'd0;
 	end
 	else begin
 		case ({is_new_entry, fifo_pop})
@@ -420,8 +421,8 @@ always @(posedge clk_sys) begin
 				rd_burst_beat     <= 2'd0;
 				state             <= S_CPU_READ;
 			end
-			// 2. High-priority CPU Write drain (FIFO >= 32, or CPU read waiting on conflicting write)
-			else if ((fifo_count > 0) && (cpu_rd_pend || (fifo_count >= 7'd32))) begin
+			// 2. High-priority CPU Write drain (FIFO >= 8, or CPU read waiting on conflicting write)
+			else if ((fifo_count > 0) && (cpu_rd_pend || (fifo_count >= 5'd8))) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b1;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, fifo_addr[fifo_rptr]};
