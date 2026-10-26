@@ -240,44 +240,28 @@ reg [16:0] dma_cur_addr;
 wire dma_writing = (dma_state == DMA_BURST_DATA) && vram_ddr_rvalid;
 wire [9:0] dma_wr_addr = {buf_prefetch_sys, dma_word64_idx};
 
-// Write Port A of Line Buffer (driven on clk_sys by DMA and CPU snoop)
+// Single multiplexed Write Port on clk_sys for M10K BRAM inference
+wire        line_wr_dma = dma_writing;
+wire        line_wr_cpu = cpu_vram_write && (snoop_disp_hit || snoop_pref_hit);
+wire        line_wr_en  = line_wr_dma || line_wr_cpu;
+
+wire  [9:0] line_wr_addr = line_wr_dma ? dma_wr_addr :
+                           snoop_disp_hit ? snoop_disp_addr : snoop_pref_addr;
+
+wire [63:0] line_wr_din  = line_wr_dma ? vram_ddr_dout : cpu_w64_din;
+wire  [7:0] line_wr_be   = line_wr_dma ? 8'hFF : cpu_w64_be;
+
 always @(posedge clk_sys) begin
-	if (dma_writing) begin
-		line_even_b0[dma_wr_addr] <= vram_ddr_dout[7:0];
-		line_even_b1[dma_wr_addr] <= vram_ddr_dout[15:8];
-		line_even_b2[dma_wr_addr] <= vram_ddr_dout[23:16];
-		line_even_b3[dma_wr_addr] <= vram_ddr_dout[31:24];
+	if (line_wr_en) begin
+		if (line_wr_be[0]) line_even_b0[line_wr_addr] <= line_wr_din[7:0];
+		if (line_wr_be[1]) line_even_b1[line_wr_addr] <= line_wr_din[15:8];
+		if (line_wr_be[2]) line_even_b2[line_wr_addr] <= line_wr_din[23:16];
+		if (line_wr_be[3]) line_even_b3[line_wr_addr] <= line_wr_din[31:24];
 
-		line_odd_b0[dma_wr_addr]  <= vram_ddr_dout[39:32];
-		line_odd_b1[dma_wr_addr]  <= vram_ddr_dout[47:40];
-		line_odd_b2[dma_wr_addr]  <= vram_ddr_dout[55:48];
-		line_odd_b3[dma_wr_addr]  <= vram_ddr_dout[63:56];
-	end
-	else if (cpu_vram_write) begin
-		// Snoop into active display line
-		if (snoop_disp_hit) begin
-			if (cpu_w64_be[0]) line_even_b0[snoop_disp_addr] <= cpu_w64_din[7:0];
-			if (cpu_w64_be[1]) line_even_b1[snoop_disp_addr] <= cpu_w64_din[15:8];
-			if (cpu_w64_be[2]) line_even_b2[snoop_disp_addr] <= cpu_w64_din[23:16];
-			if (cpu_w64_be[3]) line_even_b3[snoop_disp_addr] <= cpu_w64_din[31:24];
-
-			if (cpu_w64_be[4]) line_odd_b0[snoop_disp_addr]  <= cpu_w64_din[39:32];
-			if (cpu_w64_be[5]) line_odd_b1[snoop_disp_addr]  <= cpu_w64_din[47:40];
-			if (cpu_w64_be[6]) line_odd_b2[snoop_disp_addr]  <= cpu_w64_din[55:48];
-			if (cpu_w64_be[7]) line_odd_b3[snoop_disp_addr]  <= cpu_w64_din[63:56];
-		end
-		// Snoop into prefetch line
-		if (snoop_pref_hit) begin
-			if (cpu_w64_be[0]) line_even_b0[snoop_pref_addr] <= cpu_w64_din[7:0];
-			if (cpu_w64_be[1]) line_even_b1[snoop_pref_addr] <= cpu_w64_din[15:8];
-			if (cpu_w64_be[2]) line_even_b2[snoop_pref_addr] <= cpu_w64_din[23:16];
-			if (cpu_w64_be[3]) line_even_b3[snoop_pref_addr] <= cpu_w64_din[31:24];
-
-			if (cpu_w64_be[4]) line_odd_b0[snoop_pref_addr]  <= cpu_w64_din[39:32];
-			if (cpu_w64_be[5]) line_odd_b1[snoop_pref_addr]  <= cpu_w64_din[47:40];
-			if (cpu_w64_be[6]) line_odd_b2[snoop_pref_addr]  <= cpu_w64_din[55:48];
-			if (cpu_w64_be[7]) line_odd_b3[snoop_pref_addr]  <= cpu_w64_din[63:56];
-		end
+		if (line_wr_be[4]) line_odd_b0[line_wr_addr]  <= line_wr_din[39:32];
+		if (line_wr_be[5]) line_odd_b1[line_wr_addr]  <= line_wr_din[47:40];
+		if (line_wr_be[6]) line_odd_b2[line_wr_addr]  <= line_wr_din[55:48];
+		if (line_wr_be[7]) line_odd_b3[line_wr_addr]  <= line_wr_din[63:56];
 	end
 end
 
