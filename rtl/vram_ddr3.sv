@@ -245,9 +245,10 @@ reg [16:0] dma_cur_addr;
 // DDR3 Request & Arbitration FSM States
 localparam S_IDLE      = 3'd0;
 localparam S_CPU_READ  = 3'd1;
-localparam S_DMA_BURST = 3'd2;
-localparam S_DMA_DATA  = 3'd3;
-localparam S_CPU_WRITE = 3'd4;
+localparam S_CPU_DATA  = 3'd2;
+localparam S_DMA_BURST = 3'd3;
+localparam S_DMA_DATA  = 3'd4;
+localparam S_CPU_WRITE = 3'd5;
 
 reg [2:0] state = S_IDLE;
 reg       cpu_rd_pend = 1'b0;
@@ -368,7 +369,19 @@ always @(posedge clk_sys) begin
 			vram_ddr_req <= 1'b1;
 			if (vram_ddr_ack) begin
 				vram_ddr_req <= 1'b0;
+				if (vram_ddr_rvalid) begin
+					vram_rdata  <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
+					vram_ack    <= 1'b1;
+					cpu_rd_pend <= 1'b0;
+					state       <= S_IDLE;
+				end
+				else begin
+					state       <= S_CPU_DATA;
+				end
 			end
+		end
+
+		S_CPU_DATA: begin
 			if (vram_ddr_rvalid) begin
 				vram_rdata  <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
 				vram_ack    <= 1'b1;

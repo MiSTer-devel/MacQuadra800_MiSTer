@@ -93,14 +93,18 @@ vram_ddr3 #(
 	.vram_ddr_rvalid(vram_ddr_rvalid)
 );
 
-// DDR3 Responder Model
+// DDR3 Responder Model with 4-cycle CAS latency
 reg [7:0] burst_rem = 0;
 reg [28:0] resp_addr = 0;
+reg [2:0] read_latency = 0;
 always @(posedge clk_sys) begin
 	vram_ddr_rvalid <= 0;
 	if (vram_ddr_ack) vram_ddr_ack <= 0;
 
-	if (burst_rem > 0) begin
+	if (read_latency > 0) begin
+		read_latency <= read_latency - 1'b1;
+	end
+	else if (burst_rem > 0) begin
 		vram_ddr_dout <= ddr_mem[resp_addr[15:0]];
 		vram_ddr_rvalid <= 1;
 		resp_addr <= resp_addr + 1'b1;
@@ -120,9 +124,10 @@ always @(posedge clk_sys) begin
 			if (vram_ddr_be[7]) ddr_mem[vram_ddr_addr[15:0]][63:56] <= vram_ddr_din[63:56];
 		end
 		else begin
-			// Read from memory
+			// Read from memory with 4-cycle CAS latency
 			resp_addr <= vram_ddr_addr;
 			burst_rem <= vram_ddr_burstcnt;
+			read_latency <= 3'd4;
 		end
 	end
 end
