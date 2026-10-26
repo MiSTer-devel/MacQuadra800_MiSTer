@@ -577,7 +577,6 @@ always @(posedge clk_sys) begin
 			vram_ddr_req <= 1'b1;
 			vram_ddr_we  <= 1'b1;
 			if (vram_ddr_ack) begin
-				fifo_rptr       <= fifo_rptr + 1'b1;
 				drain_beats_rem <= drain_beats_rem - 1'b1;
 				if (drain_beats_rem == 4'd1) begin
 					vram_ddr_req <= 1'b0;
