@@ -70,8 +70,15 @@ wire  [7:0] cpu_w64_be   = mem_addr[2] ? {mem_be, 4'b0000}  : {4'b0000, mem_be};
 // Bank Odd:  holds words with col[0] == 1 (DDR3 bits [63:32])
 // Each bank has 1024 entries: [9] is buffer select (0 or 1), [8:0] is word64 index
 //----------------------------------------------------------------------------
-(* ramstyle = "M10K, no_rw_check" *) reg [31:0] line_even [0:1023];
-(* ramstyle = "M10K, no_rw_check" *) reg [31:0] line_odd  [0:1023];
+(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_even_b0 [0:1023];
+(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_even_b1 [0:1023];
+(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_even_b2 [0:1023];
+(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_even_b3 [0:1023];
+
+(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_odd_b0  [0:1023];
+(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_odd_b1  [0:1023];
+(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_odd_b2  [0:1023];
+(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_odd_b3  [0:1023];
 
 reg        buf_display_vid = 1'b1;
 reg        buf_prefetch_sys = 1'b0;
@@ -86,8 +93,10 @@ wire [9:0] line_rd_addr = {eff_buf_display, vid_col_word[9:1]};
 
 always @(posedge clk_vid) begin
 	vid_col_word_d <= vid_col_word;
-	vid_rdata_even <= line_even[line_rd_addr];
-	vid_rdata_odd  <= line_odd[line_rd_addr];
+	vid_rdata_even <= {line_even_b3[line_rd_addr], line_even_b2[line_rd_addr],
+	                   line_even_b1[line_rd_addr], line_even_b0[line_rd_addr]};
+	vid_rdata_odd  <= {line_odd_b3[line_rd_addr],  line_odd_b2[line_rd_addr],
+	                   line_odd_b1[line_rd_addr],  line_odd_b0[line_rd_addr]};
 end
 
 assign vid_rdata = vid_col_word_d[0] ? vid_rdata_odd : vid_rdata_even;
@@ -375,15 +384,15 @@ wire  [7:0] line_wr_be   = line_wr_dma ? 8'hFF : cpu_w64_be;
 
 always @(posedge clk_sys) begin
 	if (line_wr_en) begin
-		if (line_wr_be[0]) line_even[line_wr_addr][7:0]   <= line_wr_din[7:0];
-		if (line_wr_be[1]) line_even[line_wr_addr][15:8]  <= line_wr_din[15:8];
-		if (line_wr_be[2]) line_even[line_wr_addr][23:16] <= line_wr_din[23:16];
-		if (line_wr_be[3]) line_even[line_wr_addr][31:24] <= line_wr_din[31:24];
+		if (line_wr_be[0]) line_even_b0[line_wr_addr] <= line_wr_din[7:0];
+		if (line_wr_be[1]) line_even_b1[line_wr_addr] <= line_wr_din[15:8];
+		if (line_wr_be[2]) line_even_b2[line_wr_addr] <= line_wr_din[23:16];
+		if (line_wr_be[3]) line_even_b3[line_wr_addr] <= line_wr_din[31:24];
 
-		if (line_wr_be[4]) line_odd[line_wr_addr][7:0]    <= line_wr_din[39:32];
-		if (line_wr_be[5]) line_odd[line_wr_addr][15:8]   <= line_wr_din[47:40];
-		if (line_wr_be[6]) line_odd[line_wr_addr][23:16]  <= line_wr_din[55:48];
-		if (line_wr_be[7]) line_odd[line_wr_addr][31:24]  <= line_wr_din[63:56];
+		if (line_wr_be[4]) line_odd_b0[line_wr_addr]  <= line_wr_din[39:32];
+		if (line_wr_be[5]) line_odd_b1[line_wr_addr]  <= line_wr_din[47:40];
+		if (line_wr_be[6]) line_odd_b2[line_wr_addr]  <= line_wr_din[55:48];
+		if (line_wr_be[7]) line_odd_b3[line_wr_addr]  <= line_wr_din[63:56];
 	end
 end
 
