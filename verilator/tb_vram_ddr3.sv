@@ -43,7 +43,7 @@ wire  [7:0] vram_ddr_burstcnt;
 wire [63:0] vram_ddr_din;
 wire  [7:0] vram_ddr_be;
 reg         vram_ddr_busy = 0;
-reg         vram_ddr_ack = 0;
+wire        vram_ddr_ack;
 reg  [63:0] vram_ddr_dout = 0;
 reg         vram_ddr_rvalid = 0;
 
@@ -97,9 +97,15 @@ vram_ddr3 #(
 reg [7:0] burst_rem = 0;
 reg [28:0] resp_addr = 0;
 reg [2:0] read_latency = 0;
+reg [7:0] wr_burst_rem = 0;
+reg [28:0] wr_addr = 0;
+reg       rd_cmd_ack = 0;
+
+assign vram_ddr_ack = (vram_ddr_req && vram_ddr_we && !vram_ddr_busy) || rd_cmd_ack;
+
 always @(posedge clk_sys) begin
 	vram_ddr_rvalid <= 0;
-	if (vram_ddr_ack) vram_ddr_ack <= 0;
+	rd_cmd_ack      <= 0;
 
 	if (read_latency > 0) begin
 		read_latency <= read_latency - 1'b1;
@@ -110,26 +116,34 @@ always @(posedge clk_sys) begin
 		resp_addr <= resp_addr + 1'b1;
 		burst_rem <= burst_rem - 1'b1;
 	end
-	else if (vram_ddr_req && !vram_ddr_ack) begin
-		vram_ddr_ack <= 1;
-		if (vram_ddr_we) begin
-			$display("  [TB_DDR_WR] addr=%04x be=%02x din=%08x_%08x", vram_ddr_addr[15:0], vram_ddr_be, vram_ddr_din[63:32], vram_ddr_din[31:0]);
-			// Write to memory
-			if (vram_ddr_be[0]) ddr_mem[vram_ddr_addr[15:0]][7:0]   <= vram_ddr_din[7:0];
-			if (vram_ddr_be[1]) ddr_mem[vram_ddr_addr[15:0]][15:8]  <= vram_ddr_din[15:8];
-			if (vram_ddr_be[2]) ddr_mem[vram_ddr_addr[15:0]][23:16] <= vram_ddr_din[23:16];
-			if (vram_ddr_be[3]) ddr_mem[vram_ddr_addr[15:0]][31:24] <= vram_ddr_din[31:24];
-			if (vram_ddr_be[4]) ddr_mem[vram_ddr_addr[15:0]][39:32] <= vram_ddr_din[39:32];
-			if (vram_ddr_be[5]) ddr_mem[vram_ddr_addr[15:0]][47:40] <= vram_ddr_din[47:40];
-			if (vram_ddr_be[6]) ddr_mem[vram_ddr_addr[15:0]][55:48] <= vram_ddr_din[55:48];
-			if (vram_ddr_be[7]) ddr_mem[vram_ddr_addr[15:0]][63:56] <= vram_ddr_din[63:56];
+
+	if (vram_ddr_req && vram_ddr_we && !vram_ddr_busy) begin
+		// Active write beat captured
+		$display("  [TB_DDR_WR] addr=%04x be=%02x din=%08x_%08x", (wr_burst_rem > 0 ? wr_addr[15:0] : vram_ddr_addr[15:0]), vram_ddr_be, vram_ddr_din[63:32], vram_ddr_din[31:0]);
+		if (vram_ddr_be[0]) ddr_mem[(wr_burst_rem > 0 ? wr_addr[15:0] : vram_ddr_addr[15:0])][7:0]   <= vram_ddr_din[7:0];
+		if (vram_ddr_be[1]) ddr_mem[(wr_burst_rem > 0 ? wr_addr[15:0] : vram_ddr_addr[15:0])][15:8]  <= vram_ddr_din[15:8];
+		if (vram_ddr_be[2]) ddr_mem[(wr_burst_rem > 0 ? wr_addr[15:0] : vram_ddr_addr[15:0])][23:16] <= vram_ddr_din[23:16];
+		if (vram_ddr_be[3]) ddr_mem[(wr_burst_rem > 0 ? wr_addr[15:0] : vram_ddr_addr[15:0])][31:24] <= vram_ddr_din[31:24];
+		if (vram_ddr_be[4]) ddr_mem[(wr_burst_rem > 0 ? wr_addr[15:0] : vram_ddr_addr[15:0])][39:32] <= vram_ddr_din[39:32];
+		if (vram_ddr_be[5]) ddr_mem[(wr_burst_rem > 0 ? wr_addr[15:0] : vram_ddr_addr[15:0])][47:40] <= vram_ddr_din[47:40];
+		if (vram_ddr_be[6]) ddr_mem[(wr_burst_rem > 0 ? wr_addr[15:0] : vram_ddr_addr[15:0])][55:48] <= vram_ddr_din[55:48];
+		if (vram_ddr_be[7]) ddr_mem[(wr_burst_rem > 0 ? wr_addr[15:0] : vram_ddr_addr[15:0])][63:56] <= vram_ddr_din[63:56];
+
+		if (wr_burst_rem > 0) begin
+			wr_addr <= wr_addr + 1'b1;
+			wr_burst_rem <= wr_burst_rem - 1'b1;
 		end
-		else begin
-			// Read from memory with 4-cycle CAS latency
-			resp_addr <= vram_ddr_addr;
-			burst_rem <= vram_ddr_burstcnt;
-			read_latency <= 3'd4;
+		else if (vram_ddr_burstcnt > 8'd1) begin
+			wr_addr <= vram_ddr_addr + 1'b1;
+			wr_burst_rem <= vram_ddr_burstcnt - 1'b1;
 		end
+	end
+	else if (vram_ddr_req && !vram_ddr_we && !rd_cmd_ack) begin
+		// Read command accepted
+		resp_addr <= vram_ddr_addr;
+		burst_rem <= vram_ddr_burstcnt;
+		read_latency <= 3'd4;
+		rd_cmd_ack <= 1;
 	end
 end
 
@@ -506,6 +520,48 @@ initial begin
 	if (vram_rdata !== 32'hFFFF_0000) $fatal(1, "Test 12: Word 7 mismatch! Got %08x", vram_rdata);
 	@(posedge clk_sys);
 	mem_req <= 0;
+	mem_is_vram <= 0;
+	repeat (5) @(posedge clk_sys);
+
+	// Test 13: 4-Way Associative Cache across 4 distinct scanlines (vertical blit stride)
+	$display("Test 13: 4-Way Associative Cache (vertical scanline blits)");
+	ddr_mem[16'h3000] = 64'hAAAA_0001_AAAA_0000; // Line 0 (word 64 addr 0x3000 -> longword addr 0x6000)
+	ddr_mem[16'h3800] = 64'hBBBB_0001_BBBB_0000; // Line 1 (word 64 addr 0x3800 -> longword addr 0x7000)
+	ddr_mem[16'h4000] = 64'hCCCC_0001_CCCC_0000; // Line 2 (word 64 addr 0x4000 -> longword addr 0x8000)
+	ddr_mem[16'h4800] = 64'hDDDD_0001_DDDD_0000; // Line 3 (word 64 addr 0x4800 -> longword addr 0x9000)
+
+	// Cold reads to populate lines 0, 1, 2, 3
+	$display("  [TB_T13] Reading Line 0...");
+	mem_is_vram <= 1;
+	mem_req <= 1; mem_addr <= 30'h3E40_6000; wait (vram_ack); $display("  [TB_T13] Line 0 acked!"); @(posedge clk_sys); mem_req <= 0; wait (dut.state == 0); @(posedge clk_sys);
+	$display("  [TB_T13] Reading Line 1...");
+	mem_req <= 1; mem_addr <= 30'h3E40_7000; wait (vram_ack); $display("  [TB_T13] Line 1 acked!"); @(posedge clk_sys); mem_req <= 0; wait (dut.state == 0); @(posedge clk_sys);
+	$display("  [TB_T13] Reading Line 2...");
+	mem_req <= 1; mem_addr <= 30'h3E40_8000; wait (vram_ack); $display("  [TB_T13] Line 2 acked!"); @(posedge clk_sys); mem_req <= 0; wait (dut.state == 0); @(posedge clk_sys);
+	$display("  [TB_T13] Reading Line 3...");
+	mem_req <= 1; mem_addr <= 30'h3E40_9000; wait (vram_ack); $display("  [TB_T13] Line 3 acked!"); @(posedge clk_sys); mem_req <= 0; wait (dut.state == 0); @(posedge clk_sys);
+
+	$display("  Cache tags: 0:%04x(val=%b) 1:%04x(val=%b) 2:%04x(val=%b) 3:%04x(val=%b)",
+		dut.rd_cache_tag_0, dut.rd_cache_val_0,
+		dut.rd_cache_tag_1, dut.rd_cache_val_1,
+		dut.rd_cache_tag_2, dut.rd_cache_val_2,
+		dut.rd_cache_tag_3, dut.rd_cache_val_3);
+
+	// Re-read Line 0: Must hit immediately in 1 cycle!
+	mem_req <= 1; mem_addr <= 30'h3E40_6000;
+	@(posedge clk_sys);
+	if (!vram_ack) $fatal(1, "Test 13: Expected instant 1-cycle hit on Line 0, but vram_ack was 0!");
+	if (vram_rdata !== 32'hAAAA_0000) $fatal(1, "Test 13: Line 0 data mismatch! Got %08x", vram_rdata);
+	$display("  -> Instant 1-cycle hit on Line 0: 0x%08x", vram_rdata);
+	mem_req <= 0; @(posedge clk_sys);
+
+	// Re-read Line 1: Must hit immediately in 1 cycle!
+	mem_req <= 1; mem_addr <= 30'h3E40_7000;
+	@(posedge clk_sys);
+	if (!vram_ack) $fatal(1, "Test 13: Expected instant 1-cycle hit on Line 1, but vram_ack was 0!");
+	if (vram_rdata !== 32'hBBBB_0000) $fatal(1, "Test 13: Line 1 data mismatch! Got %08x", vram_rdata);
+	$display("  -> Instant 1-cycle hit on Line 1: 0x%08x", vram_rdata);
+	mem_req <= 0; @(posedge clk_sys);
 	mem_is_vram <= 0;
 
 	$display("ALL TESTS PASSED! vram_ddr3 verified successfully!");

@@ -1066,7 +1066,7 @@ wire [28:0] vram_ddr_addr;
 wire  [7:0] vram_ddr_burstcnt;
 wire [63:0] vram_ddr_din;
 wire  [7:0] vram_ddr_be;
-reg         vram_ddr_ack;
+wire        vram_ddr_ack;
 wire        vram_ddr_rvalid;
 
 vram_ddr3 #(
@@ -1133,8 +1133,8 @@ reg  [7:0] ddram_be;
 reg        ddram_we, ddram_rd;
 assign DDRAM_BURSTCNT = ddram_burstcnt;
 assign DDRAM_ADDR     = ddram_addr;
-assign DDRAM_DIN      = ddram_din;
-assign DDRAM_BE       = ddram_be;
+assign DDRAM_DIN      = ddr_wait_vram_wr ? vram_ddr_din : ddram_din;
+assign DDRAM_BE       = ddr_wait_vram_wr ? vram_ddr_be  : ddram_be;
 assign DDRAM_WE       = ddram_we;
 assign DDRAM_RD       = ddram_rd;
 
@@ -1156,15 +1156,20 @@ assign     eth_mem_rvalid = ddr_wait_eth && DDRAM_DOUT_READY;
 
 reg        ddr_wait_vram = 1'b0;
 reg  [7:0] ddr_vram_beats_left = 8'd0;
+reg        ddr_wait_vram_wr = 1'b0;
+reg  [7:0] ddr_vram_wr_beats_left = 8'd0;
 reg        vram_ddr_accept = 1'b0;
+reg        vram_rd_ack = 1'b0;
+wire       vram_wr_ack = ddr_wait_vram_wr && !DDRAM_BUSY;
+assign     vram_ddr_ack = vram_wr_ack || vram_rd_ack;
 assign     vram_ddr_rvalid = ddr_wait_vram && DDRAM_DOUT_READY;
 
 always @(posedge clk_sys) begin
 	mem_ack_r <= 0;
 	eth_mem_accept <= 0;
-	vram_ddr_ack <= 0;
+	vram_rd_ack <= 0;
 
-	if (!vram_ddr_req) vram_ddr_accept <= 0;
+	if (!vram_ddr_req && !ddr_wait_vram_wr) vram_ddr_accept <= 0;
 
 	// boot.rom halfwords: capture, then stall hps_io until written
 	if (ioctl_download && rom_index && ioctl_wr) begin
@@ -1175,8 +1180,19 @@ always @(posedge clk_sys) begin
 	end
 
 	if (!DDRAM_BUSY) begin
-		ddram_we <= 0;
+		if (!ddr_wait_vram_wr) ddram_we <= 0;
 		ddram_rd <= 0;
+	end
+
+	if (ddr_wait_vram_wr) begin
+		if (!DDRAM_BUSY) begin
+			ddr_vram_wr_beats_left <= ddr_vram_wr_beats_left - 1'b1;
+			if (ddr_vram_wr_beats_left == 8'd1) begin
+				ddram_we         <= 0;
+				ddr_wait_vram_wr <= 0;
+				if (!vram_ddr_req) vram_ddr_accept <= 0;
+			end
+		end
 	end
 
 	if (ddr_wait_data) begin
@@ -1227,17 +1243,19 @@ always @(posedge clk_sys) begin
 		end
 		else if (vram_ddr_req && !vram_ddr_accept) begin
 			ddram_addr      <= vram_ddr_addr;
-			ddram_din       <= vram_ddr_din;
-			ddram_be        <= vram_ddr_be;
 			ddram_burstcnt  <= vram_ddr_burstcnt;
 			ddram_we        <= vram_ddr_we;
 			ddram_rd        <= !vram_ddr_we;
-			if (!vram_ddr_we) begin
+			if (vram_ddr_we) begin
+				ddr_wait_vram_wr       <= 1;
+				ddr_vram_wr_beats_left <= vram_ddr_burstcnt;
+			end
+			else begin
 				ddr_wait_vram       <= 1;
 				ddr_vram_beats_left <= vram_ddr_burstcnt;
+				vram_rd_ack         <= 1;
 			end
 			vram_ddr_accept <= 1;
-			vram_ddr_ack    <= 1;
 		end
 		else if (mem_req && !mem_ack && mem_is_rom) begin
 			if (mem_write) begin

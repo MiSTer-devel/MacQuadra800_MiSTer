@@ -48,8 +48,8 @@ module vram_ddr3 #(
 	output reg        vram_ddr_we,
 	output reg [28:0] vram_ddr_addr,
 	output reg  [7:0] vram_ddr_burstcnt,
-	output reg [63:0] vram_ddr_din,
-	output reg  [7:0] vram_ddr_be,
+	output wire [63:0] vram_ddr_din,
+	output wire  [7:0] vram_ddr_be,
 	input             vram_ddr_busy,
 	input             vram_ddr_ack,
 	input      [63:0] vram_ddr_dout,
@@ -70,15 +70,8 @@ wire  [7:0] cpu_w64_be   = mem_addr[2] ? {mem_be, 4'b0000}  : {4'b0000, mem_be};
 // Bank Odd:  holds words with col[0] == 1 (DDR3 bits [63:32])
 // Each bank has 1024 entries: [9] is buffer select (0 or 1), [8:0] is word64 index
 //----------------------------------------------------------------------------
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_even_b0 [0:1023];
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_even_b1 [0:1023];
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_even_b2 [0:1023];
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_even_b3 [0:1023];
-
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_odd_b0  [0:1023];
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_odd_b1  [0:1023];
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_odd_b2  [0:1023];
-(* ramstyle = "M10K, no_rw_check" *) reg [7:0] line_odd_b3  [0:1023];
+(* ramstyle = "M10K, no_rw_check" *) reg [31:0] line_even [0:1023];
+(* ramstyle = "M10K, no_rw_check" *) reg [31:0] line_odd  [0:1023];
 
 reg        buf_display_vid = 1'b1;
 reg        buf_prefetch_sys = 1'b0;
@@ -93,10 +86,8 @@ wire [9:0] line_rd_addr = {eff_buf_display, vid_col_word[9:1]};
 
 always @(posedge clk_vid) begin
 	vid_col_word_d <= vid_col_word;
-	vid_rdata_even <= {line_even_b3[line_rd_addr], line_even_b2[line_rd_addr],
-	                   line_even_b1[line_rd_addr], line_even_b0[line_rd_addr]};
-	vid_rdata_odd  <= {line_odd_b3[line_rd_addr],  line_odd_b2[line_rd_addr],
-	                   line_odd_b1[line_rd_addr],  line_odd_b0[line_rd_addr]};
+	vid_rdata_even <= line_even[line_rd_addr];
+	vid_rdata_odd  <= line_odd[line_rd_addr];
 end
 
 assign vid_rdata = vid_col_word_d[0] ? vid_rdata_odd : vid_rdata_even;
@@ -210,6 +201,37 @@ wire [63:0] merged_din = {
 };
 wire [7:0] merged_be = fifo_be[last_wptr] | cpu_w64_be;
 
+// Driven directly to DDR3 interface for maximum throughput without pipeline bubbles
+assign vram_ddr_din = (can_combine && (fifo_rptr == last_wptr)) ? merged_din : fifo_din[fifo_rptr];
+assign vram_ddr_be  = (can_combine && (fifo_rptr == last_wptr)) ? merged_be  : fifo_be[fifo_rptr];
+
+// Burst scanner: detect contiguous sequential addresses in FIFO (up to 8 beats)
+wire [3:0] rptr_p1 = fifo_rptr + 4'd1;
+wire [3:0] rptr_p2 = fifo_rptr + 4'd2;
+wire [3:0] rptr_p3 = fifo_rptr + 4'd3;
+wire [3:0] rptr_p4 = fifo_rptr + 4'd4;
+wire [3:0] rptr_p5 = fifo_rptr + 4'd5;
+wire [3:0] rptr_p6 = fifo_rptr + 4'd6;
+wire [3:0] rptr_p7 = fifo_rptr + 4'd7;
+
+wire contig_1 = (fifo_count >= 5'd2) && (fifo_addr[rptr_p1] == (fifo_addr[fifo_rptr] + 17'd1));
+wire contig_2 = contig_1 && (fifo_count >= 5'd3) && (fifo_addr[rptr_p2] == (fifo_addr[fifo_rptr] + 17'd2));
+wire contig_3 = contig_2 && (fifo_count >= 5'd4) && (fifo_addr[rptr_p3] == (fifo_addr[fifo_rptr] + 17'd3));
+wire contig_4 = contig_3 && (fifo_count >= 5'd5) && (fifo_addr[rptr_p4] == (fifo_addr[fifo_rptr] + 17'd4));
+wire contig_5 = contig_4 && (fifo_count >= 5'd6) && (fifo_addr[rptr_p5] == (fifo_addr[fifo_rptr] + 17'd5));
+wire contig_6 = contig_5 && (fifo_count >= 5'd7) && (fifo_addr[rptr_p6] == (fifo_addr[fifo_rptr] + 17'd6));
+wire contig_7 = contig_6 && (fifo_count >= 5'd8) && (fifo_addr[rptr_p7] == (fifo_addr[fifo_rptr] + 17'd7));
+
+wire [3:0] burst_beats = contig_7 ? 4'd8 :
+                         contig_6 ? 4'd7 :
+                         contig_5 ? 4'd6 :
+                         contig_4 ? 4'd5 :
+                         contig_3 ? 4'd4 :
+                         contig_2 ? 4'd3 :
+                         contig_1 ? 4'd2 : 4'd1;
+
+reg [3:0] drain_beats_rem = 4'd0;
+
 // Conflict detection between CPU read address and pending writes in FIFO
 reg fifo_conflict;
 integer f_i;
@@ -298,17 +320,32 @@ reg  [7:0] dma_burst_idx;
 reg  [5:0] dma_beats_left;
 reg [16:0] dma_cur_addr;
 
-// 32-Byte (4 x 64-bit word) Read Line Cache
-reg [14:0] rd_cache_tag;
-reg [63:0] rd_cache_line [0:3];
-reg  [3:0] rd_cache_valid = 4'b0000;
+// 4-Way Associative 32-Byte Read Line Cache (4 ways x 4 beats = 128 bytes total)
+reg [14:0] rd_cache_tag_0 = 15'd0, rd_cache_tag_1 = 15'd0;
+reg [14:0] rd_cache_tag_2 = 15'd0, rd_cache_tag_3 = 15'd0;
+reg [63:0] rd_cache_line_0 [0:3];
+reg [63:0] rd_cache_line_1 [0:3];
+reg [63:0] rd_cache_line_2 [0:3];
+reg [63:0] rd_cache_line_3 [0:3];
+reg  [3:0] rd_cache_val_0 = 4'b0, rd_cache_val_1 = 4'b0;
+reg  [3:0] rd_cache_val_2 = 4'b0, rd_cache_val_3 = 4'b0;
+reg  [1:0] rd_victim = 2'd0;
 reg  [1:0] rd_burst_beat;
 
-wire rd_cache_hit = rd_cache_valid[cpu_w64_addr[1:0]] &&
-                    (rd_cache_tag == cpu_w64_addr[16:2]) &&
-                    !fifo_conflict;
+wire [14:0] cur_rd_tag  = cpu_w64_addr[16:2];
+wire  [1:0] cur_rd_beat = cpu_w64_addr[1:0];
 
-wire [63:0] hit_data = rd_cache_line[cpu_w64_addr[1:0]];
+wire hit_way_0 = rd_cache_val_0[cur_rd_beat] && (rd_cache_tag_0 == cur_rd_tag);
+wire hit_way_1 = rd_cache_val_1[cur_rd_beat] && (rd_cache_tag_1 == cur_rd_tag);
+wire hit_way_2 = rd_cache_val_2[cur_rd_beat] && (rd_cache_tag_2 == cur_rd_tag);
+wire hit_way_3 = rd_cache_val_3[cur_rd_beat] && (rd_cache_tag_3 == cur_rd_tag);
+
+wire rd_cache_hit = (hit_way_0 || hit_way_1 || hit_way_2 || hit_way_3) && !fifo_conflict;
+
+wire [63:0] hit_data = hit_way_0 ? rd_cache_line_0[cur_rd_beat] :
+                       hit_way_1 ? rd_cache_line_1[cur_rd_beat] :
+                       hit_way_2 ? rd_cache_line_2[cur_rd_beat] :
+                                   rd_cache_line_3[cur_rd_beat];
 wire [31:0] hit_word = mem_addr[2] ? hit_data[63:32] : hit_data[31:0];
 
 // DDR3 Request & Arbitration FSM States
@@ -338,15 +375,15 @@ wire  [7:0] line_wr_be   = line_wr_dma ? 8'hFF : cpu_w64_be;
 
 always @(posedge clk_sys) begin
 	if (line_wr_en) begin
-		if (line_wr_be[0]) line_even_b0[line_wr_addr] <= line_wr_din[7:0];
-		if (line_wr_be[1]) line_even_b1[line_wr_addr] <= line_wr_din[15:8];
-		if (line_wr_be[2]) line_even_b2[line_wr_addr] <= line_wr_din[23:16];
-		if (line_wr_be[3]) line_even_b3[line_wr_addr] <= line_wr_din[31:24];
+		if (line_wr_be[0]) line_even[line_wr_addr][7:0]   <= line_wr_din[7:0];
+		if (line_wr_be[1]) line_even[line_wr_addr][15:8]  <= line_wr_din[15:8];
+		if (line_wr_be[2]) line_even[line_wr_addr][23:16] <= line_wr_din[23:16];
+		if (line_wr_be[3]) line_even[line_wr_addr][31:24] <= line_wr_din[31:24];
 
-		if (line_wr_be[4]) line_odd_b0[line_wr_addr]  <= line_wr_din[39:32];
-		if (line_wr_be[5]) line_odd_b1[line_wr_addr]  <= line_wr_din[47:40];
-		if (line_wr_be[6]) line_odd_b2[line_wr_addr]  <= line_wr_din[55:48];
-		if (line_wr_be[7]) line_odd_b3[line_wr_addr]  <= line_wr_din[63:56];
+		if (line_wr_be[4]) line_odd[line_wr_addr][7:0]    <= line_wr_din[39:32];
+		if (line_wr_be[5]) line_odd[line_wr_addr][15:8]   <= line_wr_din[47:40];
+		if (line_wr_be[6]) line_odd[line_wr_addr][23:16]  <= line_wr_din[55:48];
+		if (line_wr_be[7]) line_odd[line_wr_addr][31:24]  <= line_wr_din[63:56];
 	end
 end
 
@@ -354,22 +391,29 @@ end
 // DDR3 Request & Arbitration FSM
 // Priority:
 //   1. CPU Read (on-demand probe / CopyBits read; bypasses FIFO if !fifo_conflict)
-//   2. High-priority CPU Write Drain (if queue >= 4 or CPU read has conflicting write)
+//   2. High-priority CPU Write Drain (if queue >= 8 or CPU read has conflicting write)
 //   3. Line DMA Burst (pre-fetches next scanline during horizontal period)
 //   4. Normal CPU Write Drain (drains FIFO to DDR3 when DMA is idle)
 //----------------------------------------------------------------------------
 always @(posedge clk_sys) begin
-	vram_ack     <= 1'b0;
-	vram_ddr_req <= 1'b0;
+	vram_ack <= 1'b0;
+	if (state != S_CPU_WRITE) vram_ddr_req <= 1'b0;
 
 	if (reset) begin
 		state           <= S_IDLE;
 		dma_state       <= DMA_IDLE;
 		cpu_rd_pend     <= 1'b0;
 		vram_wr_ph      <= 1'b0;
+		vram_ddr_req    <= 1'b0;
+		vram_ddr_we     <= 1'b0;
 		dma_word64_idx  <= 9'd0;
-		rd_cache_valid  <= 4'b0000;
+		rd_cache_val_0  <= 4'b0000;
+		rd_cache_val_1  <= 4'b0000;
+		rd_cache_val_2  <= 4'b0000;
+		rd_cache_val_3  <= 4'b0000;
+		rd_victim       <= 2'd0;
 		rd_burst_beat   <= 2'd0;
+		drain_beats_rem <= 4'd0;
 	end
 	else begin
 		// Normal write handshake with quadra800 bus
@@ -381,9 +425,12 @@ always @(posedge clk_sys) begin
 			vram_wr_ph <= 1'b0;
 		end
 
-		// Invalidate read cache word on CPU write to matching address
-		if (cpu_vram_write && (cpu_w64_addr[16:2] == rd_cache_tag)) begin
-			rd_cache_valid[cpu_w64_addr[1:0]] <= 1'b0;
+		// Invalidate matching read cache words on CPU write
+		if (cpu_vram_write) begin
+			if (cur_rd_tag == rd_cache_tag_0) rd_cache_val_0[cur_rd_beat] <= 1'b0;
+			if (cur_rd_tag == rd_cache_tag_1) rd_cache_val_1[cur_rd_beat] <= 1'b0;
+			if (cur_rd_tag == rd_cache_tag_2) rd_cache_val_2[cur_rd_beat] <= 1'b0;
+			if (cur_rd_tag == rd_cache_tag_3) rd_cache_val_3[cur_rd_beat] <= 1'b0;
 		end
 
 		// DMA trigger: start prefetch on line_req_sys (32-beat bursts)
@@ -410,14 +457,18 @@ always @(posedge clk_sys) begin
 		// DDR3 bus state machine
 		case (state)
 		S_IDLE: begin
-			// 1. CPU Read (burst of 4 beats = 32 bytes into line cache)
+			// 1. CPU Read (burst of 4 beats = 32 bytes into 4-way line cache)
 			if (cpu_rd_pend && !fifo_conflict) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b0;
-				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, cpu_w64_addr[16:2], 2'b00};
+				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, cur_rd_tag, 2'b00};
 				vram_ddr_burstcnt <= 8'd4;
-				rd_cache_tag      <= cpu_w64_addr[16:2];
-				rd_cache_valid    <= 4'b0000;
+				case (rd_victim)
+				2'd0: begin rd_cache_tag_0 <= cur_rd_tag; rd_cache_val_0 <= 4'b0; end
+				2'd1: begin rd_cache_tag_1 <= cur_rd_tag; rd_cache_val_1 <= 4'b0; end
+				2'd2: begin rd_cache_tag_2 <= cur_rd_tag; rd_cache_val_2 <= 4'b0; end
+				2'd3: begin rd_cache_tag_3 <= cur_rd_tag; rd_cache_val_3 <= 4'b0; end
+				endcase
 				rd_burst_beat     <= 2'd0;
 				state             <= S_CPU_READ;
 			end
@@ -426,9 +477,8 @@ always @(posedge clk_sys) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b1;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, fifo_addr[fifo_rptr]};
-				vram_ddr_din      <= (can_combine && (fifo_rptr == last_wptr)) ? merged_din : fifo_din[fifo_rptr];
-				vram_ddr_be       <= (can_combine && (fifo_rptr == last_wptr)) ? merged_be  : fifo_be[fifo_rptr];
-				vram_ddr_burstcnt <= 8'd1;
+				vram_ddr_burstcnt <= {4'd0, burst_beats};
+				drain_beats_rem   <= burst_beats;
 				state             <= S_CPU_WRITE;
 			end
 			// 3. Line DMA burst read (32-beat bursts)
@@ -444,9 +494,8 @@ always @(posedge clk_sys) begin
 				vram_ddr_req      <= 1'b1;
 				vram_ddr_we       <= 1'b1;
 				vram_ddr_addr     <= DDR_VRAM_BASE + {12'd0, fifo_addr[fifo_rptr]};
-				vram_ddr_din      <= (can_combine && (fifo_rptr == last_wptr)) ? merged_din : fifo_din[fifo_rptr];
-				vram_ddr_be       <= (can_combine && (fifo_rptr == last_wptr)) ? merged_be  : fifo_be[fifo_rptr];
-				vram_ddr_burstcnt <= 8'd1;
+				vram_ddr_burstcnt <= {4'd0, burst_beats};
+				drain_beats_rem   <= burst_beats;
 				state             <= S_CPU_WRITE;
 			end
 		end
@@ -456,10 +505,14 @@ always @(posedge clk_sys) begin
 			if (vram_ddr_ack) begin
 				vram_ddr_req <= 1'b0;
 				if (vram_ddr_rvalid) begin
-					rd_cache_line[2'd0]  <= vram_ddr_dout;
-					rd_cache_valid[2'd0] <= 1'b1;
-					rd_burst_beat        <= 2'd1;
-					if (cpu_rd_pend && (cpu_w64_addr[1:0] == 2'd0)) begin
+					case (rd_victim)
+					2'd0: begin rd_cache_line_0[2'd0] <= vram_ddr_dout; rd_cache_val_0[2'd0] <= 1'b1; end
+					2'd1: begin rd_cache_line_1[2'd0] <= vram_ddr_dout; rd_cache_val_1[2'd0] <= 1'b1; end
+					2'd2: begin rd_cache_line_2[2'd0] <= vram_ddr_dout; rd_cache_val_2[2'd0] <= 1'b1; end
+					2'd3: begin rd_cache_line_3[2'd0] <= vram_ddr_dout; rd_cache_val_3[2'd0] <= 1'b1; end
+					endcase
+					rd_burst_beat <= 2'd1;
+					if (cpu_rd_pend && (cur_rd_beat == 2'd0)) begin
 						vram_rdata  <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
 						vram_ack    <= 1'b1;
 						cpu_rd_pend <= 1'b0;
@@ -474,16 +527,21 @@ always @(posedge clk_sys) begin
 
 		S_CPU_DATA: begin
 			if (vram_ddr_rvalid) begin
-				rd_cache_line[rd_burst_beat]  <= vram_ddr_dout;
-				rd_cache_valid[rd_burst_beat] <= 1'b1;
-				rd_burst_beat                 <= rd_burst_beat + 1'b1;
-				if (cpu_rd_pend && (cpu_w64_addr[1:0] == rd_burst_beat)) begin
+				case (rd_victim)
+				2'd0: begin rd_cache_line_0[rd_burst_beat] <= vram_ddr_dout; rd_cache_val_0[rd_burst_beat] <= 1'b1; end
+				2'd1: begin rd_cache_line_1[rd_burst_beat] <= vram_ddr_dout; rd_cache_val_1[rd_burst_beat] <= 1'b1; end
+				2'd2: begin rd_cache_line_2[rd_burst_beat] <= vram_ddr_dout; rd_cache_val_2[rd_burst_beat] <= 1'b1; end
+				2'd3: begin rd_cache_line_3[rd_burst_beat] <= vram_ddr_dout; rd_cache_val_3[rd_burst_beat] <= 1'b1; end
+				endcase
+				rd_burst_beat <= rd_burst_beat + 1'b1;
+				if (cpu_rd_pend && (cur_rd_beat == rd_burst_beat)) begin
 					vram_rdata  <= mem_addr[2] ? vram_ddr_dout[63:32] : vram_ddr_dout[31:0];
 					vram_ack    <= 1'b1;
 					cpu_rd_pend <= 1'b0;
 				end
 				if (rd_burst_beat == 2'd3) begin
-					state <= S_IDLE;
+					rd_victim <= rd_victim + 1'b1;
+					state     <= S_IDLE;
 				end
 			end
 		end
@@ -517,9 +575,15 @@ always @(posedge clk_sys) begin
 
 		S_CPU_WRITE: begin
 			vram_ddr_req <= 1'b1;
+			vram_ddr_we  <= 1'b1;
 			if (vram_ddr_ack) begin
-				vram_ddr_req <= 1'b0;
-				state        <= S_IDLE;
+				fifo_rptr       <= fifo_rptr + 1'b1;
+				drain_beats_rem <= drain_beats_rem - 1'b1;
+				if (drain_beats_rem == 4'd1) begin
+					vram_ddr_req <= 1'b0;
+					vram_ddr_we  <= 1'b0;
+					state        <= S_IDLE;
+				end
 			end
 		end
 
